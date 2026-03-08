@@ -150,6 +150,7 @@ interface Props {
 // Component
 // --------------------------------------------------------------------------
 
+/** Repo-centric navigation sidebar with session tree, module browser, archive access, and app controls. Resizable and collapsible. */
 export function LeftSidebar({
   sessions,
   activeSessionId,

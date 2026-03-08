@@ -27,10 +27,12 @@ export const DAY_PATTERNS = [
   { label: 'Sun', dow: '0' },
 ]
 
+/** Build a cron expression from an hour (0–23) and day-of-week pattern (e.g. "*", "1-5", "3"). */
 export function buildCron(hour: number, dow: string): string {
   return `0 ${hour} * * ${dow}`
 }
 
+/** Parse a 5-field cron expression into hour and day-of-week components. Falls back to 6 AM daily. */
 export function parseCron(expr: string): { hour: number; dow: string } {
   const parts = expr.trim().split(/\s+/)
   if (parts.length === 5) {
@@ -39,6 +41,7 @@ export function parseCron(expr: string): { hour: number; dow: string } {
   return { hour: 6, dow: '*' }
 }
 
+/** Format a 24-hour integer (0–23) as a 12-hour time string, e.g. `6` → `"6:00 AM"`. */
 export function formatHour(h: number): string {
   if (h === 0) return '12:00 AM'
   if (h < 12) return `${h}:00 AM`
@@ -46,6 +49,7 @@ export function formatHour(h: number): string {
   return `${h - 12}:00 PM`
 }
 
+/** Convert a 5-field cron expression into a human-readable description, e.g. `"Daily at 06:00"`. */
 export function describeCron(expr: string): string {
   const parts = expr.trim().split(/\s+/)
   if (parts.length !== 5) return expr
@@ -59,18 +63,22 @@ export function describeCron(expr: string): string {
   return `Weekly ${dayName} at ${time}`
 }
 
+/** Look up the display label for a workflow kind, e.g. `"coverage.daily"` → `"Coverage Assessment"`. */
 export function kindLabel(kind: string): string {
   return WORKFLOW_KINDS.find(k => k.value === kind)?.label ?? kind
 }
 
+/** Look up the category for a workflow kind. Defaults to `"assessment"` for unknown kinds. */
 export function kindCategory(kind: string): WorkflowCategory {
   return WORKFLOW_KINDS.find(k => k.value === kind)?.category ?? 'assessment'
 }
 
+/** Convert a string to a URL-safe slug: lowercase, non-alphanumeric chars replaced with hyphens. */
 export function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
+/** Format the elapsed time between two ISO timestamps as a compact duration (e.g. `"3m"`, `"45s"`). Uses wall-clock time if still running. */
 export function formatDuration(startedAt: string | null, completedAt: string | null): string {
   if (!startedAt) return '—'
   const end = completedAt ? new Date(completedAt) : new Date()
@@ -80,6 +88,7 @@ export function formatDuration(startedAt: string | null, completedAt: string | n
   return `${Math.round(ms / 60_000)}m`
 }
 
+/** Format an ISO timestamp as a short locale string, e.g. `"Mar 8, 06:00 AM"`. Returns `"—"` for null. */
 export function formatTime(iso: string | null): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleString(undefined, {
@@ -87,12 +96,14 @@ export function formatTime(iso: string | null): string {
   })
 }
 
+/** Extract a display-friendly repo name from a workflow run's input, falling back to the kind. */
 export function repoNameFromRun(run: WorkflowRun): string {
   return (run.input.repoName as string)
     || (run.input.repoPath as string)?.split('/').pop()
     || run.kind
 }
 
+/** Return Tailwind CSS classes for a status badge background and text color. */
 export function statusBadge(status: string): string {
   switch (status) {
     case 'succeeded': return 'bg-success-7 text-success-2'

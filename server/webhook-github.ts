@@ -39,6 +39,8 @@ export function _resetGhRunner(): void {
 /**
  * Check whether the `gh` CLI is available, authenticated, and has API access.
  * Runs three sequential checks: PATH lookup, auth status, and API connectivity.
+ *
+ * @returns `{ available: true }` on success, or `{ available: false, reason }` with a diagnostic message.
  */
 export async function checkGhHealth(): Promise<{ available: boolean; reason?: string }> {
   try {
@@ -64,7 +66,11 @@ export async function checkGhHealth(): Promise<{ available: boolean; reason?: st
 
 /**
  * Fetch the failed job logs for a workflow run, truncated to the last N lines.
- * Returns empty string on error.
+ *
+ * @param repo     - GitHub repo in `owner/name` format.
+ * @param runId    - Workflow run ID.
+ * @param maxLines - Maximum number of log lines to return (from the end).
+ * @returns The truncated log output, or empty string on error.
  */
 export async function fetchFailedLogs(repo: string, runId: number, maxLines: number): Promise<string> {
   try {
@@ -82,7 +88,10 @@ export async function fetchFailedLogs(repo: string, runId: number, maxLines: num
 
 /**
  * Fetch job information for a workflow run via the GitHub API.
- * Returns empty array on error.
+ *
+ * @param repo  - GitHub repo in `owner/name` format.
+ * @param runId - Workflow run ID.
+ * @returns Array of job info objects with steps, or empty array on error.
  */
 export async function fetchJobs(repo: string, runId: number): Promise<JobInfo[]> {
   try {
@@ -117,7 +126,10 @@ export async function fetchJobs(repo: string, runId: number): Promise<JobInfo[]>
 /**
  * Fetch annotations for failed check runs in a check suite.
  * Traverses: check-suite -> check-runs (filtered by failure) -> annotations.
- * Returns what we have so far on error at any step.
+ *
+ * @param repo         - GitHub repo in `owner/name` format.
+ * @param checkSuiteId - Check suite ID to query.
+ * @returns Array of annotations collected so far (partial results on error).
  */
 export async function fetchAnnotations(repo: string, checkSuiteId: number): Promise<Annotation[]> {
   const annotations: Annotation[] = []
@@ -175,7 +187,10 @@ export async function fetchAnnotations(repo: string, checkSuiteId: number): Prom
 
 /**
  * Fetch the commit message for a given SHA.
- * Returns empty string on error.
+ *
+ * @param repo - GitHub repo in `owner/name` format.
+ * @param sha  - Full commit SHA.
+ * @returns The commit message text, or empty string on error.
  */
 export async function fetchCommitMessage(repo: string, sha: string): Promise<string> {
   try {
@@ -189,7 +204,10 @@ export async function fetchCommitMessage(repo: string, sha: string): Promise<str
 
 /**
  * Fetch the title of a pull request.
- * Returns empty string on error.
+ *
+ * @param repo     - GitHub repo in `owner/name` format.
+ * @param prNumber - Pull request number.
+ * @returns The PR title, or empty string on error.
  */
 export async function fetchPRTitle(repo: string, prNumber: number): Promise<string> {
   try {

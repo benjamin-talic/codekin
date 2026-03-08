@@ -28,6 +28,7 @@ interface PromptButtonsProps {
   onSelect: (value: string | string[]) => void
 }
 
+/** Sticky prompt bar for permission approvals, single/multi-select questions, and multi-question AskUserQuestion flows. */
 export function PromptButtons({ options, question, multiSelect, promptType, questions, approvePattern, onSelect }: PromptButtonsProps) {
   const isPermission = promptType === 'permission'
 
@@ -46,19 +47,23 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
   const displayOptions = currentQ ? currentQ.options : options
   const displayMultiSelect = currentQ ? currentQ.multiSelect : multiSelect
 
+  // Multi-question flow: each answer is recorded in `answers` keyed by question text.
+  // After recording, the index advances to the next question and selection state resets.
+  // When the last question is answered, all answers are serialized as a JSON map and
+  // sent back to the parent via onSelect. For single questions this is a pass-through.
   const handleSingleAnswer = useCallback((value: string) => {
     if (!isMultiQuestion || !currentQ) {
       onSelect(value)
       return
     }
-    // Multi-question: record answer and advance
     const nextAnswers = { ...answers, [currentQ.question]: value }
     if (questionIndex + 1 < questions.length) {
+      // More questions remain — save answer and advance to the next one
       setAnswers(nextAnswers)
       setQuestionIndex(questionIndex + 1)
       setSelected(new Set())
     } else {
-      // All questions answered — send JSON answers map
+      // Final question answered — send the complete answers map
       onSelect(JSON.stringify(nextAnswers))
     }
   }, [isMultiQuestion, currentQ, answers, questionIndex, questions, onSelect])

@@ -415,7 +415,7 @@ wss.on('connection', (ws: WebSocket, req) => {
         break
 
       case 'get_usage':
-        // TODO: track usage
+        // Usage tracking not yet implemented — returns no data.
         break
     }
   })

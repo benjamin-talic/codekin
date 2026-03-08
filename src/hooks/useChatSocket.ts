@@ -190,7 +190,7 @@ export function rebuildFromHistory(buffer: WsServerMessage[]): ChatMessage[] {
         messages.push({ type: 'planning_mode', active: msg.active, key: nextKey() })
         break
 
-      // todo_update handled separately
+      // `todo_update` handled separately
       default:
         break
     }

@@ -543,6 +543,7 @@ interface Props {
   onNavigateToSession?: (sessionId: string) => void
 }
 
+/** Workflows management page — shows configured workflows grouped by repo, with inline run history and activity feed. */
 export function WorkflowsView({ token, onNavigateToSession }: Props) {
   const { runs, schedules, config, error, cancelRun, triggerSchedule, addRepo, removeRepo, updateRepo, toggleScheduleEnabled } = useWorkflows(token)
 

@@ -297,6 +297,7 @@ function StepSchedule({
 // AddWorkflowModal (wizard)
 // ---------------------------------------------------------------------------
 
+/** Three-step wizard modal for creating a new scheduled workflow: select repo, choose type, configure schedule. */
 export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
   const [step, setStep] = useState<Step>(1)
   const [selectedRepoId, setSelectedRepoId] = useState('')
