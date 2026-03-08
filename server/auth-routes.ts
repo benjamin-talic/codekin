@@ -11,6 +11,17 @@ import type { SessionManager } from './session-manager.js'
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
 
+/**
+ * Create an Express router with auth verification and health-check endpoints.
+ *
+ * @param verifyToken     - Returns true if the given bearer token is valid.
+ * @param extractToken    - Extracts the bearer token from an incoming request (header, cookie, etc.).
+ * @param sessions        - Session manager instance, used to report active/total session counts.
+ * @param claudeAvailable - Whether the Claude CLI binary was found at startup.
+ * @param claudeVersion   - Version string of the detected Claude CLI.
+ * @param apiKeySet       - Whether an Anthropic API key is configured.
+ * @returns An Express Router with POST `/auth-verify` and GET `/api/health` routes.
+ */
 export function createAuthRouter(
   verifyToken: VerifyFn,
   extractToken: ExtractFn,

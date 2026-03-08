@@ -69,7 +69,12 @@ async function ensureBareMirrorImpl(repo: string): Promise<string> {
  * Create an isolated workspace for a webhook session.
  * Clones from the bare mirror and checks out the target branch.
  *
- * Returns the workspace directory path.
+ * @param sessionId - Unique session ID, used as the workspace directory name.
+ * @param repo      - GitHub repo in `owner/name` format.
+ * @param cloneUrl  - HTTPS clone URL for git remote (must be a github.com URL).
+ * @param branch    - Branch name to check out.
+ * @param headSha   - Exact commit SHA to pin the workspace to.
+ * @returns The absolute path to the created workspace directory.
  */
 export async function createWorkspace(
   sessionId: string,
@@ -148,6 +153,8 @@ export async function createWorkspace(
 
 /**
  * Remove a workspace directory when a session closes.
+ *
+ * @param sessionId - Session ID whose workspace should be cleaned up.
  */
 export function cleanupWorkspace(sessionId: string): void {
   const workspacePath = join(WORKSPACES_DIR, sessionId)
