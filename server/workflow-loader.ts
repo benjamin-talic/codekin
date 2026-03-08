@@ -1,8 +1,9 @@
 /**
  * MD-based workflow loader.
  *
- * Reads *.md files from server/workflows/ (built-in global definitions) and,
- * at run time, from {repoPath}/.codekin/workflows/ (per-repo overrides).
+ * Reads *.md files from server/workflows/ (built-in definitions shipped with
+ * the NPM package) and from {repoPath}/.codekin/workflows/ (per-repo
+ * definitions that can override built-ins or define entirely new workflows).
  *
  * All workflows share the same 4-step execution model:
  *   1. validate_repo  — verify path exists, is a git repo, check staleness
@@ -22,8 +23,9 @@
  *   ---
  *   You are performing a daily automated code review...
  *
- * Per-repo overrides: place a file at {repoPath}/.codekin/workflows/{kind}.md.
- * If found at run time, its prompt replaces the global one for that run.
+ * Per-repo workflows: place MD files at {repoPath}/.codekin/workflows/.
+ * Files whose `kind` matches a built-in override that built-in's prompt.
+ * Files with a new `kind` register as standalone workflows for that repo.
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
@@ -38,7 +40,13 @@ import type { WsServerMessage } from './types.js'
 // Types
 // ---------------------------------------------------------------------------
 
-interface WorkflowDef {
+export interface WorkflowKindInfo {
+  kind: string
+  name: string
+  source: 'builtin' | 'repo'
+}
+
+export interface WorkflowDef {
   kind: string
   name: string
   sessionPrefix: string
@@ -316,23 +324,23 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
           const REPORTS_BRANCH = 'codekin/reports'
           try {
             const relativePath = `${def.outputDir}/${filename}`
-            const originalBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: repoPath, timeout: 5_000 }).toString().trim()
+            const originalBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath, timeout: 5_000 }).toString().trim()
 
             // Ensure the reports branch exists (create as orphan if needed)
             try {
-              execSync(`git rev-parse --verify ${REPORTS_BRANCH}`, { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
+              execFileSync('git', ['rev-parse', '--verify', REPORTS_BRANCH], { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
             } catch {
               // Branch doesn't exist yet — create it from the current branch
-              execSync(`git branch ${REPORTS_BRANCH}`, { cwd: repoPath, timeout: 5_000 })
+              execFileSync('git', ['branch', REPORTS_BRANCH], { cwd: repoPath, timeout: 5_000 })
               console.log(`[workflow:${def.kind}] Created branch ${REPORTS_BRANCH}`)
             }
 
             // Stash any uncommitted changes on the working branch
-            const stashResult = execSync('git stash --include-untracked', { cwd: repoPath, timeout: 10_000 }).toString().trim()
+            const stashResult = execFileSync('git', ['stash', '--include-untracked'], { cwd: repoPath, timeout: 10_000 }).toString().trim()
             const didStash = !stashResult.includes('No local changes')
 
             try {
-              execSync(`git checkout ${REPORTS_BRANCH}`, { cwd: repoPath, timeout: 10_000 })
+              execFileSync('git', ['checkout', REPORTS_BRANCH], { cwd: repoPath, timeout: 10_000 })
 
               // Re-create the report file on this branch (the file was written while on the original branch)
               const reportsDirOnBranch = join(repoPath, def.outputDir)
@@ -341,25 +349,25 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
               }
               writeFileSync(join(reportsDirOnBranch, filename), markdown, 'utf-8')
 
-              execSync(`git add "${relativePath}"`, { cwd: repoPath, timeout: 10_000 })
-              execSync(
-                `git commit -m "${def.commitMessage} ${dateStr}"`,
+              execFileSync('git', ['add', relativePath], { cwd: repoPath, timeout: 10_000 })
+              execFileSync(
+                'git', ['commit', '-m', `${def.commitMessage} ${dateStr}`],
                 { cwd: repoPath, timeout: 15_000 }
               )
               console.log(`[workflow:${def.kind}] Committed ${relativePath} on ${REPORTS_BRANCH}`)
 
               // Push to remote
               try {
-                execSync(`git push origin ${REPORTS_BRANCH}`, { cwd: repoPath, timeout: 30_000, stdio: 'pipe' })
+                execFileSync('git', ['push', 'origin', REPORTS_BRANCH], { cwd: repoPath, timeout: 30_000, stdio: 'pipe' })
                 console.log(`[workflow:${def.kind}] Pushed ${REPORTS_BRANCH} to origin`)
               } catch (pushErr) {
                 console.warn(`[workflow:${def.kind}] Could not push ${REPORTS_BRANCH}: ${pushErr}`)
               }
             } finally {
               // Always switch back to the original branch
-              execSync(`git checkout ${originalBranch}`, { cwd: repoPath, timeout: 10_000 })
+              execFileSync('git', ['checkout', originalBranch], { cwd: repoPath, timeout: 10_000 })
               if (didStash) {
-                execSync('git stash pop', { cwd: repoPath, timeout: 10_000 })
+                execFileSync('git', ['stash', 'pop'], { cwd: repoPath, timeout: 10_000 })
               }
             }
           } catch (err) {
@@ -387,6 +395,79 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
       }
     },
   })
+}
+
+// ---------------------------------------------------------------------------
+// Repo workflow discovery
+// ---------------------------------------------------------------------------
+
+/** Scan {repoPath}/.codekin/workflows/ for all MD workflow definitions. */
+function discoverRepoWorkflows(repoPath: string): WorkflowDef[] {
+  const dir = join(repoPath, '.codekin', 'workflows')
+  if (!existsSync(dir)) return []
+
+  const defs: WorkflowDef[] = []
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith('.md')) continue
+    const filePath = join(dir, file)
+    try {
+      defs.push(parseMdWorkflow(readFileSync(filePath, 'utf-8'), filePath))
+    } catch (err) {
+      console.warn(`[workflow-loader] Failed to parse repo workflow ${filePath}:`, err)
+    }
+  }
+  return defs
+}
+
+/** Track which repo workflow kinds have already been registered with the engine. */
+const registeredRepoKinds = new Set<string>()
+
+/**
+ * Discover and register any standalone repo workflows (kinds not already
+ * registered as built-ins). Called when a repo is configured or when listing
+ * available kinds for a repo. Safe to call multiple times — already-registered
+ * kinds are skipped.
+ */
+export function ensureRepoWorkflowsRegistered(
+  engine: WorkflowEngine,
+  sessions: SessionManager,
+  repoPath: string,
+): void {
+  const repoDefs = discoverRepoWorkflows(repoPath)
+  for (const def of repoDefs) {
+    const registrationKey = `${repoPath}::${def.kind}`
+    if (registeredRepoKinds.has(registrationKey)) continue
+    if (engine.hasWorkflow(def.kind)) continue
+    registerWorkflow(engine, sessions, def)
+    registeredRepoKinds.add(registrationKey)
+    console.log(`[workflow-loader] Registered repo workflow "${def.kind}" from ${repoPath}`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Kind listing
+// ---------------------------------------------------------------------------
+
+/** Return available workflow kinds: built-ins plus any from a specific repo. */
+export function listAvailableKinds(repoPath?: string): WorkflowKindInfo[] {
+  const builtinDefs = loadBuiltinWorkflows()
+  const kinds: WorkflowKindInfo[] = builtinDefs.map(d => ({
+    kind: d.kind,
+    name: d.name,
+    source: 'builtin' as const,
+  }))
+
+  const builtinKindSet = new Set(builtinDefs.map(d => d.kind))
+
+  if (repoPath) {
+    const repoDefs = discoverRepoWorkflows(repoPath)
+    for (const def of repoDefs) {
+      if (builtinKindSet.has(def.kind)) continue
+      kinds.push({ kind: def.kind, name: def.name, source: 'repo' })
+    }
+  }
+
+  return kinds
 }
 
 // ---------------------------------------------------------------------------
