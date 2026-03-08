@@ -27,6 +27,11 @@ vi.mock('fs', async (importOriginal) => {
   }
 })
 
+// Mock config to set REPOS_ROOT to /tmp so test paths pass validation
+vi.mock('./config.js', () => ({
+  REPOS_ROOT: '/tmp',
+}))
+
 // Mock better-sqlite3 (needed by workflow-engine import)
 vi.mock('better-sqlite3', () => {
   class MockDatabase {
@@ -208,12 +213,12 @@ Some prompt.
 
       it('throws when repoPath does not exist', async () => {
         mockExistsSync.mockImplementation((p: string) => {
-          if (String(p) === '/nonexistent') return false
+          if (String(p) === '/tmp/nonexistent') return false
           return true
         })
 
         const handler = registeredDef.steps[0].handler
-        await expect(handler({ repoPath: '/nonexistent' }, { runId: 'r1', run: {}, abortSignal: new AbortController().signal }))
+        await expect(handler({ repoPath: '/tmp/nonexistent' }, { runId: 'r1', run: {}, abortSignal: new AbortController().signal }))
           .rejects.toThrow('does not exist')
       })
 

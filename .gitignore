@@ -32,7 +32,6 @@ dist-ssr
 
 # Generated workflow outputs
 .codekin/outputs/
-.codekin/reports/
 review logs/
 dependency-reports/
 coverage-reports/

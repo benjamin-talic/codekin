@@ -21,6 +21,33 @@ import type { SessionManager } from './session-manager.js'
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
 
+/** Validate a 5-field cron expression. Returns true if the format is valid. */
+function isValidCron(expr: string): boolean {
+  const parts = expr.trim().split(/\s+/)
+  if (parts.length !== 5) return false
+  const ranges = [
+    [0, 59],  // minute
+    [0, 23],  // hour
+    [1, 31],  // day of month
+    [1, 12],  // month
+    [0, 6],   // day of week
+  ]
+  return parts.every((part, i) => {
+    const [min, max] = ranges[i]
+    return part.split(',').every(segment => {
+      const stepMatch = segment.match(/^(.+)\/(\d+)$/)
+      const range = stepMatch ? stepMatch[1] : segment
+      if (range === '*') return true
+      if (range.includes('-')) {
+        const [a, b] = range.split('-').map(Number)
+        return !isNaN(a) && !isNaN(b) && a >= min && b <= max && a <= b
+      }
+      const n = parseInt(range, 10)
+      return !isNaN(n) && n >= min && n <= max
+    })
+  })
+}
+
 /**
  * Sync cron schedules with the current workflow config.
  * When `sessions` is provided, also registers any standalone repo workflows.
@@ -159,6 +186,9 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
     const { id, kind, cronExpression, input, enabled } = req.body
     if (!id || !kind || !cronExpression) {
       return res.status(400).json({ error: 'Missing id, kind, or cronExpression' })
+    }
+    if (!isValidCron(cronExpression)) {
+      return res.status(400).json({ error: 'Invalid cron expression' })
     }
 
     const schedule = engine.upsertSchedule({

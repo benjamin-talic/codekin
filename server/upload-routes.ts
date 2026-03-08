@@ -157,12 +157,14 @@ export function createUploadRouter(
   const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } })
 
   // --- File upload ---
-  router.post('/api/upload', upload.single('file'), (req, res) => {
+  router.post('/api/upload', (req, res, next) => {
     const token = extractToken(req)
     if (!verifyToken(token)) {
       res.status(401).json({ error: 'Invalid token' })
       return
     }
+    next()
+  }, upload.single('file'), (req, res) => {
     if (!req.file) {
       res.status(400).json({ error: 'No file uploaded' })
       return

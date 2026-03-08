@@ -17,8 +17,8 @@ import { readFileSync, existsSync } from 'fs'
 /** Main server port (WebSocket + REST + uploads). */
 export const PORT = parseInt(process.env.PORT || '32352', 10)
 
-/** CORS allowed origin. */
-export const CORS_ORIGIN = process.env.CORS_ORIGIN || '*'
+/** CORS allowed origin. Defaults to localhost dev server; set explicitly for production. */
+export const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173'
 
 // ---------------------------------------------------------------------------
 // Authentication

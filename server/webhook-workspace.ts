@@ -89,6 +89,16 @@ export async function createWorkspace(
     timeout: GIT_TIMEOUT_MS,
   })
 
+  // Validate cloneUrl — only allow HTTPS GitHub URLs
+  if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:\.git)?$/.test(cloneUrl)) {
+    throw new Error(`Invalid clone URL: ${cloneUrl}`)
+  }
+
+  // Validate branch name — only safe characters
+  if (!/^[a-zA-Z0-9/_.-]+$/.test(branch)) {
+    throw new Error(`Invalid branch name: ${branch}`)
+  }
+
   // Set up remote to point to the real repo for pushes
   await execFileAsync('git', ['remote', 'set-url', 'origin', cloneUrl], {
     cwd: workspacePath,

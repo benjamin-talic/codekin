@@ -57,6 +57,9 @@ for (let i = 0; i < args.length; i++) {
 
 if (authToken) {
   console.log('Auth token configured')
+} else {
+  console.warn('⚠️  WARNING: No auth token configured. All endpoints are unauthenticated!')
+  console.warn('   Set AUTH_TOKEN or AUTH_TOKEN_FILE to secure the server.')
 }
 
 /** Check if a token matches the configured auth token (passes if no auth configured). */
@@ -206,7 +209,16 @@ app.post(
 // JSON body parser for all other routes
 app.use(express.json())
 
-// CORS — restrict to configured origin (default: allow all for local dev)
+// Security headers
+app.use((_req, res, next) => {
+  res.header('X-Content-Type-Options', 'nosniff')
+  res.header('X-Frame-Options', 'SAMEORIGIN')
+  res.header('X-XSS-Protection', '1; mode=block')
+  res.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  next()
+})
+
+// CORS — restrict to configured origin (default: localhost dev server)
 app.use((_req, res, next) => {
   res.header('Access-Control-Allow-Origin', CORS_ORIGIN)
   res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
