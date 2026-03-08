@@ -90,7 +90,7 @@ export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = 
                           </span>
                         )}
                         {!repo.cloned && !isCloning && (
-                          <span className="flex-shrink-0 rounded border border-neutral-6/40 bg-neutral-8/30 px-1.5 py-0.5 text-[13px] text-neutral-5">
+                          <span className="flex-shrink-0 rounded border border-neutral-6 bg-neutral-8/50 px-1.5 py-0.5 text-[13px] text-neutral-3">
                             remote
                           </span>
                         )}
