@@ -29,7 +29,7 @@ interface Props {
 }
 
 export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
-  const { groups, loading: reposLoading } = useRepos(token)
+  const { groups, loading: reposLoading, error: reposError } = useRepos(token)
   const allRepos = groups.flatMap(g => g.repos)
 
   const [selectedRepoId, setSelectedRepoId] = useState<string>('')
@@ -125,6 +125,10 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
               <div className="flex items-center gap-2 py-2 text-[13px] text-neutral-5">
                 <IconLoader2 size={14} stroke={2} className="animate-spin" />
                 Loading repos…
+              </div>
+            ) : reposError ? (
+              <div className="rounded-md bg-error-10/50 px-3 py-2 text-[13px] text-error-4">
+                Failed to load repos: {reposError}
               </div>
             ) : (
               <select
