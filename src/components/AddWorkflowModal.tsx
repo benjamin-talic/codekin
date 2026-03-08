@@ -29,7 +29,7 @@ interface Props {
 }
 
 export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
-  const { groups, loading: reposLoading } = useRepos()
+  const { groups, loading: reposLoading } = useRepos(token)
   const allRepos = groups.flatMap(g => g.repos)
 
   const [selectedRepoId, setSelectedRepoId] = useState<string>('')
