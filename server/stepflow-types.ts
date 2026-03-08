@@ -303,4 +303,6 @@ export interface StepflowConfig {
   secret: string
   /** Maximum number of simultaneous Stepflow-sourced Claude sessions. */
   maxConcurrentSessions: number
+  /** Allowlist of hostnames permitted for callback URLs. Empty = allow all (unsafe). */
+  allowedCallbackHosts: string[]
 }

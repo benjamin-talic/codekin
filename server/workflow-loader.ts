@@ -30,7 +30,8 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import { execSync, execFileSync } from 'child_process'
-import { dirname, join } from 'path'
+import { dirname, join, resolve } from 'path'
+import { REPOS_ROOT } from './config.js'
 import { fileURLToPath } from 'url'
 import type { WorkflowEngine, WorkflowRun } from './workflow-engine.js'
 import type { SessionManager } from './session-manager.js'
@@ -197,7 +198,11 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
         handler: async (input) => {
           const repoPath = input.repoPath as string
           if (!repoPath) throw new Error('Missing repoPath in workflow input')
-          if (!existsSync(repoPath)) throw new Error(`Repository path does not exist: ${repoPath}`)
+          const resolvedPath = resolve(repoPath)
+          if (!resolvedPath.startsWith(REPOS_ROOT)) {
+            throw new Error(`Repository path ${resolvedPath} is outside REPOS_ROOT`)
+          }
+          if (!existsSync(resolvedPath)) throw new Error(`Repository path does not exist: ${resolvedPath}`)
 
           try {
             const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: repoPath, timeout: 5000 }).toString().trim()

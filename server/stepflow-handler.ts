@@ -424,6 +424,22 @@ export class StepflowHandler {
       headers['X-Stepflow-Signature'] = sig
     }
 
+    // SSRF protection: validate callback URL against allowlist
+    const parsedUrl = new URL(callbackUrl)
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+      throw new Error(`Callback URL protocol ${parsedUrl.protocol} not allowed`)
+    }
+    if (this.config.allowedCallbackHosts.length > 0 &&
+        !this.config.allowedCallbackHosts.includes(parsedUrl.hostname)) {
+      throw new Error(`Callback host ${parsedUrl.hostname} not in allowlist`)
+    }
+    // Block private/link-local IP ranges
+    const ip = parsedUrl.hostname
+    if (/^(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|0\.)/.test(ip) ||
+        ip === 'localhost' || ip === '[::1]') {
+      throw new Error(`Callback to private/link-local address ${ip} is blocked`)
+    }
+
     const response = await fetch(callbackUrl, {
       method: 'POST',
       headers,
@@ -525,5 +541,8 @@ export function loadStepflowConfig(): StepflowConfig {
     if (!isNaN(n) && n > 0) maxConcurrentSessions = n
   }
 
-  return { enabled, secret, maxConcurrentSessions }
+  const allowedCallbackHosts = (process.env.STEPFLOW_CALLBACK_HOSTS || '')
+    .split(',').map(s => s.trim()).filter(Boolean)
+
+  return { enabled, secret, maxConcurrentSessions, allowedCallbackHosts }
 }

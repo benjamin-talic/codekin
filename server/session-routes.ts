@@ -247,6 +247,11 @@ export function createSessionRouter(
 
   // Hook notification endpoint (Notification hook via HttpTransport)
   router.post('/api/hook-notify', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) {
+      return res.status(401).json({ error: 'Unauthorized' })
+    }
+
     const { sessionId, notificationType, title, message } = req.body
     if (!sessionId) {
       return res.status(400).json({ error: 'Missing sessionId' })
