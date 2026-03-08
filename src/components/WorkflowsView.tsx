@@ -8,7 +8,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import {
-  IconRefresh, IconPlus, IconPlayerPlay, IconPlayerStop, IconPlayerPause,
+  IconPlus, IconPlayerPlay, IconPlayerStop, IconPlayerPause,
   IconExternalLink, IconTrash, IconChevronDown, IconChevronRight,
   IconCheck, IconX, IconLoader2, IconMinus, IconCircle, IconClock, IconPencil,
   IconCalendarEvent, IconArrowRight,
@@ -457,7 +457,7 @@ interface Props {
 }
 
 export function WorkflowsView({ token, onNavigateToSession }: Props) {
-  const { runs, schedules, config, loading, error, refresh, cancelRun, triggerSchedule, addRepo, removeRepo, updateRepo, toggleScheduleEnabled } = useWorkflows(token)
+  const { runs, schedules, config, error, cancelRun, triggerSchedule, addRepo, removeRepo, updateRepo, toggleScheduleEnabled } = useWorkflows(token)
 
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [runDetail, setRunDetail] = useState<WorkflowRunWithSteps | null>(null)
@@ -543,13 +543,6 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
       <div className="flex items-center justify-between border-b border-neutral-8/50 px-5 py-3">
         <h1 className="text-[17px] font-medium text-neutral-1">Workflows</h1>
         <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => refresh()}
-            className="rounded-md p-1.5 text-neutral-4 hover:text-neutral-1 hover:bg-neutral-8 transition-colors"
-            title="Refresh"
-          >
-            <IconRefresh size={16} stroke={2} className={loading ? 'animate-spin' : ''} />
-          </button>
           <button
             onClick={() => setShowAddForm(true)}
             className="flex items-center gap-1.5 rounded-md bg-accent-7 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-accent-6 transition-colors"
