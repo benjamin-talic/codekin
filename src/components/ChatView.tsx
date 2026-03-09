@@ -131,6 +131,17 @@ function AssistantMessage({ msg, fontSize, theme }: { msg: ChatMessage & { type:
                 </code>
               )
             },
+            img({ src, alt, ...props }) {
+              return (
+                <img
+                  src={src}
+                  alt={alt || 'Image'}
+                  className="max-w-full max-h-96 rounded-lg border border-neutral-8 my-2"
+                  loading="lazy"
+                  {...props}
+                />
+              )
+            },
           }}
         >
           {msg.text}
