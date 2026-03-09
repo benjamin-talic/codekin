@@ -558,7 +558,7 @@ export default function App() {
 
             {/* Smart prompt buttons (conditional) */}
             {promptOptions && (
-              <PromptButtons options={promptOptions} question={promptQuestion} multiSelect={multiSelect} promptType={promptType} questions={promptQuestions} approvePattern={approvePattern} onSelect={sendPromptResponse} />
+              <PromptButtons options={promptOptions} question={promptQuestion} multiSelect={multiSelect} promptType={promptType} questions={promptQuestions} approvePattern={approvePattern} onSelect={sendPromptResponse} isMobile={isMobile} />
             )}
 
             {/* Tentative banner */}

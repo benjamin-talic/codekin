@@ -26,11 +26,14 @@ interface PromptButtonsProps {
   /** Derived pattern for "Approve Pattern" button, e.g. "cat *". Only present for Bash permission prompts. */
   approvePattern?: string
   onSelect: (value: string | string[]) => void
+  /** When true, uses larger tap targets for mobile. */
+  isMobile?: boolean
 }
 
 /** Sticky prompt bar for permission approvals, single/multi-select questions, and multi-question AskUserQuestion flows. */
-export function PromptButtons({ options, question, multiSelect, promptType, questions, approvePattern, onSelect }: PromptButtonsProps) {
+export function PromptButtons({ options, question, multiSelect, promptType, questions, approvePattern, onSelect, isMobile = false }: PromptButtonsProps) {
   const isPermission = promptType === 'permission'
+  const btnPad = isMobile ? 'px-4 py-2 text-[14px]' : 'px-3 py-0.5 text-[13px]'
 
   // Auto-allow countdown for permission prompts
   const [timeLeft, setTimeLeft] = useState(15)
@@ -137,7 +140,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
               key={opt.value}
               onClick={() => toggle(opt.value)}
               title={opt.description}
-              className={`rounded-full border px-3 py-0.5 text-[13px] transition-colors ${
+              className={`rounded-full border ${btnPad} transition-colors ${
                 selected.has(opt.value)
                   ? 'border-primary-6 bg-primary-9 text-primary-3'
                   : 'border-neutral-8 bg-neutral-10 text-neutral-2 hover:border-primary-7 hover:bg-neutral-9 hover:text-neutral-1'
@@ -149,7 +152,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
           {selected.size > 0 && (
             <button
               onClick={confirm}
-              className="rounded-full border border-primary-7 bg-primary-9 px-3 py-0.5 text-[13px] text-primary-3 hover:bg-primary-8 transition-colors"
+              className={`rounded-full border border-primary-7 bg-primary-9 ${btnPad} text-primary-3 hover:bg-primary-8 transition-colors`}
             >
               Confirm ({selected.size})
             </button>
@@ -173,7 +176,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
           const isAllow = isPermission && opt.value === 'allow'
           const isAlwaysAllow = isPermission && opt.value === 'always_allow'
           const isDeny = isPermission && opt.value === 'deny'
-          let btnClass = 'rounded-full border px-3 py-0.5 text-[13px] transition-colors '
+          let btnClass = `rounded-full border ${btnPad} transition-colors `
           if (isAllow) {
             btnClass += 'border-success-7 bg-success-10/50 text-success-4 hover:bg-success-9/50'
           } else if (isAlwaysAllow) {
@@ -198,7 +201,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
           <button
             onClick={() => handleSingleAnswer('approve_pattern')}
             title={`Auto-approve all future: ${approvePattern}`}
-            className="rounded-full border border-warning-7 bg-warning-10/50 px-3 py-0.5 text-[13px] text-warning-4 hover:bg-warning-9/50 transition-colors"
+            className={`rounded-full border border-warning-7 bg-warning-10/50 ${btnPad} text-warning-4 hover:bg-warning-9/50 transition-colors`}
           >
             Approve Pattern: <code className="font-mono">{approvePattern}</code>
           </button>
