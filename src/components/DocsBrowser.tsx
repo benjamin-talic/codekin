@@ -31,24 +31,22 @@ export function DocsBrowser({
 }: Props) {
   return (
     <div className="relative flex flex-1 min-h-0 w-full flex-col">
-      {/* Nav bar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-neutral-10 bg-neutral-11/50 flex-shrink-0">
+      {/* Nav bar — inverted colors so it's clearly distinct from terminal */}
+      <div className="docs-header flex items-center gap-2 px-4 py-2 border-b flex-shrink-0">
         <button
           onClick={onClose}
-          className="flex items-center gap-1 text-[13px] text-neutral-4 hover:text-neutral-1 transition-colors cursor-pointer"
+          className="docs-header-back flex items-center gap-1 text-[13px] transition-colors cursor-pointer"
         >
           <IconChevronLeft size={14} stroke={2.5} />
           Back
         </button>
-        <span className="flex-1 text-[13px] text-neutral-5 text-center truncate">
-          {repoName} <span className="text-neutral-7">/</span> {filePath}
+        <span className="docs-header-path flex-1 text-[13px] text-center truncate">
+          {repoName} <span className="docs-header-slash">/</span> {filePath}
         </span>
         <button
           onClick={onToggleRaw}
-          className={`rounded px-2 py-0.5 text-[13px] transition-colors cursor-pointer ${
-            rawMode
-              ? 'bg-neutral-9 text-neutral-2'
-              : 'text-neutral-5 hover:text-neutral-2 hover:bg-neutral-9'
+          className={`docs-header-toggle rounded px-2 py-0.5 text-[13px] transition-colors cursor-pointer ${
+            rawMode ? 'is-active' : ''
           }`}
         >
           {rawMode ? 'Rendered' : 'Raw'}
