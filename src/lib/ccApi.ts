@@ -280,6 +280,29 @@ export async function getSupportProvider(token: string): Promise<{ preferred: Su
   return res.json()
 }
 
+/** Webhook configuration (public subset, no secret). */
+export interface WebhookConfigInfo {
+  enabled: boolean
+  maxConcurrentSessions: number
+  logLinesToInclude: number
+}
+
+/** Fetch the webhook configuration from the server. */
+export async function getWebhookConfig(token: string): Promise<WebhookConfigInfo> {
+  const res = await authFetch(`${BASE}/api/webhooks/config?token=${encodeURIComponent(token)}`)
+  if (!res.ok) throw new Error(`Failed to get webhook config: ${res.status}`)
+  const data = await res.json()
+  return data.config
+}
+
+/** Fetch recent webhook events. */
+export async function getWebhookEvents(token: string): Promise<Array<{ id: string; repo: string; branch: string; workflow: string; conclusion: string; status: string; receivedAt: string }>> {
+  const res = await authFetch(`${BASE}/api/webhooks/events?token=${encodeURIComponent(token)}`)
+  if (!res.ok) throw new Error(`Failed to get webhook events: ${res.status}`)
+  const data = await res.json()
+  return data.events ?? []
+}
+
 /** Set the preferred support provider. */
 export async function setSupportProvider(token: string, provider: SupportProvider): Promise<void> {
   const res = await authFetch(`${BASE}/api/settings/support-provider?token=${encodeURIComponent(token)}`, {
