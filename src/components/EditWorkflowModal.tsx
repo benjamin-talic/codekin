@@ -7,11 +7,18 @@ import { useState } from 'react'
 import { IconX, IconLoader2 } from '@tabler/icons-react'
 import type { ReviewRepoConfig } from '../lib/workflowApi'
 import {
-  WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL,
+  WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL, isBiweeklyDow,
   buildCron, parseCron, describeCron, kindLabel,
   toTimeValue, fromTimeValue,
 } from '../lib/workflowHelpers'
 import { CategoryBadge } from './WorkflowBadges'
+
+const btnClass = (selected: boolean) =>
+  `rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
+    selected
+      ? 'border-accent-6 bg-accent-9/40 text-accent-2'
+      : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
+  }`
 
 interface Props {
   repo: ReviewRepoConfig
@@ -52,6 +59,9 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
   }
 
   const repoShortName = repo.repoPath.split('/').pop() || repo.name
+  const biweekly = isBiweeklyDow(form.cronDow)
+  const baseDow = biweekly ? form.cronDow.split('-').slice(1).join('-') : form.cronDow
+  const isDay = DAY_INDIVIDUAL.some(d => d.dow === baseDow)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
@@ -114,7 +124,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
                 const { hour, minute } = fromTimeValue(e.target.value)
                 setForm(f => ({ ...f, cronHour: hour, cronMinute: minute }))
               }}
-              className="rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 focus:border-accent-6 focus:outline-none w-full mb-3"
+              className="rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 focus:border-accent-6 focus:outline-none w-40 mb-3 themed-time-input"
             />
             <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
             <div className="flex flex-wrap gap-1.5 mb-2">
@@ -123,11 +133,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
                   key={p.dow}
                   type="button"
                   onClick={() => setForm(f => ({ ...f, cronDow: p.dow }))}
-                  className={`rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
-                    form.cronDow === p.dow
-                      ? 'border-accent-6 bg-accent-9/40 text-accent-2'
-                      : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
-                  }`}
+                  className={btnClass(form.cronDow === p.dow)}
                 >
                   {p.label}
                 </button>
@@ -138,17 +144,23 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
                 <button
                   key={p.dow}
                   type="button"
-                  onClick={() => setForm(f => ({ ...f, cronDow: p.dow }))}
-                  className={`rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
-                    form.cronDow === p.dow
-                      ? 'border-accent-6 bg-accent-9/40 text-accent-2'
-                      : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
-                  }`}
+                  onClick={() => setForm(f => ({ ...f, cronDow: biweekly ? `biweekly-${p.dow}` : p.dow }))}
+                  className={btnClass(baseDow === p.dow)}
                 >
                   {p.label}
                 </button>
               ))}
             </div>
+            {isDay && (
+              <div className="flex gap-1.5 mt-2">
+                <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: baseDow }))} className={btnClass(!biweekly)}>
+                  Every week
+                </button>
+                <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: `biweekly-${baseDow}` }))} className={btnClass(biweekly)}>
+                  Every 2 weeks
+                </button>
+              </div>
+            )}
             <div className="mt-2 text-[13px] text-neutral-5">
               {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
             </div>
