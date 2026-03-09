@@ -640,7 +640,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setShowAddForm(true)}
-            className="flex items-center gap-1.5 rounded-md bg-accent-7 px-3 py-1.5 text-[14px] font-medium text-white hover:bg-accent-6 transition-colors"
+            className="flex items-center gap-1.5 rounded-md bg-primary-8 px-3 py-1.5 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 transition-colors"
           >
             <IconPlus size={14} stroke={2} />
             New Workflow
@@ -668,7 +668,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
             </div>
             <button
               onClick={() => setShowAddForm(true)}
-              className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-accent-7 px-4 py-2 text-[14px] font-medium text-white hover:bg-accent-6 transition-colors"
+              className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 transition-colors"
             >
               <IconPlus size={14} stroke={2} />
               Create your first workflow

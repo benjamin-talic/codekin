@@ -60,7 +60,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h2 className="text-[17px] font-semibold text-neutral-1">Edit Workflow</h2>
+            <h2 className="text-[19px] font-semibold text-neutral-1">Edit Workflow</h2>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-[13px] text-neutral-4">{repoShortName}</span>
               <span className="text-neutral-7">·</span>
@@ -91,7 +91,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
                       : 'border-neutral-7 bg-neutral-10 hover:border-neutral-6'
                   }`}
                 >
-                  <span className={`block text-[14px] font-medium ${
+                  <span className={`block text-[15px] font-medium ${
                     form.kind === k.value ? 'text-accent-2' : 'text-neutral-2'
                   }`}>
                     {k.label}
@@ -156,14 +156,14 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-md border border-neutral-7 bg-neutral-10 py-2 text-[14px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
+              className="flex-1 rounded-md border border-neutral-7 bg-neutral-10 py-2 text-[15px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="flex-1 rounded-md bg-accent-7 py-2 text-[14px] font-medium text-white hover:bg-accent-6 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+              className="flex-1 rounded-md bg-primary-8 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
             >
               {saving ? (
                 <>
