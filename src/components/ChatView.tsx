@@ -351,7 +351,7 @@ export function ChatView({ messages, fontSize, theme = 'dark', disabled, plannin
       )}
       <div
         ref={containerRef}
-        className="chat-scroll flex-1 overflow-y-auto min-h-0"
+        className="chat-scroll flex-1 overflow-y-auto overflow-x-hidden min-h-0"
         onScroll={checkScroll}
       >
         <div className="flex flex-col py-2">

@@ -54,7 +54,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
-  const MOBILE_HEIGHT = 80
+  const MOBILE_HEIGHT = 100
   const [height, setHeight] = useState(() => {
     if (isMobile) return MOBILE_HEIGHT
     const stored = localStorage.getItem(INPUT_HEIGHT_KEY)
