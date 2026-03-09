@@ -20,6 +20,7 @@
  *   outputDir: .codekin/reports/code-review
  *   filenameSuffix: _code-review-daily.md
  *   commitMessage: chore: code review
+ *   model: claude-sonnet-4-6          # optional — defaults to system default
  *   ---
  *   You are performing a daily automated code review...
  *
@@ -54,6 +55,7 @@ export interface WorkflowDef {
   outputDir: string
   filenameSuffix: string
   commitMessage: string
+  model?: string
   prompt: string
 }
 
@@ -88,6 +90,7 @@ function parseMdWorkflow(content: string, sourcePath: string): WorkflowDef {
     outputDir: meta.outputDir,
     filenameSuffix: meta.filenameSuffix,
     commitMessage: meta.commitMessage,
+    model: meta.model,
     prompt,
   }
 }
@@ -236,6 +239,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
           const session = sessions.create(`${def.sessionPrefix}:${repoName}`, repoPath, {
             source: 'workflow',
             groupDir: repoPath,
+            model: def.model,
           })
 
           console.log(`[workflow:${def.kind}] Created session ${session.id} for ${repoName} (run ${ctx.runId})`)
