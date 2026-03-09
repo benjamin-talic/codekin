@@ -29,9 +29,14 @@ describe('workflowHelpers', () => {
       expect(buildCron(14, '1-5', 15)).toBe('15 14 * * 1-5')
     })
 
-    it('builds a biweekly cron expression', () => {
+    it('builds a biweekly cron expression (legacy)', () => {
       expect(buildCron(6, 'biweekly')).toBe('0 6 */14 * *')
       expect(buildCron(9, 'biweekly', 45)).toBe('45 9 */14 * *')
+    })
+
+    it('builds a biweekly cron expression with specific day', () => {
+      expect(buildCron(6, 'biweekly-1')).toBe('0 6 */14 * 1')
+      expect(buildCron(9, 'biweekly-5', 30)).toBe('30 9 */14 * 5')
     })
   })
 
@@ -46,9 +51,14 @@ describe('workflowHelpers', () => {
       expect(parseCron('15 14 * * 1-5')).toEqual({ hour: 14, minute: 15, dow: '1-5' })
     })
 
-    it('parses biweekly expression', () => {
+    it('parses biweekly expression (legacy, no day)', () => {
       expect(parseCron('0 6 */14 * *')).toEqual({ hour: 6, minute: 0, dow: 'biweekly' })
       expect(parseCron('45 9 */14 * *')).toEqual({ hour: 9, minute: 45, dow: 'biweekly' })
+    })
+
+    it('parses biweekly expression with specific day', () => {
+      expect(parseCron('0 6 */14 * 1')).toEqual({ hour: 6, minute: 0, dow: 'biweekly-1' })
+      expect(parseCron('30 9 */14 * 5')).toEqual({ hour: 9, minute: 30, dow: 'biweekly-5' })
     })
 
     it('returns defaults for invalid expression', () => {
@@ -110,9 +120,14 @@ describe('workflowHelpers', () => {
       expect(describeCron('0 9 * * 0')).toBe('Weekly Sun at 09:00')
     })
 
-    it('describes biweekly cron', () => {
+    it('describes biweekly cron (legacy)', () => {
       expect(describeCron('0 6 */14 * *')).toBe('Bi-weekly at 06:00')
       expect(describeCron('30 9 */14 * *')).toBe('Bi-weekly at 09:30')
+    })
+
+    it('describes biweekly cron with specific day', () => {
+      expect(describeCron('0 6 */14 * 1')).toBe('Bi-weekly Mon at 06:00')
+      expect(describeCron('30 9 */14 * 5')).toBe('Bi-weekly Fri at 09:30')
     })
 
     it('returns raw expression for invalid format', () => {

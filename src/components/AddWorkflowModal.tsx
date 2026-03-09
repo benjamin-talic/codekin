@@ -15,7 +15,7 @@ import type { ReviewRepoConfig, WorkflowKindInfo } from '../lib/workflowApi'
 import {
   WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL,
   buildCron, describeCron, slugify, kindCategory,
-  toTimeValue, fromTimeValue,
+  toTimeValue, fromTimeValue, isBiweeklyDow,
 } from '../lib/workflowHelpers'
 import { CategoryBadge } from './WorkflowBadges'
 import { RepoList } from './RepoList'
@@ -275,34 +275,69 @@ function StepSchedule({
           step={900}
           value={toTimeValue(form.cronHour, form.cronMinute)}
           onChange={handleTimeChange}
-          className="rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 focus:border-accent-6 focus:outline-none w-full"
+          className="rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 focus:border-accent-6 focus:outline-none w-40 themed-time-input"
         />
       </div>
 
       <div>
         <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
         <div className="flex flex-wrap gap-1.5 mb-2">
-          {DAY_PRESETS.map(p => (
-            <FrequencyButton
-              key={p.dow}
-              label={p.label}
-              dow={p.dow}
-              selected={form.cronDow === p.dow}
-              onSelect={dow => onChange({ cronDow: dow })}
-            />
-          ))}
+          {DAY_PRESETS.map(p => {
+            const selected = form.cronDow === p.dow
+            return (
+              <FrequencyButton
+                key={p.dow}
+                label={p.label}
+                dow={p.dow}
+                selected={selected}
+                onSelect={dow => onChange({ cronDow: dow })}
+              />
+            )
+          })}
         </div>
         <div className="flex gap-1.5">
-          {DAY_INDIVIDUAL.map(p => (
-            <FrequencyButton
-              key={p.dow}
-              label={p.label}
-              dow={p.dow}
-              selected={form.cronDow === p.dow}
-              onSelect={dow => onChange({ cronDow: dow })}
-            />
-          ))}
+          {DAY_INDIVIDUAL.map(p => {
+            const baseDow = isBiweeklyDow(form.cronDow)
+              ? form.cronDow.split('-').slice(1).join('-')
+              : form.cronDow
+            const selected = baseDow === p.dow
+            return (
+              <FrequencyButton
+                key={p.dow}
+                label={p.label}
+                dow={p.dow}
+                selected={selected}
+                onSelect={dow => {
+                  const biweekly = isBiweeklyDow(form.cronDow)
+                  onChange({ cronDow: biweekly ? `biweekly-${dow}` : dow })
+                }}
+              />
+            )
+          })}
         </div>
+        {/* Weekly / Bi-weekly toggle — visible when a single day is selected */}
+        {(() => {
+          const isDay = DAY_INDIVIDUAL.some(d => d.dow === form.cronDow || form.cronDow === `biweekly-${d.dow}`)
+          if (!isDay) return null
+          const biweekly = isBiweeklyDow(form.cronDow)
+          const baseDow = biweekly ? form.cronDow.split('-').slice(1).join('-') : form.cronDow
+          return (
+            <div className="flex gap-1.5 mt-2">
+              <FrequencyButton
+                label="Every week"
+                dow={baseDow}
+                selected={!biweekly}
+                onSelect={dow => onChange({ cronDow: dow })}
+              />
+              <FrequencyButton
+                label="Every 2 weeks"
+                dow={`biweekly-${baseDow}`}
+                selected={biweekly}
+                onSelect={dow => onChange({ cronDow: dow })}
+              />
+            </div>
+          )
+        })()}
         <div className="mt-2 text-[13px] text-neutral-5">
           {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
         </div>

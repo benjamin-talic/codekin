@@ -18,7 +18,6 @@ export const WORKFLOW_KINDS = [
 export const DAY_PRESETS = [
   { label: 'Daily', dow: '*' },
   { label: 'Weekdays', dow: '1-5' },
-  { label: 'Bi-weekly', dow: 'biweekly' },
 ]
 
 export const DAY_INDIVIDUAL = [
@@ -33,9 +32,20 @@ export const DAY_INDIVIDUAL = [
 
 export const DAY_PATTERNS = [...DAY_PRESETS, ...DAY_INDIVIDUAL]
 
+/** Check if a dow value represents a bi-weekly schedule (e.g. `"biweekly"` or `"biweekly-1"`). */
+export function isBiweeklyDow(dow: string): boolean {
+  return dow.startsWith('biweekly')
+}
+
+/** Extract the day-of-week from a biweekly dow value, e.g. `"biweekly-1"` → `"1"`. Returns `"*"` for legacy `"biweekly"`. */
+export function biweeklyDay(dow: string): string {
+  const parts = dow.split('-')
+  return parts.length >= 2 ? parts.slice(1).join('-') : '*'
+}
+
 /** Build a cron expression from hour (0–23), day-of-week pattern, and optional minute (0–59). */
 export function buildCron(hour: number, dow: string, minute = 0): string {
-  if (dow === 'biweekly') return `${minute} ${hour} */14 * *`
+  if (isBiweeklyDow(dow)) return `${minute} ${hour} */14 * ${biweeklyDay(dow)}`
   return `${minute} ${hour} * * ${dow}`
 }
 
@@ -43,11 +53,14 @@ export function buildCron(hour: number, dow: string, minute = 0): string {
 export function parseCron(expr: string): { hour: number; minute: number; dow: string } {
   const parts = expr.trim().split(/\s+/)
   if (parts.length === 5) {
-    const isBiweekly = parts[2] === '*/14'
+    const biweekly = parts[2] === '*/14'
+    const dow = biweekly
+      ? (parts[4] === '*' ? 'biweekly' : `biweekly-${parts[4]}`)
+      : parts[4]
     return {
       hour: parseInt(parts[1]) || 0,
       minute: parseInt(parts[0]) || 0,
-      dow: isBiweekly ? 'biweekly' : parts[4],
+      dow,
     }
   }
   return { hour: 6, minute: 0, dow: '*' }
@@ -79,10 +92,13 @@ export function describeCron(expr: string): string {
   const [min, hour, dom, , dow] = parts
   const pad = (n: string) => n.length === 1 ? `0${n}` : n
   const time = `${pad(hour)}:${pad(min)}`
-  if (dom === '*/14') return `Bi-weekly at ${time}`
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  if (dom === '*/14') {
+    const dayName = dow !== '*' ? ` ${days[parseInt(dow)] ?? dow}` : ''
+    return `Bi-weekly${dayName} at ${time}`
+  }
   if (dow === '*') return `Daily at ${time}`
   if (dow === '1-5') return `Weekdays at ${time}`
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const dayName = days[parseInt(dow)] ?? dow
   return `Weekly ${dayName} at ${time}`
 }
