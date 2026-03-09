@@ -8,7 +8,7 @@
 
 import { homedir } from 'os'
 import { join } from 'path'
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, realpathSync } from 'fs'
 
 // ---------------------------------------------------------------------------
 // Network
@@ -45,8 +45,11 @@ export const AUTH_TOKEN = loadAuthToken()
 // Paths
 // ---------------------------------------------------------------------------
 
-/** Root directory for cloned repositories. */
-export const REPOS_ROOT = process.env.REPOS_ROOT || join(homedir(), 'repos')
+/** Root directory for cloned repositories. Resolved via realpathSync to follow symlinks. */
+const rawReposRoot = process.env.REPOS_ROOT || join(homedir(), 'repos')
+export const REPOS_ROOT = existsSync(rawReposRoot)
+  ? realpathSync(rawReposRoot)
+  : rawReposRoot
 
 /** Codekin data directory (sessions, approvals, workflows, etc.). */
 export const DATA_DIR = process.env.DATA_DIR || join(homedir(), '.codekin')
