@@ -47,7 +47,7 @@ function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }
   return (
     <div className="flex items-center gap-2 mb-3">
       <span className="text-neutral-5">{icon}</span>
-      <h3 className="text-[14px] font-semibold uppercase tracking-wide text-neutral-5">{title}</h3>
+      <h3 className="text-[13px] font-semibold uppercase tracking-wide text-neutral-5">{title}</h3>
       <div className="flex-1 border-t border-neutral-9/60" />
     </div>
   )
@@ -169,29 +169,29 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
           {/* ── Authentication ── */}
           <section>
             <SectionHeader icon={<IconKey size={15} />} title="Authentication" />
-            <label className="mb-1 block text-[14px] text-neutral-4">Claude Code Web Token</label>
+            <label className="mb-1 block text-[15px] text-neutral-4">Claude Code Web Token</label>
             <div className="flex gap-2">
               <input
                 type="password"
                 value={tokenInput}
                 onChange={e => { setTokenInput(e.target.value); setStatus('idle') }}
                 placeholder="Enter your auth token"
-                className="flex-1 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[14px] text-neutral-2 outline-none focus:border-primary-7"
+                className="flex-1 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
                 onKeyDown={e => e.key === 'Enter' && handleVerify()}
               />
               <button
                 onClick={handleVerify}
                 disabled={verifying || !tokenInput.trim()}
-                className="rounded bg-primary-8 px-3 py-2 text-[14px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50"
+                className="rounded bg-primary-8 px-3 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50"
               >
                 {verifying ? '...' : 'Verify'}
               </button>
             </div>
             {status === 'valid' && (
-              <p className="mt-1 text-[12px] text-success-6">Token verified successfully</p>
+              <p className="mt-1 text-[13px] text-success-6">Token verified successfully</p>
             )}
             {status === 'invalid' && (
-              <p className="mt-1 text-[12px] text-error-5">Invalid token</p>
+              <p className="mt-1 text-[13px] text-error-5">Invalid token</p>
             )}
           </section>
 
@@ -201,11 +201,11 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
 
             {/* Theme */}
             <div className="mb-4">
-              <label className="mb-1.5 block text-[14px] text-neutral-4">Theme</label>
+              <label className="mb-1.5 block text-[15px] text-neutral-4">Theme</label>
               <div className="flex gap-2">
                 <button
                   onClick={() => onUpdate({ theme: 'dark' })}
-                  className={`rounded px-4 py-1.5 text-[14px] font-medium transition-colors ${
+                  className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
                     settings.theme !== 'light'
                       ? 'bg-primary-8 text-neutral-1'
                       : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
@@ -215,7 +215,7 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
                 </button>
                 <button
                   onClick={() => onUpdate({ theme: 'light' })}
-                  className={`rounded px-4 py-1.5 text-[14px] font-medium transition-colors ${
+                  className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
                     settings.theme === 'light'
                       ? 'bg-primary-8 text-neutral-1'
                       : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
@@ -228,7 +228,7 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
 
             {/* Support LLM Provider */}
             <div className="mb-4">
-              <label className="mb-1.5 block text-[14px] text-neutral-4">
+              <label className="mb-1.5 block text-[15px] text-neutral-4">
                 <span className="flex items-center gap-1.5">
                   <IconBrain size={14} className="text-neutral-5" />
                   Support LLM Provider
@@ -241,7 +241,7 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
                   setSupportProviderState(provider)
                   setSupportProvider(settings.token, provider).catch(() => setSaveError('Failed to save provider setting'))
                 }}
-                className="w-full rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[14px] text-neutral-2 outline-none focus:border-primary-7"
+                className="w-full rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
               >
                 {(Object.keys(PROVIDER_LABELS) as SupportProvider[]).map(key => {
                   const isUnavailable = key !== 'auto' && !availableProviders.includes(key)
@@ -254,16 +254,16 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
               </select>
               {supportProvider !== 'auto' && (
                 <div className="mt-1.5 rounded border border-neutral-9 bg-neutral-10/50 px-3 py-1.5">
-                  <span className="text-[12px] text-neutral-5">Model: </span>
-                  <span className="text-[12px] font-mono text-neutral-3">{PROVIDER_MODELS[supportProvider]}</span>
+                  <span className="text-[13px] text-neutral-5">Model: </span>
+                  <span className="text-[13px] font-mono text-neutral-3">{PROVIDER_MODELS[supportProvider]}</span>
                 </div>
               )}
-              <p className="mt-1 text-[12px] text-neutral-6">Used for session naming and other background tasks</p>
+              <p className="mt-1 text-[13px] text-neutral-6">Used for session naming and other background tasks</p>
             </div>
 
             {/* Archived Session Retention */}
             <div>
-              <label className="mb-1.5 block text-[14px] text-neutral-4">
+              <label className="mb-1.5 block text-[15px] text-neutral-4">
                 <span className="flex items-center gap-1.5">
                   <IconArchive size={14} className="text-neutral-5" />
                   Archived Session Retention
@@ -280,11 +280,11 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
                     setRetentionDays(days)
                     setRetentionDaysApi(settings.token, days).catch(() => setSaveError('Failed to save retention setting'))
                   }}
-                  className="w-20 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[14px] text-neutral-2 outline-none focus:border-primary-7"
+                  className="w-20 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
                 />
-                <span className="text-[14px] text-neutral-5">days</span>
+                <span className="text-[15px] text-neutral-5">days</span>
               </div>
-              <p className="mt-1 text-[12px] text-neutral-6">Auto-delete archived sessions older than this</p>
+              <p className="mt-1 text-[13px] text-neutral-6">Auto-delete archived sessions older than this</p>
             </div>
           </section>
 
@@ -298,15 +298,15 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
                 webhookConfig.enabled ? (
                   <>
                     <IconCircleCheckFilled size={16} className="text-success-6" />
-                    <span className="text-[14px] text-success-5 font-medium">Active</span>
-                    <span className="text-[12px] text-neutral-6">
+                    <span className="text-[15px] text-success-5 font-medium">Active</span>
+                    <span className="text-[13px] text-neutral-6">
                       &middot; max {webhookConfig.maxConcurrentSessions} concurrent sessions
                     </span>
                   </>
                 ) : (
                   <>
                     <IconCircleXFilled size={16} className="text-neutral-6" />
-                    <span className="text-[14px] text-neutral-5">Disabled</span>
+                    <span className="text-[15px] text-neutral-5">Disabled</span>
                   </>
                 )
               ) : (
@@ -365,7 +365,7 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
                     Under <strong className="text-neutral-3">&ldquo;Which events?&rdquo;</strong>, select <strong className="text-neutral-3">Let me select individual events</strong> and check <strong className="text-neutral-3">Workflow runs</strong>
                   </span>
                 </div>
-                <p className="text-[12px] text-neutral-6 pt-1 border-t border-neutral-9/50">
+                <p className="text-[13px] text-neutral-6 pt-1 border-t border-neutral-9/50">
                   Failed workflow runs will automatically spawn a <IconRobot size={12} className="inline -mt-0.5" /> session that analyzes logs and proposes fixes.
                 </p>
               </div>
@@ -398,7 +398,7 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
 
             {/* Disabled hint */}
             {webhookConfig && !webhookConfig.enabled && (
-              <p className="mt-3 text-[12px] text-neutral-6">
+              <p className="mt-3 text-[13px] text-neutral-6">
                 Set <code className="bg-neutral-9/50 px-1 rounded text-neutral-4">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="bg-neutral-9/50 px-1 rounded text-neutral-4">GITHUB_WEBHOOK_SECRET</code> on the server to enable.
               </p>
             )}
@@ -409,14 +409,14 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
         <div className="flex-shrink-0 px-6 py-4 border-t border-neutral-10 flex items-center justify-between">
           <div>
             {saveError && (
-              <p className="text-[12px] text-error-5">{saveError}</p>
+              <p className="text-[13px] text-error-5">{saveError}</p>
             )}
           </div>
           <div className="flex gap-2">
             {settings.token && (
               <button
                 onClick={onClose}
-                className="rounded px-4 py-2 text-[14px] text-neutral-6 hover:text-neutral-2"
+                className="rounded px-4 py-2 text-[15px] text-neutral-6 hover:text-neutral-2"
               >
                 Cancel
               </button>
@@ -424,7 +424,7 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
             <button
               onClick={handleSave}
               disabled={!tokenInput.trim()}
-              className="rounded bg-primary-8 px-4 py-2 text-[14px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50"
+              className="rounded bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50"
             >
               Save
             </button>
