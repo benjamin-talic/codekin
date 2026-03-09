@@ -72,13 +72,13 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     },
   }))
 
-  // Auto-focus on waiting transition false → true
+  // Auto-focus on waiting transition false → true (skip on mobile to avoid keyboard popup)
   useEffect(() => {
-    if (isWaiting && !prevWaiting.current) {
+    if (isWaiting && !prevWaiting.current && !isMobile) {
       textareaRef.current?.focus()
     }
     prevWaiting.current = isWaiting
-  }, [isWaiting])
+  }, [isWaiting, isMobile])
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
