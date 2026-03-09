@@ -394,7 +394,7 @@ function RepoGroup({
     <div className="rounded-xl border border-neutral-8/80 bg-neutral-11/50 overflow-hidden">
       {/* Repo header */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-neutral-8/50 bg-neutral-11/40">
-        <span className="text-[14px] font-semibold text-neutral-2">{repoName}</span>
+        <span className="text-[15px] font-semibold text-neutral-2">{repoName}</span>
         <span className="text-[12px] text-neutral-6">{workflows.length}</span>
       </div>
       {/* Workflow rows */}
@@ -438,7 +438,7 @@ function ActivityRow({
   return (
     <div className="flex items-center gap-3 px-4 py-2 hover:bg-neutral-10/30 transition-colors rounded-md">
       <HealthDot status={run.status} />
-      <span className="text-[14px] font-medium text-neutral-2 min-w-0 truncate max-w-[140px]">
+      <span className="text-[15px] font-medium text-neutral-2 min-w-0 truncate max-w-[140px]">
         {repoNameFromRun(run)}
       </span>
       <span className="text-[13px] text-neutral-4">
@@ -475,7 +475,7 @@ function CustomWorkflowGuide() {
     <div className="mt-6 rounded-xl border border-neutral-8/40 bg-neutral-11/20">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-4 py-3 text-left text-[14px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors"
+        className="w-full flex items-center gap-2 px-4 py-3 text-left text-[15px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors"
       >
         {open
           ? <IconChevronDown size={14} stroke={2} className="text-neutral-5" />
@@ -640,7 +640,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setShowAddForm(true)}
-            className="flex items-center gap-1.5 rounded-md bg-accent-7 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-accent-6 transition-colors"
+            className="flex items-center gap-1.5 rounded-md bg-primary-8 px-3 py-1.5 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 transition-colors"
           >
             <IconPlus size={14} stroke={2} />
             New Workflow
@@ -668,7 +668,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
             </div>
             <button
               onClick={() => setShowAddForm(true)}
-              className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-accent-7 px-4 py-2 text-[13px] font-medium text-white hover:bg-accent-6 transition-colors"
+              className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 transition-colors"
             >
               <IconPlus size={14} stroke={2} />
               Create your first workflow
@@ -703,7 +703,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
           <div className="mt-6">
             <button
               onClick={() => setShowActivity(!showActivity)}
-              className="flex items-center gap-2 text-[14px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors mb-2"
+              className="flex items-center gap-2 text-[15px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors mb-2"
             >
               {showActivity
                 ? <IconChevronDown size={14} stroke={2} />

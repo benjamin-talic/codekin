@@ -198,7 +198,7 @@ function StepKind({
                       : 'border-neutral-7 bg-neutral-10 hover:border-neutral-6'
                   }`}
                 >
-                  <span className={`block text-[14px] font-medium ${
+                  <span className={`block text-[15px] font-medium ${
                     selectedKind === k.kind ? 'text-accent-2' : 'text-neutral-2'
                   }`}>
                     {k.name}
@@ -368,7 +368,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-1">
-          <h2 className="text-[17px] font-semibold text-neutral-1">New Workflow</h2>
+          <h2 className="text-[19px] font-semibold text-neutral-1">New Workflow</h2>
           <button onClick={onClose} className="rounded p-1 text-neutral-4 hover:text-neutral-1 hover:bg-neutral-9">
             <IconX size={16} stroke={2} />
           </button>
@@ -418,7 +418,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
             <button
               type="button"
               onClick={handleBack}
-              className="flex items-center gap-1.5 rounded-md border border-neutral-7 bg-neutral-10 px-4 py-2 text-[14px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
+              className="flex items-center gap-1.5 rounded-md border border-neutral-7 bg-neutral-10 px-4 py-2 text-[15px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
             >
               <IconArrowLeft size={14} stroke={2} />
               Back
@@ -427,7 +427,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-neutral-7 bg-neutral-10 px-4 py-2 text-[14px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
+              className="rounded-md border border-neutral-7 bg-neutral-10 px-4 py-2 text-[15px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
             >
               Cancel
             </button>
@@ -440,7 +440,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
               type="button"
               onClick={handleNext}
               disabled={!canNext()}
-              className="flex items-center gap-1.5 rounded-md bg-accent-7 px-4 py-2 text-[14px] font-medium text-white hover:bg-accent-6 disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-40 transition-colors"
             >
               Next
               <IconArrowRight size={14} stroke={2} />
@@ -450,7 +450,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
               type="button"
               onClick={handleSubmit}
               disabled={saving}
-              className="flex items-center gap-1.5 rounded-md bg-accent-7 px-4 py-2 text-[14px] font-medium text-white hover:bg-accent-6 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50 transition-colors"
             >
               {saving ? (
                 <>

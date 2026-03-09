@@ -602,7 +602,7 @@ function RepoSection({
                     <span className="text-[13px] text-neutral-6 tabular-nums flex-shrink-0">{compactAge(s.created)}</span>
                     <span
                       onClick={e => { e.stopPropagation(); startEditing(s) }}
-                      className="cursor-pointer flex-shrink-0 text-transparent group-hover:text-neutral-6 hover:text-neutral-2! transition-colors"
+                      className="cursor-pointer flex-shrink-0 text-transparent group-hover:text-neutral-5 hover:text-neutral-2! transition-colors"
                       title="Rename session"
                     >
                       <IconPencil size={13} stroke={2} />
