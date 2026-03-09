@@ -235,7 +235,7 @@ app.use((_req, res, next) => {
   res.header('X-XSS-Protection', '1; mode=block')
   res.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   res.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
-  res.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws:; img-src 'self' data:; font-src 'self'")
+  res.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws:; img-src 'self' data: https:; font-src 'self'")
   if (process.env.NODE_ENV === 'production') {
     res.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
   }
