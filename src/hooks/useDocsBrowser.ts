@@ -2,16 +2,30 @@
  * Hook for the docs browser feature.
  *
  * Manages state for the file picker, selected file, content loading,
- * raw/rendered toggle, and open/close lifecycle.
+ * raw/rendered toggle, starred docs, and open/close lifecycle.
  */
 
 import { useState, useCallback } from 'react'
 
 const BASE = '/cc'
+const STARRED_KEY = 'codekin-starred-docs'
 
 interface DocFile {
   path: string
   pinned: boolean
+}
+
+/** Load starred doc paths from localStorage. Keyed by repo dir. */
+function loadStarred(): Record<string, string[]> {
+  try {
+    return JSON.parse(localStorage.getItem(STARRED_KEY) || '{}')
+  } catch {
+    return {}
+  }
+}
+
+function persistStarred(starred: Record<string, string[]>) {
+  localStorage.setItem(STARRED_KEY, JSON.stringify(starred))
 }
 
 interface UseDocsBrowserReturn {
@@ -46,6 +60,13 @@ interface UseDocsBrowserReturn {
   closePicker: () => void
   /** The repo working dir for the open picker. */
   pickerRepoDir: string | null
+
+  /** Starred docs — persisted per-repo in localStorage. */
+  starredDocs: string[]
+  /** Whether the currently viewed file is starred. */
+  isCurrentFileStarred: boolean
+  /** Toggle star on the currently viewed file. */
+  toggleStarCurrentFile: () => void
 }
 
 export function useDocsBrowser(): UseDocsBrowserReturn {
@@ -60,6 +81,8 @@ export function useDocsBrowser(): UseDocsBrowserReturn {
   const [pickerFiles, setPickerFiles] = useState<DocFile[]>([])
   const [pickerLoading, setPickerLoading] = useState(false)
   const [pickerRepoDir, setPickerRepoDir] = useState<string | null>(null)
+
+  const [starred, setStarred] = useState<Record<string, string[]>>(loadStarred)
 
   const openPicker = useCallback(async (repoDir: string, token: string) => {
     setPickerRepoDir(repoDir)
@@ -119,6 +142,25 @@ export function useDocsBrowser(): UseDocsBrowserReturn {
     setRawMode(prev => !prev)
   }, [])
 
+  const currentRepoStarred = repoWorkingDir ? (starred[repoWorkingDir] ?? []) : []
+  const isCurrentFileStarred = selectedFile !== null && currentRepoStarred.includes(selectedFile)
+
+  const toggleStarCurrentFile = useCallback(() => {
+    if (!repoWorkingDir || !selectedFile) return
+    setStarred(prev => {
+      const repoStarred = prev[repoWorkingDir] ?? []
+      const next = repoStarred.includes(selectedFile)
+        ? repoStarred.filter(f => f !== selectedFile)
+        : [...repoStarred, selectedFile]
+      const updated = { ...prev, [repoWorkingDir]: next }
+      persistStarred(updated)
+      return updated
+    })
+  }, [repoWorkingDir, selectedFile])
+
+  /** Starred docs for the picker's currently open repo. */
+  const pickerStarred = pickerRepoDir ? (starred[pickerRepoDir] ?? []) : []
+
   return {
     isOpen: selectedFile !== null,
     selectedFile,
@@ -136,5 +178,8 @@ export function useDocsBrowser(): UseDocsBrowserReturn {
     openPicker,
     closePicker,
     pickerRepoDir,
+    starredDocs: pickerStarred,
+    isCurrentFileStarred,
+    toggleStarCurrentFile,
   }
 }
