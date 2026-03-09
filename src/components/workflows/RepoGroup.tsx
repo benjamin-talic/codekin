@@ -45,7 +45,7 @@ export function RepoGroup({
   return (
     <div className="rounded-xl border border-neutral-8/80 bg-neutral-11/50 overflow-hidden">
       {/* Repo header */}
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-neutral-8/50 bg-neutral-11/40">
+      <div className="flex items-baseline gap-2 px-4 py-2.5 border-b border-neutral-8/50 bg-neutral-11/40">
         <span className="text-[15px] font-semibold text-neutral-2">{repoName}</span>
         <span className="text-[13px] text-neutral-6">{workflows.length}</span>
       </div>
