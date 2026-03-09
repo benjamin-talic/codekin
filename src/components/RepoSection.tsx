@@ -249,7 +249,7 @@ export function RepoSection({
                     className="flex-1 min-w-0 bg-neutral-10 border border-neutral-7 rounded px-1 py-0 text-[15px] text-neutral-1 outline-none focus:border-primary-6"
                   />
                 ) : (
-                  <span className="flex-1 truncate">{sessionDisplayName(s)}</span>
+                  <span className="flex-1 truncate font-normal">{sessionDisplayName(s)}</span>
                 )}
                 {!isEditing && (
                   <>
