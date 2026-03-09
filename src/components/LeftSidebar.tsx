@@ -11,7 +11,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   IconBook, IconSettings as IconSettingsGear,
   IconLogout, IconSun, IconMoon,
-  IconChevronRight, IconChevronLeft, IconSparkles,
+  IconChevronRight, IconChevronLeft, IconSparkles, IconX,
 } from '@tabler/icons-react'
 import type { Session, Module, Repo } from '../types'
 import type { RepoGroup } from '../hooks/useRepos'
@@ -280,7 +280,15 @@ export function LeftSidebar({
           <AppIcon size={24} className="text-primary-7" />
         </div>
         <span className="flex-1 text-[17px] font-semibold text-neutral-2 truncate">Codekin</span>
-        {!isMobile && (
+        {isMobile ? (
+          <button
+            onClick={onMobileClose}
+            className="rounded p-1 text-neutral-3 hover:text-neutral-2 hover:bg-neutral-6 transition-colors flex-shrink-0"
+            title="Close menu"
+          >
+            <IconX size={18} stroke={2} />
+          </button>
+        ) : (
           <button
             onClick={() => setCollapsed(true)}
             className="rounded p-1 text-neutral-3 hover:text-neutral-2 hover:bg-neutral-6 transition-colors flex-shrink-0 opacity-0 group-hover/header:opacity-100"
