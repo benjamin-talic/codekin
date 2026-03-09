@@ -36,17 +36,14 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@ai-sdk/groq": "^3.0.29",
     "@tabler/icons-react": "^3.37.1",
     "@tailwindcss/vite": "^4.2.0",
-    "ai": "^6.0.116",
     "cmdk": "^1.1.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.0",
     "remark-gfm": "^4.0.1",
-    "better-sqlite3": "^12.6.2",
     "tailwindcss": "^4.2.0"
   },
   "devDependencies": {
@@ -55,7 +52,6 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/react-syntax-highlighter": "^15.5.13",
-    "@types/better-sqlite3": "^7.6.13",
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.0.18",
     "eslint": "^9.39.1",
