@@ -34,7 +34,7 @@ export class ApprovalManager {
   }
 
   /** Add an auto-approval rule for a repo and persist. */
-  private addRepoApproval(workingDir: string, opts: { tool?: string; command?: string; pattern?: string }): void {
+  addRepoApproval(workingDir: string, opts: { tool?: string; command?: string; pattern?: string }): void {
     const entry = this.getRepoApprovalEntry(workingDir)
     if (opts.tool) entry.tools.add(opts.tool)
     if (opts.command) entry.commands.add(opts.command)
