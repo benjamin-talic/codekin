@@ -371,7 +371,11 @@ export default function App() {
 
   // Docs browser: handle browse docs from sidebar
   const handleBrowseDocs = useCallback((workingDir: string) => {
-    docsBrowser.openPicker(workingDir, settings.token)
+    if (docsBrowser.pickerOpen && docsBrowser.pickerRepoDir === workingDir) {
+      docsBrowser.closePicker()
+    } else {
+      docsBrowser.openPicker(workingDir, settings.token)
+    }
   }, [docsBrowser, settings.token])
 
   // Docs browser: handle file selection from picker
