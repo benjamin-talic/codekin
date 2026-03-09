@@ -185,7 +185,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           onChange={handleFileChange}
           className="hidden"
         />
-        <div className="flex flex-shrink-0 flex-row items-end gap-1 pb-0.5">
+        <div className={`flex flex-shrink-0 flex-row items-end ${isMobile ? 'gap-2' : 'gap-1'} pb-0.5`}>
           {currentModel && onModelChange && (
             <div className="relative">
               <button
@@ -216,10 +216,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               <button
                 onClick={() => setSkillMenuOpen(!skillMenuOpen)}
                 disabled={disabled}
-                className="flex items-center justify-center rounded p-1 text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30"
+                className={`flex items-center justify-center rounded ${isMobile ? 'p-2.5 min-w-[44px] min-h-[44px]' : 'p-1'} text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30`}
                 title="Claude Skills"
               >
-                <IconTerminal2 size={20} stroke={2} />
+                <IconTerminal2 size={isMobile ? 24 : 20} stroke={2} />
               </button>
               {skillMenuOpen && (
                 <SkillMenu
@@ -237,22 +237,22 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           <button
             onClick={handleFileSelect}
             disabled={disabled}
-            className="flex items-center justify-center rounded p-1 text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30"
+            className={`flex items-center justify-center rounded ${isMobile ? 'p-2.5 min-w-[44px] min-h-[44px]' : 'p-1'} text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30`}
             title="Attach files"
           >
-            <IconPaperclip size={20} stroke={2} />
+            <IconPaperclip size={isMobile ? 24 : 20} stroke={2} />
           </button>
           <button
             onClick={handleSend}
             disabled={disabled || (!value.trim() && pendingFiles.length === 0)}
-            className={`flex items-center justify-center rounded p-1 transition-colors disabled:opacity-30 ${
+            className={`flex items-center justify-center rounded ${isMobile ? 'p-2.5 min-w-[44px] min-h-[44px]' : 'p-1'} transition-colors disabled:opacity-30 ${
               value.trim() || pendingFiles.length > 0
                 ? 'bg-primary-8 text-neutral-1 hover:bg-primary-7'
                 : 'text-neutral-5'
             }`}
             title="Send (Enter)"
           >
-            <IconSend size={20} stroke={2} />
+            <IconSend size={isMobile ? 24 : 20} stroke={2} />
           </button>
         </div>
       </div>
