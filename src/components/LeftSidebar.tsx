@@ -444,7 +444,7 @@ export function LeftSidebar({
         onClick={onMobileClose}
       >
         <div
-          className={`h-full transition-transform duration-200 ease-out ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
+          className={`h-full w-fit transition-transform duration-200 ease-out ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
           onClick={e => e.stopPropagation()}
         >
           {sidebarContent}
