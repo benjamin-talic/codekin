@@ -32,6 +32,7 @@ import { createAuthRouter } from './auth-routes.js'
 import { createSessionRouter } from './session-routes.js'
 import { createWebhookRouter } from './webhook-routes.js'
 import { createUploadRouter } from './upload-routes.js'
+import { createDocsRouter } from './docs-routes.js'
 import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST } from './config.js'
 
 // ---------------------------------------------------------------------------
@@ -244,6 +245,7 @@ app.use(createAuthRouter(verifyToken, extractToken, sessions, claudeAvailable, c
 app.use(createSessionRouter(verifyToken, extractToken, sessions))
 app.use(createWebhookRouter(verifyToken, extractToken, webhookHandler, stepflowHandler))
 app.use(createUploadRouter(verifyToken, extractToken))
+app.use(createDocsRouter(verifyToken, extractToken))
 app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
