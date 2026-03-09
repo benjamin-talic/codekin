@@ -2,12 +2,12 @@
  * DocsFilePicker — inline scrollable list of .md files for a repo.
  *
  * Rendered inside the sidebar (like archived sessions), with a search filter
- * and scrollable list capped at ~10 visible items. Pinned files (CLAUDE.md,
- * README.md) appear first, separated by a divider from the rest.
+ * and scrollable list capped at ~10 visible items. Starred files appear first,
+ * then pinned files (CLAUDE.md, README.md), separated by dividers from the rest.
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { IconLoader2, IconFileText } from '@tabler/icons-react'
+import { IconLoader2, IconFileText, IconStarFilled } from '@tabler/icons-react'
 
 interface DocFile {
   path: string
@@ -17,11 +17,12 @@ interface DocFile {
 interface Props {
   files: DocFile[]
   loading: boolean
+  starredDocs: string[]
   onSelect: (filePath: string) => void
   onClose: () => void
 }
 
-export function DocsFilePicker({ files, loading, onSelect, onClose }: Props) {
+export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose }: Props) {
   const [search, setSearch] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
@@ -33,12 +34,16 @@ export function DocsFilePicker({ files, loading, onSelect, onClose }: Props) {
     return () => document.removeEventListener('keydown', handleKey)
   }, [onClose])
 
+  const starredSet = new Set(starredDocs)
+
   const filtered = search.trim()
     ? files.filter(f => f.path.toLowerCase().includes(search.toLowerCase()))
     : files
 
-  const pinned = filtered.filter(f => f.pinned)
-  const rest = filtered.filter(f => !f.pinned)
+  const starred = filtered.filter(f => starredSet.has(f.path))
+  const pinned = filtered.filter(f => f.pinned && !starredSet.has(f.path))
+  const rest = filtered.filter(f => !f.pinned && !starredSet.has(f.path))
+  const hasGroups = (starred.length > 0 ? 1 : 0) + (pinned.length > 0 ? 1 : 0) + (rest.length > 0 ? 1 : 0) > 1
 
   return (
     <div ref={ref} className="mt-1 border-t border-neutral-8/30 pt-1">
@@ -67,6 +72,19 @@ export function DocsFilePicker({ files, loading, onSelect, onClose }: Props) {
               <div className="pl-10 pr-2 py-1 text-[13px] text-neutral-5">No matching files</div>
             ) : (
               <>
+                {starred.map(f => (
+                  <button
+                    key={f.path}
+                    onClick={() => onSelect(f.path)}
+                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-[15px] text-neutral-2 font-medium hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors cursor-pointer rounded-md"
+                  >
+                    <IconStarFilled size={13} className="flex-shrink-0 text-primary-5" />
+                    <span className="flex-1 truncate">{f.path}</span>
+                  </button>
+                ))}
+                {starred.length > 0 && hasGroups && (
+                  <div className="border-t border-neutral-8/30 my-0.5 mx-10" />
+                )}
                 {pinned.map(f => (
                   <button
                     key={f.path}

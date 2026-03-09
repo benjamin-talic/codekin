@@ -423,6 +423,7 @@ export default function App() {
         docsPickerLoading={docsBrowser.pickerLoading}
         onDocsPickerSelect={handleSelectDocFile}
         onDocsPickerClose={docsBrowser.closePicker}
+        docsStarredDocs={docsBrowser.starredDocs}
       />
 
       {/* Main area */}
@@ -461,7 +462,9 @@ export default function App() {
               loading={docsBrowser.loading}
               error={docsBrowser.error}
               rawMode={docsBrowser.rawMode}
+              isStarred={docsBrowser.isCurrentFileStarred}
               onToggleRaw={docsBrowser.toggleRawMode}
+              onToggleStar={docsBrowser.toggleStarCurrentFile}
               onClose={docsBrowser.close}
             />
             {/* Input bar in docs mode */}

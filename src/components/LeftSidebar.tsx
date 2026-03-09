@@ -103,6 +103,7 @@ interface Props {
   docsPickerLoading?: boolean
   onDocsPickerSelect?: (filePath: string) => void
   onDocsPickerClose?: () => void
+  docsStarredDocs?: string[]
 }
 
 // --------------------------------------------------------------------------
@@ -144,6 +145,7 @@ export function LeftSidebar({
   docsPickerLoading,
   onDocsPickerSelect,
   onDocsPickerClose,
+  docsStarredDocs,
 }: Props) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('codekin-left-sidebar-collapsed') === 'true')
   const [width, setWidth] = useState(() => {
@@ -347,6 +349,7 @@ export function LeftSidebar({
             docsPickerLoading={docsPickerLoading}
             onDocsPickerSelect={onDocsPickerSelect}
             onDocsPickerClose={onDocsPickerClose}
+            docsStarredDocs={docsStarredDocs}
           />
         ))}
 

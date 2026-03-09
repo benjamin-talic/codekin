@@ -1,11 +1,11 @@
 /**
  * DocsBrowser — full document view replacing the message feed.
  *
- * Shows a nav bar with back button, file path, and raw/rendered toggle,
+ * Shows a nav bar with back button, file path, star toggle, and raw/rendered toggle,
  * followed by the rendered markdown content or raw source.
  */
 
-import { IconChevronLeft, IconLoader2 } from '@tabler/icons-react'
+import { IconChevronLeft, IconLoader2, IconStar, IconStarFilled } from '@tabler/icons-react'
 import { MarkdownRenderer } from './MarkdownRenderer'
 
 interface Props {
@@ -15,7 +15,9 @@ interface Props {
   loading: boolean
   error: string | null
   rawMode: boolean
+  isStarred: boolean
   onToggleRaw: () => void
+  onToggleStar: () => void
   onClose: () => void
 }
 
@@ -26,7 +28,9 @@ export function DocsBrowser({
   loading,
   error,
   rawMode,
+  isStarred,
   onToggleRaw,
+  onToggleStar,
   onClose,
 }: Props) {
   return (
@@ -43,6 +47,13 @@ export function DocsBrowser({
         <span className="docs-header-path flex-1 text-[13px] text-center truncate">
           {repoName} <span className="docs-header-slash">/</span> {filePath}
         </span>
+        <button
+          onClick={onToggleStar}
+          className={`docs-header-star transition-colors cursor-pointer ${isStarred ? 'is-starred' : ''}`}
+          title={isStarred ? 'Remove from favourites' : 'Add to favourites'}
+        >
+          {isStarred ? <IconStarFilled size={15} /> : <IconStar size={15} />}
+        </button>
         <button
           onClick={onToggleRaw}
           className={`docs-header-toggle rounded px-2 py-0.5 text-[13px] transition-colors cursor-pointer ${

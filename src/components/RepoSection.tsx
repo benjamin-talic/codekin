@@ -95,6 +95,7 @@ export interface RepoSectionProps {
   docsPickerLoading?: boolean
   onDocsPickerSelect?: (filePath: string) => void
   onDocsPickerClose?: () => void
+  docsStarredDocs?: string[]
 }
 
 // --------------------------------------------------------------------------
@@ -123,6 +124,7 @@ export function RepoSection({
   docsPickerLoading,
   onDocsPickerSelect,
   onDocsPickerClose,
+  docsStarredDocs,
 }: RepoSectionProps) {
   const [expanded, setExpanded] = useState(isActive)
   const [approvalsOpen, setApprovalsOpen] = useState(false)
@@ -306,6 +308,7 @@ export function RepoSection({
             <DocsFilePicker
               files={docsPickerFiles ?? []}
               loading={docsPickerLoading ?? false}
+              starredDocs={docsStarredDocs ?? []}
               onSelect={onDocsPickerSelect}
               onClose={onDocsPickerClose}
             />

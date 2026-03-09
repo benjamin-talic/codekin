@@ -690,6 +690,15 @@ html, body, #root {
   color: var(--color-neutral-10);
   background: var(--color-neutral-4);
 }
+.docs-header-star {
+  color: var(--color-neutral-6);
+}
+.docs-header-star:hover {
+  color: var(--color-primary-5);
+}
+.docs-header-star.is-starred {
+  color: var(--color-primary-5);
+}
 .docs-header-toggle.is-active {
   background: var(--color-neutral-5);
   color: var(--color-neutral-11);
