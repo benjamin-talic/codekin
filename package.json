@@ -47,7 +47,6 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
-    "react-syntax-highlighter": "^16.1.0",
     "remark-gfm": "^4.0.1",
     "tailwindcss": "^4.2.0"
   },
@@ -57,7 +56,6 @@
     "@types/node": "^25.0.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.0.18",
     "better-sqlite3": "^12.6.2",
