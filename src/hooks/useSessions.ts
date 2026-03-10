@@ -66,7 +66,7 @@ export function useSessions(token: string) {
   useEffect(() => {
     if (!token) return
     void refresh()
-    intervalRef.current = setInterval(refresh, 10000)
+    intervalRef.current = setInterval(() => void refresh(), 10000)
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
