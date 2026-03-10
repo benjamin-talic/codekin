@@ -14,7 +14,7 @@ Web UI for Claude Code sessions — multi-session support, WebSocket streaming, 
 **One-liner:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Multiplier-Labs/codekin/main/install.sh | bash
+curl -fsSL codekin.ai/install.sh | bash
 ```
 
 This will:
@@ -51,7 +51,7 @@ codekin setup --regenerate      # Generate a new auth token
 Re-run the install script — it's idempotent and will upgrade to the latest version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Multiplier-Labs/codekin/main/install.sh | bash
+curl -fsSL codekin.ai/install.sh | bash
 ```
 
 Or upgrade manually:
