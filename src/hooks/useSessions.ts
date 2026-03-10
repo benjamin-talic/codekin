@@ -65,7 +65,7 @@ export function useSessions(token: string) {
   // Poll every 10s
   useEffect(() => {
     if (!token) return
-    refresh()
+    void refresh()
     intervalRef.current = setInterval(refresh, 10000)
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
