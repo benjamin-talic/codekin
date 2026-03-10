@@ -129,7 +129,7 @@ async function cmdSetup({ regenerate = false } = {}) {
   if (existingToken && !regenerate) {
     console.log('Auth token: (already exists, use --regenerate to replace)')
   } else {
-    const token = randomBytes(32).toString('hex')
+    const token = randomBytes(16).toString('base64url')
     writeFileSync(TOKEN_FILE, token + '\n', { mode: 0o600 })
     console.log('Auth token: generated')
   }
