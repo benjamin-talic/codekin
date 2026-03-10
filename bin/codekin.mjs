@@ -8,6 +8,7 @@
  *   codekin service install        Install + start background service
  *   codekin service uninstall      Remove background service
  *   codekin service status         Show service status
+ *   codekin config                  Update API keys and settings
  *   codekin token                  Print access URL with auth token
  *   codekin uninstall              Remove Codekin entirely
  */
@@ -423,6 +424,8 @@ if (cmd === 'start') {
   cmdStart()
 } else if (cmd === 'setup') {
   await cmdSetup({ regenerate: args.includes('--regenerate') })
+} else if (cmd === 'config') {
+  await cmdSetup()
 } else if (cmd === 'token') {
   cmdToken()
 } else if (cmd === 'uninstall') {
@@ -441,6 +444,7 @@ Usage:
   codekin start                   Run server in foreground
   codekin setup                   First-time setup wizard
   codekin setup --regenerate      Regenerate auth token
+  codekin config                  Update API keys and settings
   codekin service install         Install + start background service
   codekin service uninstall       Remove background service
   codekin service status          Show service status
