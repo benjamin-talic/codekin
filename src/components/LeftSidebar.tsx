@@ -71,7 +71,6 @@ interface Props {
   activeSessionId: string | null
   activeWorkingDir: string | null
   waitingSessions: Record<string, boolean>
-  usagePercent: number | null
   tentativeQueues: Record<string, { text: string; files: File[] }[]>
   groups: RepoGroup[]
   globalModules: Module[]
@@ -109,7 +108,6 @@ export function LeftSidebar({
   activeSessionId,
   activeWorkingDir,
   waitingSessions,
-  usagePercent,
   tentativeQueues,
   groups,
   globalModules,
@@ -359,6 +357,7 @@ export function LeftSidebar({
             onDocsPickerSelect={docsPicker.onSelect}
             onDocsPickerClose={docsPicker.onClose}
             docsStarredDocs={docsPicker.starredDocs}
+            isMobile={isMobile}
           />
         ))}
 
@@ -384,44 +383,31 @@ export function LeftSidebar({
 
       {/* Bottom toolbar */}
       <div className="flex flex-col border-t border-neutral-8/30 flex-shrink-0">
-        {usagePercent !== null && (
-          <div className="flex items-center gap-2 px-3 py-1.5" title={`Weekly usage: ${Math.round(usagePercent)}%`}>
-            <div className="flex-1 h-1.5 rounded-full bg-neutral-9 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${usagePercent >= 80 ? 'bg-error-7' : usagePercent >= 50 ? 'bg-warning-6' : 'bg-success-7'}`}
-                style={{ width: `${Math.min(100, usagePercent)}%` }}
-              />
-            </div>
-            <span className={`text-[11px] tabular-nums ${usagePercent >= 80 ? 'text-error-7' : 'text-neutral-5'}`}>
-              {Math.round(usagePercent)}%
-            </span>
-          </div>
-        )}
-        <div className="flex items-center gap-0.5 px-2 py-2">
+        <div className={`flex items-center gap-0.5 px-2 ${isMobile ? 'gap-1 py-3' : 'py-2'}`}>
           <div className="flex items-center justify-center px-1 py-1" title={connState.charAt(0).toUpperCase() + connState.slice(1)}>
             <span className={`inline-block h-2 w-2 rounded-full ${connDotColor}`} />
           </div>
           <button
             onClick={onSettingsOpen}
-            className="flex items-center gap-1 rounded px-1.5 py-1 text-[13px] text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
+            className={`flex items-center gap-1 rounded text-[13px] text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
             title="Settings"
           >
-            <IconSettingsGear size={20} stroke={2} />
+            <IconSettingsGear size={isMobile ? 24 : 20} stroke={2} />
           </button>
           <div className="flex-1" />
           <button
             onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="rounded px-1.5 py-1 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors"
+            className={`rounded text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
-            {theme === 'dark' ? <IconSun size={20} stroke={2} /> : <IconMoon size={20} stroke={2} />}
+            {theme === 'dark' ? <IconSun size={isMobile ? 24 : 20} stroke={2} /> : <IconMoon size={isMobile ? 24 : 20} stroke={2} />}
           </button>
           <button
             onClick={() => { window.location.href = '/authelia/logout' }}
-            className="rounded px-1.5 py-1 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors"
+            className={`rounded text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
             title="Logout"
           >
-            <IconLogout size={20} stroke={2} />
+            <IconLogout size={isMobile ? 24 : 20} stroke={2} />
           </button>
         </div>
       </div>

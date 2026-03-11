@@ -128,8 +128,5 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       send({ type: 'pong' })
       break
 
-    case 'get_usage':
-      void sessions.checkUsage()
-      break
   }
 }
