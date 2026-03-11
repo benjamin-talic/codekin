@@ -17,6 +17,8 @@
  */
 
 import { randomUUID } from 'crypto'
+import { execFile } from 'child_process'
+import { homedir } from 'os'
 import type { WebSocket } from 'ws'
 import { ClaudeProcess } from './claude-process.js'
 import { SessionArchive } from './session-archive.js'
@@ -79,7 +81,7 @@ function queryClaudeUsage(): Promise<{ percentage: number; raw: string } | null>
         USER: process.env.USER || 'dev',
         LANG: process.env.LANG || 'en_US.UTF-8',
       },
-    }, (err, stdout) => {
+    }, (err: Error | null, stdout: string) => {
       if (err) {
         console.warn('[usage-check] Failed to query Claude usage:', err.message)
         resolve(null)
