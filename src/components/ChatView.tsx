@@ -135,7 +135,7 @@ function AssistantMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'assis
               )
             },
             a({ href, children, ...props }) {
-              const safeHref = href && /^javascript:/i.test(href) ? '#' : href
+              const safeHref = href && /^(https?:|mailto:|\/|#)/i.test(href) ? href : '#'
               return <a href={safeHref} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
             },
             img({ src, alt, ...props }) {
@@ -268,7 +268,9 @@ function ToolActivity({ run, fontSize }: { run: ToolRun; fontSize: number }) {
 
 function ImageInline({ msg }: { msg: ChatMessage & { type: 'image' } }) {
   const [expanded, setExpanded] = useState(false)
-  const src = `data:${msg.mediaType};base64,${msg.base64}`
+  const allowedMediaTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'])
+  const mediaType = allowedMediaTypes.has(msg.mediaType) ? msg.mediaType : 'image/png'
+  const src = `data:${mediaType};base64,${msg.base64}`
   return (
     <div className="pl-4 py-1">
       <img

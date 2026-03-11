@@ -160,7 +160,7 @@ export class SessionArchive {
       created: row.created,
       archivedAt: row.archived_at,
       messageCount: row.message_count,
-      outputHistory: JSON.parse(row.output_history),
+      outputHistory: (() => { try { return JSON.parse(row.output_history) } catch { return [] } })(),
     }
   }
 
