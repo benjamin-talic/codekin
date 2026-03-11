@@ -18,7 +18,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { execFileSync } from 'child_process'
-import { randomUUID, timingSafeEqual } from 'crypto'
+import { createHash, randomUUID, timingSafeEqual } from 'crypto'
 import { verifySessionToken } from './crypto-utils.js'
 import { SessionManager } from './session-manager.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
@@ -69,10 +69,9 @@ if (authToken) {
 function verifyToken(token: string | undefined): boolean {
   if (!authToken) return false  // No auth configured — fail closed
   if (!token) return false
-  // Timing-safe comparison to prevent timing attacks
-  const a = Buffer.from(authToken)
-  const b = Buffer.from(token)
-  if (a.length !== b.length) return false
+  // Timing-safe comparison — hash both to fixed length to avoid leaking length info
+  const a = createHash('sha256').update(authToken).digest()
+  const b = createHash('sha256').update(token).digest()
   return timingSafeEqual(a, b)
 }
 
@@ -350,6 +349,12 @@ wss.on('connection', (ws: WebSocket, req) => {
 
   const handlerCtx = { ws, sessions, clientSessions, send }
 
+  // Post-auth message rate limiting: max 60 messages per second
+  const MSG_RATE_LIMIT = 60
+  const MSG_RATE_WINDOW_MS = 1000
+  let msgCount = 0
+  let msgWindowStart = Date.now()
+
   ws.on('message', (raw) => {
     let msg: WsClientMessage
     try {
@@ -369,6 +374,16 @@ wss.on('connection', (ws: WebSocket, req) => {
       clearTimeout(authTimeout)
       send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet })
       return
+    }
+
+    // Rate limit post-auth messages
+    const now = Date.now()
+    if (now - msgWindowStart > MSG_RATE_WINDOW_MS) {
+      msgCount = 0
+      msgWindowStart = now
+    }
+    if (++msgCount > MSG_RATE_LIMIT) {
+      return // silently drop excess messages
     }
 
     handleWsMessage(msg, handlerCtx)

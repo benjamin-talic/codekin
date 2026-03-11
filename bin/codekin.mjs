@@ -221,8 +221,9 @@ function buildPlist() {
   // Inject PATH and HOME so launchd service can find gh, node, etc.
   if (!envVars.PATH && process.env.PATH) envVars.PATH = process.env.PATH
   if (!envVars.HOME) envVars.HOME = homedir()
+  const escXml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const envEntries = Object.entries(envVars)
-    .map(([k, v]) => `\t\t<key>${k}</key>\n\t\t<string>${v}</string>`)
+    .map(([k, v]) => `\t\t<key>${escXml(k)}</key>\n\t\t<string>${escXml(v)}</string>`)
     .join('\n')
 
   return `<?xml version="1.0" encoding="UTF-8"?>
