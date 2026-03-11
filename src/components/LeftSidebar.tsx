@@ -383,31 +383,31 @@ export function LeftSidebar({
 
       {/* Bottom toolbar */}
       <div className="flex flex-col border-t border-neutral-8/30 flex-shrink-0">
-        <div className="flex items-center gap-0.5 px-2 py-2">
+        <div className={`flex items-center gap-0.5 px-2 ${isMobile ? 'gap-1 py-3' : 'py-2'}`}>
           <div className="flex items-center justify-center px-1 py-1" title={connState.charAt(0).toUpperCase() + connState.slice(1)}>
             <span className={`inline-block h-2 w-2 rounded-full ${connDotColor}`} />
           </div>
           <button
             onClick={onSettingsOpen}
-            className="flex items-center gap-1 rounded px-1.5 py-1 text-[13px] text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
+            className={`flex items-center gap-1 rounded text-[13px] text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
             title="Settings"
           >
-            <IconSettingsGear size={20} stroke={2} />
+            <IconSettingsGear size={isMobile ? 24 : 20} stroke={2} />
           </button>
           <div className="flex-1" />
           <button
             onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="rounded px-1.5 py-1 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors"
+            className={`rounded text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
-            {theme === 'dark' ? <IconSun size={20} stroke={2} /> : <IconMoon size={20} stroke={2} />}
+            {theme === 'dark' ? <IconSun size={isMobile ? 24 : 20} stroke={2} /> : <IconMoon size={isMobile ? 24 : 20} stroke={2} />}
           </button>
           <button
             onClick={() => { window.location.href = '/authelia/logout' }}
-            className="rounded px-1.5 py-1 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors"
+            className={`rounded text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
             title="Logout"
           >
-            <IconLogout size={20} stroke={2} />
+            <IconLogout size={isMobile ? 24 : 20} stroke={2} />
           </button>
         </div>
       </div>
