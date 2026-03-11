@@ -8,7 +8,6 @@
  */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import type { ChatMessage } from './types'
 import { useSettings } from './hooks/useSettings'
 import { useRepos } from './hooks/useRepos'
 import { useSessions } from './hooks/useSessions'
@@ -16,10 +15,10 @@ import { useChatSocket } from './hooks/useChatSocket'
 import { usePageVisibility } from './hooks/usePageVisibility'
 import { useRouter } from './hooks/useRouter'
 import { useTentativeQueue } from './hooks/useTentativeQueue'
-import { useSessionOrchestration, groupKey } from './hooks/useSessionOrchestration'
+import { useSessionOrchestration } from './hooks/useSessionOrchestration'
 import { useDocsBrowser } from './hooks/useDocsBrowser'
 import { useIsMobile } from './hooks/useIsMobile'
-import { uploadAndBuildMessage } from './lib/ccApi'
+import { useSendMessage } from './hooks/useSendMessage'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { Settings } from './components/Settings'
 import { ChatView } from './components/ChatView'
@@ -64,9 +63,6 @@ export default function App() {
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingContextRef = useRef<string | null>(null)
   const sendInputRef = useRef<(data: string) => void>(() => {})
-  const [uploadStatus, setUploadStatus] = useState<string | null>(null)
-  const [sessionPendingFiles, setSessionPendingFiles] = useState<Record<string, File[]>>({})
-  const pendingFiles = useMemo(() => activeSessionId ? (sessionPendingFiles[activeSessionId] ?? []) : [], [activeSessionId, sessionPendingFiles])
 
   const inputBarRef = useRef<InputBarHandle>(null)
   const [sessionInputs, setSessionInputs] = useState<Record<string, string>>({})
@@ -146,6 +142,45 @@ export default function App() {
     wsCreateSession,
     removeSession,
     pendingContextRef,
+  })
+
+  // Derive active repo from the active session
+  const activeRepo = activeWorkingDir
+    ? repos.find(r => r.workingDir === activeWorkingDir) ?? null
+    : null
+
+  // All available skills for the current session (global + repo)
+  const allSkills = useMemo(() => [
+    ...globalSkills,
+    ...(activeRepo?.skills ?? []),
+  ], [globalSkills, activeRepo?.skills])
+
+  // Message sending: file uploads, skill expansion, tentative queue
+  const {
+    handleSend: handleSendWithFiles,
+    handleExecuteTentative,
+    handleDiscardTentative,
+    tentativeMessages,
+    activeTentativeCount,
+    pendingFiles,
+    addFiles,
+    removeFile,
+    uploadStatus,
+  } = useSendMessage({
+    token: settings.token,
+    activeSessionId,
+    activeWorkingDir,
+    sessions,
+    allSkills,
+    sendInput,
+    tentativeQueues,
+    addToQueue,
+    clearQueue,
+    docsContext: {
+      isOpen: docsBrowser.isOpen,
+      selectedFile: docsBrowser.selectedFile,
+      repoWorkingDir: docsBrowser.repoWorkingDir,
+    },
   })
 
   // Keep sendInputRef in sync so onSessionCreated can use it
@@ -230,150 +265,6 @@ export default function App() {
     sendInput(`[Module: ${mod.name}]\n\n${mod.content}`)
   }, [sendInput])
 
-  const addFiles = useCallback((files: File[]) => {
-    if (!activeSessionId) return
-    setSessionPendingFiles(prev => ({ ...prev, [activeSessionId]: [...(prev[activeSessionId] ?? []), ...files] }))
-  }, [activeSessionId])
-
-  const removeFile = useCallback((index: number) => {
-    if (!activeSessionId) return
-    setSessionPendingFiles(prev => ({ ...prev, [activeSessionId]: (prev[activeSessionId] ?? []).filter((_, i) => i !== index) }))
-  }, [activeSessionId])
-
-  // Derive active repo from the active session
-  const activeRepo = activeWorkingDir
-    ? repos.find(r => r.workingDir === activeWorkingDir) ?? null
-    : null
-
-  // All available skills for the current session (global + repo)
-  const allSkills = useMemo(() => [
-    ...globalSkills,
-    ...(activeRepo?.skills ?? []),
-  ], [globalSkills, activeRepo?.skills])
-
-  // Expand slash commands to skill content before sending
-  const expandSkill = useCallback((text: string): string => {
-    const trimmed = text.trim()
-    if (!trimmed.startsWith('/')) return text
-
-    // Extract command and any trailing args: "/commit fix the bug" → command="/commit", args="fix the bug"
-    const spaceIdx = trimmed.indexOf(' ')
-    const command = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx)
-    const args = spaceIdx === -1 ? '' : trimmed.slice(spaceIdx + 1).trim()
-
-    const skill = allSkills.find(s => s.command === command)
-    if (!skill?.content) return text
-
-    // Replace $ARGUMENTS placeholder in skill content with actual args
-    const content = skill.content.replace(/\$ARGUMENTS/g, args || '(no arguments provided)')
-    const parts = [`[Skill: ${skill.name}]`, '', content]
-    if (args) parts.push('', `User instructions: ${args}`)
-    return parts.join('\n')
-  }, [allSkills])
-
-  const handleSendWithFiles = useCallback(async (text: string) => {
-    if (!settings.token) return
-    const expanded = expandSkill(text)
-    const displayText = expanded !== text ? text : undefined
-
-    // Include docs context if viewing a doc
-    const docsContext = docsBrowser.isOpen && docsBrowser.selectedFile && docsBrowser.repoWorkingDir
-      ? `[Viewing doc: ${docsBrowser.selectedFile} in ${docsBrowser.repoWorkingDir}]\n\n`
-      : ''
-
-    // Tentative mode: if another session for the same repo is currently processing,
-    // or if this session already has queued messages (isAlreadyTentative), hold the
-    // new message rather than sending it immediately.  This prevents two Claude
-    // processes for the same repo from interleaving edits on the same files.
-    // The queued messages are auto-executed by the useEffect below once all blocking
-    // sessions for this repo finish processing.
-    const isAlreadyTentative = (tentativeQueues[activeSessionId ?? '']?.length ?? 0) > 0
-    const hasConflict = !!activeWorkingDir &&
-      sessions.some(s => groupKey(s) === activeWorkingDir && s.isProcessing && s.id !== activeSessionId)
-    if (activeSessionId && (isAlreadyTentative || hasConflict)) {
-      addToQueue(activeSessionId, docsContext + expanded, pendingFiles)
-      if (pendingFiles.length > 0) {
-        setSessionPendingFiles(prev => ({ ...prev, [activeSessionId]: [] }))
-      }
-      return
-    }
-
-    const files = pendingFiles
-    if (files.length === 0) {
-      // displayText is the original slash command (e.g. "/commit") when `expanded`
-      // is the full skill content — the server echoes displayText to the chat so
-      // the user sees the compact command form rather than the raw skill markdown.
-      sendInput(docsContext + expanded, displayText)
-      return
-    }
-    setUploadStatus('Uploading files...')
-    try {
-      const message = await uploadAndBuildMessage(settings.token, files, docsContext + expanded)
-      if (activeSessionId) setSessionPendingFiles(prev => ({ ...prev, [activeSessionId]: [] }))
-      setUploadStatus(null)
-      sendInput(message)
-    } catch (err) {
-      setUploadStatus(`Upload failed: ${err instanceof Error ? err.message : 'unknown error'}`)
-      setTimeout(() => setUploadStatus(null), 3000)
-    }
-  }, [settings.token, activeSessionId, activeWorkingDir, sessions, tentativeQueues, addToQueue, pendingFiles, expandSkill, sendInput, docsBrowser.isOpen, docsBrowser.selectedFile, docsBrowser.repoWorkingDir])
-
-  const handleExecuteTentative = useCallback(async (sessionId: string) => {
-    const queue = tentativeQueues[sessionId] ?? []
-    clearQueue(sessionId)
-    for (let i = 0; i < queue.length; i++) {
-      const entry = queue[i]
-      if (i > 0) await new Promise(r => setTimeout(r, 100))
-      if (entry.files.length > 0 && settings.token) {
-        try {
-          const message = await uploadAndBuildMessage(settings.token, entry.files, entry.text)
-          sendInput(message)
-        } catch {
-          // Upload failed — send the text portion anyway
-          sendInput(entry.text)
-        }
-      } else {
-        sendInput(entry.text)
-      }
-    }
-  }, [tentativeQueues, clearQueue, sendInput, settings.token])
-
-  const handleDiscardTentative = useCallback((sessionId: string) => {
-    clearQueue(sessionId)
-  }, [clearQueue])
-
-  // Auto-execute tentative queue when the blocking session(s) finish
-  useEffect(() => {
-    for (const [sessionId, queue] of Object.entries(tentativeQueues)) {
-      if (queue.length === 0) continue
-      const session = sessions.find(s => s.id === sessionId)
-      if (!session) continue
-      const wDir = groupKey(session)
-      const blocking = sessions.filter(s => groupKey(s) === wDir && s.isProcessing && s.id !== sessionId)
-      if (blocking.length === 0 && sessionId === activeSessionId) {
-        void handleExecuteTentative(sessionId)
-        setTimeout(() => {
-          setUploadStatus('Session finished — starting queued session.')
-          setTimeout(() => setUploadStatus(null), 3000)
-        }, 0)
-      }
-    }
-  }, [sessions]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Tentative messages for the active session (rendered in ChatView after real messages)
-  const tentativeMessages: ChatMessage[] = activeSessionId
-    ? (tentativeQueues[activeSessionId] ?? []).map((entry, index) => ({
-        type: 'tentative' as const,
-        text: entry.files.length > 0
-          ? `${entry.text}\n📎 ${entry.files.length} file${entry.files.length > 1 ? 's' : ''} attached`
-          : entry.text,
-        index,
-        key: `tentative-${index}`,
-      }))
-    : []
-
-  const activeTentativeCount = activeSessionId ? (tentativeQueues[activeSessionId]?.length ?? 0) : 0
-
   const skillGroups = [
     { label: 'Global', skills: globalSkills },
     ...(activeRepo && activeRepo.skills.length > 0 ? [{ label: activeRepo.name, skills: activeRepo.skills }] : []),
@@ -445,16 +336,20 @@ export default function App() {
         onSendModule={handleSendModule}
         onNavigateToWorkflows={() => navigate('/workflows')}
         onBrowseDocs={handleBrowseDocs}
-        docsPickerOpen={docsBrowser.pickerOpen}
-        docsPickerRepoDir={docsBrowser.pickerRepoDir}
-        docsPickerFiles={docsBrowser.pickerFiles}
-        docsPickerLoading={docsBrowser.pickerLoading}
-        onDocsPickerSelect={handleSelectDocFile}
-        onDocsPickerClose={docsBrowser.closePicker}
-        docsStarredDocs={docsBrowser.starredDocs}
-        isMobile={isMobile}
-        mobileOpen={mobileMenuOpen}
-        onMobileClose={() => setMobileMenuOpen(false)}
+        docsPicker={{
+          open: docsBrowser.pickerOpen,
+          repoDir: docsBrowser.pickerRepoDir,
+          files: docsBrowser.pickerFiles,
+          loading: docsBrowser.pickerLoading,
+          onSelect: handleSelectDocFile,
+          onClose: docsBrowser.closePicker,
+          starredDocs: docsBrowser.starredDocs,
+        }}
+        mobile={{
+          isMobile,
+          mobileOpen: mobileMenuOpen,
+          onMobileClose: () => setMobileMenuOpen(false),
+        }}
       />
 
       {/* Main area */}

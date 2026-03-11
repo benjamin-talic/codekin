@@ -168,3 +168,21 @@ export interface Settings {
   theme: 'dark' | 'light'
 }
 
+/** Docs picker state passed through LeftSidebar → RepoSection. */
+export interface DocsPickerProps {
+  open?: boolean
+  repoDir?: string | null
+  files?: { path: string; pinned: boolean }[]
+  loading?: boolean
+  starredDocs?: string[]
+  onSelect?: (filePath: string) => void
+  onClose?: () => void
+}
+
+/** Mobile layout props for components that support responsive drawer mode. */
+export interface MobileProps {
+  isMobile?: boolean
+  mobileOpen?: boolean
+  onMobileClose?: () => void
+}
+
