@@ -13,7 +13,7 @@ import {
   IconLogout, IconSun, IconMoon,
   IconChevronRight, IconChevronLeft, IconSparkles, IconX,
 } from '@tabler/icons-react'
-import type { Session, Module, Repo } from '../types'
+import type { Session, Module, Repo, DocsPickerProps, MobileProps } from '../types'
 import type { RepoGroup } from '../hooks/useRepos'
 import AppIcon from './AppIcon'
 import { NewSessionButton } from './NewSessionButton'
@@ -94,19 +94,8 @@ interface Props {
   onSendModule: (mod: Module) => void
   onNavigateToWorkflows: () => void
   onBrowseDocs?: (workingDir: string) => void
-  docsPickerOpen?: boolean
-  docsPickerRepoDir?: string | null
-  docsPickerFiles?: { path: string; pinned: boolean }[]
-  docsPickerLoading?: boolean
-  onDocsPickerSelect?: (filePath: string) => void
-  onDocsPickerClose?: () => void
-  docsStarredDocs?: string[]
-  /** Mobile overlay mode — when true, sidebar renders as a slide-in drawer with backdrop */
-  isMobile?: boolean
-  /** Controls drawer visibility in mobile mode */
-  mobileOpen?: boolean
-  /** Called to close the mobile drawer */
-  onMobileClose?: () => void
+  docsPicker?: DocsPickerProps
+  mobile?: MobileProps
 }
 
 // --------------------------------------------------------------------------
@@ -142,17 +131,10 @@ export function LeftSidebar({
   onSendModule,
   onNavigateToWorkflows,
   onBrowseDocs,
-  docsPickerOpen,
-  docsPickerRepoDir,
-  docsPickerFiles,
-  docsPickerLoading,
-  onDocsPickerSelect,
-  onDocsPickerClose,
-  docsStarredDocs,
-  isMobile = false,
-  mobileOpen = false,
-  onMobileClose,
+  docsPicker = {},
+  mobile = {},
 }: Props) {
+  const { isMobile = false, mobileOpen = false, onMobileClose } = mobile
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('codekin-left-sidebar-collapsed') === 'true')
   const [width, setWidth] = useState(() => {
     const stored = localStorage.getItem(SIDEBAR_WIDTH_KEY)
@@ -369,13 +351,13 @@ export function LeftSidebar({
             onDeleteRepo={onDeleteRepo}
             onViewArchivedSession={setArchiveViewSessionId}
             onBrowseDocs={onBrowseDocs}
-            docsPickerOpen={docsPickerOpen}
-            docsPickerRepoDir={docsPickerRepoDir}
-            docsPickerFiles={docsPickerFiles}
-            docsPickerLoading={docsPickerLoading}
-            onDocsPickerSelect={onDocsPickerSelect}
-            onDocsPickerClose={onDocsPickerClose}
-            docsStarredDocs={docsStarredDocs}
+            docsPickerOpen={docsPicker.open}
+            docsPickerRepoDir={docsPicker.repoDir}
+            docsPickerFiles={docsPicker.files}
+            docsPickerLoading={docsPicker.loading}
+            onDocsPickerSelect={docsPicker.onSelect}
+            onDocsPickerClose={docsPicker.onClose}
+            docsStarredDocs={docsPicker.starredDocs}
           />
         ))}
 
