@@ -851,12 +851,35 @@ export class SessionManager {
 
     // Check for pending tool approval from PreToolUse hook
     if (!requestId) {
-      const hasPending = session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0
-      if (hasPending) {
-        console.warn(`[prompt_response] no requestId provided with ${session.pendingToolApprovals.size} tool approvals and ${session.pendingControlRequests.size} control requests pending — ignoring to prevent misrouted response`)
+      const totalPending = session.pendingToolApprovals.size + session.pendingControlRequests.size
+      if (totalPending === 1) {
+        // Exactly one pending prompt — safe to infer the target
+        const soleApproval = session.pendingToolApprovals.size === 1
+          ? session.pendingToolApprovals.values().next().value
+          : undefined
+        if (soleApproval) {
+          console.warn(`[prompt_response] no requestId, routing to sole pending tool approval: ${soleApproval.toolName}`)
+          this.resolveToolApproval(session, soleApproval, value)
+          return
+        }
+        const soleControl = session.pendingControlRequests.size === 1
+          ? session.pendingControlRequests.values().next().value
+          : undefined
+        if (soleControl) {
+          console.warn(`[prompt_response] no requestId, routing to sole pending control request: ${soleControl.toolName}`)
+          requestId = soleControl.requestId
+        }
+      } else if (totalPending > 1) {
+        console.warn(`[prompt_response] no requestId with ${totalPending} pending prompts — rejecting to prevent misrouted response`)
+        this.broadcast(session, {
+          type: 'system_message',
+          subtype: 'error',
+          text: 'Prompt response could not be routed: multiple prompts pending. Please refresh and try again.',
+        })
         return
+      } else {
+        console.warn(`[prompt_response] no requestId, no pending prompts — forwarding as user message`)
       }
-      console.warn(`[prompt_response] no requestId provided, no pending prompts — forwarding as user message`)
     }
     const approval = requestId ? session.pendingToolApprovals.get(requestId) : undefined
     if (approval) {

@@ -69,23 +69,19 @@ export class ApprovalManager {
     'gh pr', 'gh repo', 'gh run', 'gh search',
     'gh issue', 'gh release',
 
-    // Package managers — Node
+    // Package managers — Node (two-token subcommands only; bare executors are in NEVER list)
     'npm run', 'npm test', 'npm install', 'npm ci', 'npm exec',
-    'npx', 'node',
-    'yarn', 'pnpm', 'pnpm test', 'pnpm run', 'pnpm install',
+    'yarn run', 'yarn test', 'yarn install', 'yarn add',
+    'pnpm test', 'pnpm run', 'pnpm install',
     'pnpm --filter', 'pnpm typecheck',
-    'bun', 'bun run', 'bun test', 'bun install',
-    'deno',
+    'bun run', 'bun test', 'bun install',
 
-    // Build / compile
+    // Build / compile (two-token subcommands only)
     'cargo build', 'cargo test', 'cargo run', 'cargo check', 'cargo clippy',
     'make', 'cmake',
-    'python', 'python3', 'pip install',
+    'pip install',
     'go build', 'go test', 'go run', 'go vet',
     'tsc', 'eslint', 'prettier',
-
-    // Dev tools
-    'pm2',
 
     // File inspection (read-only)
     'cat', 'head', 'tail', 'wc', 'sort', 'uniq', 'diff', 'less',
@@ -106,6 +102,8 @@ export class ApprovalManager {
     'git reset', 'git clean',
     'git push',  // cross-remote escalation risk — require exact match
     'gh api',  // can perform DELETE/PUT — too broad to pattern
+    // Code executors — "node *" / "python *" would match arbitrary code execution
+    'node', 'npx', 'python', 'python3', 'deno', 'bun', 'pm2',
   ])
 
   /**
@@ -216,12 +214,17 @@ export class ApprovalManager {
     const first = tokens[0]
     const twoToken = tokens.length >= 2 ? `${tokens[0]} ${tokens[1]}` : ''
 
-    // Check deny-list first
-    if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(first)) return null
+    // Two-token deny-list always wins (e.g. "git push", "git reset")
     if (twoToken && ApprovalManager.NEVER_PATTERN_PREFIXES.has(twoToken)) return null
 
-    // Check allow-list (two-token first for specificity)
+    // Two-token allow-list takes priority over first-token deny
+    // (e.g. "bun run" is safe even though bare "bun" is denied)
     if (twoToken && ApprovalManager.PATTERNABLE_PREFIXES.has(twoToken)) return `${twoToken} *`
+
+    // First-token deny-list blocks remaining single-token patterns
+    if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(first)) return null
+
+    // First-token allow-list
     if (ApprovalManager.PATTERNABLE_PREFIXES.has(first)) return `${first} *`
 
     return null
@@ -428,15 +431,17 @@ export class ApprovalManager {
       const prefixGroups = new Map<string, string[]>()
       for (const cmd of entry.commands) {
         if (toRemove.has(cmd)) continue
-        let prefix = this.commandPrefix(cmd)
-        if (!prefix) continue
-        const firstToken = cmd.split(/\s+/)[0]
-        if (firstToken && ApprovalManager.NEVER_PATTERN_PREFIXES.has(firstToken)) continue
+        const tokens = cmd.split(/\s+/).filter(Boolean)
+        if (tokens.length === 0) continue
+        const firstToken = tokens[0]
+        let prefix = tokens.length >= 2 ? `${tokens[0]} ${tokens[1]}` : firstToken
+        // Two-token deny always wins
         if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(prefix)) continue
-        // Two-token prefix not patternable — try single-token fallback
+        // Two-token allow takes priority over first-token deny (e.g. "bun run" safe, bare "bun" denied)
         if (!ApprovalManager.PATTERNABLE_PREFIXES.has(prefix)) {
-          const firstToken = cmd.split(/\s+/)[0]
-          if (firstToken && ApprovalManager.PATTERNABLE_PREFIXES.has(firstToken)) {
+          // First-token deny blocks remaining single-token patterns
+          if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(firstToken)) continue
+          if (ApprovalManager.PATTERNABLE_PREFIXES.has(firstToken)) {
             prefix = firstToken
           } else {
             continue

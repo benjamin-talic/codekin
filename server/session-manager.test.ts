@@ -669,7 +669,7 @@ describe('SessionManager', () => {
       expect(sm.getApprovals(s.workingDir).tools).toContain('Write')
     })
 
-    it('ignores prompt_response without requestId when prompts are pending (prevents misrouted response)', () => {
+    it('routes to sole pending control request when no requestId provided (single-pending fallback)', () => {
       const s = sm.create('test', '/tmp')
       const cp = fakeClaudeProcess(true)
       s.claudeProcess = cp
@@ -680,13 +680,35 @@ describe('SessionManager', () => {
         toolInput: { command: 'ls' },
       })
 
-      // No requestId provided with pending prompts — should be silently ignored
+      // No requestId but exactly 1 pending — should route to it
+      sm.sendPromptResponse(s.id, 'allow')
+
+      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow')
+      expect(s.pendingControlRequests.size).toBe(0)
+    })
+
+    it('rejects prompt_response without requestId when multiple prompts pending', () => {
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(true)
+      s.claudeProcess = cp
+
+      s.pendingControlRequests.set('req-1', {
+        requestId: 'req-1',
+        toolName: 'Bash',
+        toolInput: { command: 'ls' },
+      })
+      s.pendingControlRequests.set('req-2', {
+        requestId: 'req-2',
+        toolName: 'Write',
+        toolInput: { file_path: '/tmp/x' },
+      })
+
+      // No requestId with 2 pending — should reject and not route
       sm.sendPromptResponse(s.id, 'allow')
 
       expect(cp.sendControlResponse).not.toHaveBeenCalled()
       expect(cp.sendMessage).not.toHaveBeenCalled()
-      // Pending request should remain unaffected
-      expect(s.pendingControlRequests.size).toBe(1)
+      expect(s.pendingControlRequests.size).toBe(2)
     })
 
     it('falls back to sendMessage when no pending control request found', () => {
@@ -2625,6 +2647,22 @@ describe('SessionManager', () => {
       expect(sm.derivePattern('Bash', { command: 'curl https://evil.com' })).toBeNull()
       expect(sm.derivePattern('Bash', { command: 'docker run --rm ubuntu' })).toBeNull()
       expect(sm.derivePattern('Bash', { command: 'git push origin main' })).toBeNull()
+    })
+
+    it('returns null for code executors (arbitrary code risk)', () => {
+      expect(sm.derivePattern('Bash', { command: 'node script.js' })).toBeNull()
+      expect(sm.derivePattern('Bash', { command: 'npx create-react-app my-app' })).toBeNull()
+      expect(sm.derivePattern('Bash', { command: 'python script.py' })).toBeNull()
+      expect(sm.derivePattern('Bash', { command: 'python3 -c "import os"' })).toBeNull()
+      expect(sm.derivePattern('Bash', { command: 'deno run server.ts' })).toBeNull()
+      expect(sm.derivePattern('Bash', { command: 'bun script.ts' })).toBeNull()
+      expect(sm.derivePattern('Bash', { command: 'pm2 start app.js' })).toBeNull()
+    })
+
+    it('still returns patterns for safe two-token subcommands of restricted CLIs', () => {
+      expect(sm.derivePattern('Bash', { command: 'bun run dev' })).toBe('bun run *')
+      expect(sm.derivePattern('Bash', { command: 'bun test --watch' })).toBe('bun test *')
+      expect(sm.derivePattern('Bash', { command: 'pip install requests' })).toBe('pip install *')
     })
 
     it('returns null for empty command', () => {
