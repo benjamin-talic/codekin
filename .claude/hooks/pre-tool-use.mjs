@@ -28,14 +28,18 @@ function isInProject(filePath, projectDir) {
 async function denyWithNotification(ctx, toolName, toolInput, reason) {
   const hubSessionId = ctx.env.hubSessionId;
   if (hubSessionId) {
-    await transport.notify({
-      sessionId: hubSessionId,
-      notificationType: 'hook_denial',
-      title: `Permission denied: ${toolName}`,
-      message: reason,
-      toolName,
-      toolInput,
-    });
+    try {
+      await transport.notify({
+        sessionId: hubSessionId,
+        notificationType: 'hook_denial',
+        title: `Permission denied: ${toolName}`,
+        message: reason,
+        toolName,
+        toolInput,
+      });
+    } catch {
+      // Best-effort — don't block denial on notification failure
+    }
   }
 
   return {
