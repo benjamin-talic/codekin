@@ -232,7 +232,8 @@ describe('SessionManager', () => {
   // =====================================================================
 
   describe('leave() with pending control requests', () => {
-    it('auto-denies pending control requests when last client leaves', () => {
+    it('auto-denies pending control requests when last client leaves (after grace period)', () => {
+      vi.useFakeTimers()
       const s = sm.create('test', '/tmp')
       const ws = fakeWs()
       const cp = fakeClaudeProcess()
@@ -246,10 +247,16 @@ describe('SessionManager', () => {
 
       sm.leave(s.id, ws)
 
+      // Not denied yet — grace period active
+      expect(cp.sendControlResponse).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(3000)
+
       expect(cp.sendControlResponse).toHaveBeenCalledTimes(2)
       expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'deny')
       expect(cp.sendControlResponse).toHaveBeenCalledWith('req-2', 'deny')
       expect(s.pendingControlRequests.size).toBe(0)
+      vi.useRealTimers()
     })
 
     it('does not auto-deny when other clients remain', () => {
@@ -270,7 +277,8 @@ describe('SessionManager', () => {
       expect(s.pendingControlRequests.size).toBe(1)
     })
 
-    it('auto-denies pending tool approval when last client leaves', () => {
+    it('auto-denies pending tool approval when last client leaves (after grace period)', () => {
+      vi.useFakeTimers()
       const s = sm.create('test', '/tmp')
       const ws = fakeWs()
       sm.join(s.id, ws)
@@ -280,8 +288,37 @@ describe('SessionManager', () => {
 
       sm.leave(s.id, ws)
 
+      // Not denied yet — grace period active
+      expect(resolve).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(3000)
+
       expect(resolve).toHaveBeenCalledWith({ allow: false, always: false })
       expect(s.pendingToolApprovals.size).toBe(0)
+      vi.useRealTimers()
+    })
+
+    it('cancels auto-deny if client rejoins during grace period', () => {
+      vi.useFakeTimers()
+      const s = sm.create('test', '/tmp')
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const resolve = vi.fn()
+      s.pendingToolApprovals.set('test-req', { resolve, toolName: 'Bash', toolInput: { command: 'ls' }, requestId: 'test-req' })
+
+      sm.leave(s.id, ws)
+
+      // Client rejoins before grace period expires
+      const ws2 = fakeWs()
+      sm.join(s.id, ws2)
+
+      vi.advanceTimersByTime(3000)
+
+      // Should NOT have been denied
+      expect(resolve).not.toHaveBeenCalled()
+      expect(s.pendingToolApprovals.size).toBe(1)
+      vi.useRealTimers()
     })
 
     it('does not auto-deny pending tool approval when other clients remain', () => {
@@ -300,7 +337,8 @@ describe('SessionManager', () => {
       expect(s.pendingToolApprovals.size).toBe(1)
     })
 
-    it('auto-denies both pending control requests and tool approval when last client leaves', () => {
+    it('auto-denies both pending control requests and tool approval when last client leaves (after grace period)', () => {
+      vi.useFakeTimers()
       const s = sm.create('test', '/tmp')
       const ws = fakeWs()
       const cp = fakeClaudeProcess()
@@ -313,10 +351,13 @@ describe('SessionManager', () => {
 
       sm.leave(s.id, ws)
 
+      vi.advanceTimersByTime(3000)
+
       expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'deny')
       expect(s.pendingControlRequests.size).toBe(0)
       expect(resolve).toHaveBeenCalledWith({ allow: false, always: false })
       expect(s.pendingToolApprovals.size).toBe(0)
+      vi.useRealTimers()
     })
 
     it('does nothing for unknown session', () => {
@@ -433,7 +474,7 @@ describe('SessionManager', () => {
       const resolve = vi.fn()
       s.pendingToolApprovals.set('req-1', { resolve, toolName: 'Bash', toolInput: { command: 'rm -rf /' }, requestId: 'req-1' })
 
-      sm.sendPromptResponse(s.id, 'allow')
+      sm.sendPromptResponse(s.id, 'allow', 'req-1')
 
       expect(resolve).toHaveBeenCalledWith({ allow: true, always: false })
       expect(s.pendingToolApprovals.size).toBe(0)
@@ -444,7 +485,7 @@ describe('SessionManager', () => {
       const resolve = vi.fn()
       s.pendingToolApprovals.set('req-1', { resolve, toolName: 'Bash', toolInput: { command: 'rm -rf /' }, requestId: 'req-1' })
 
-      sm.sendPromptResponse(s.id, 'deny')
+      sm.sendPromptResponse(s.id, 'deny', 'req-1')
 
       expect(resolve).toHaveBeenCalledWith({ allow: false, always: false })
       expect(s.pendingToolApprovals.size).toBe(0)
@@ -455,22 +496,23 @@ describe('SessionManager', () => {
       const resolve = vi.fn()
       s.pendingToolApprovals.set('req-1', { resolve, toolName: 'Write', toolInput: { file_path: '/tmp/x' }, requestId: 'req-1' })
 
-      sm.sendPromptResponse(s.id, 'always_allow')
+      sm.sendPromptResponse(s.id, 'always_allow', 'req-1')
 
       expect(resolve).toHaveBeenCalledWith({ allow: true, always: true })
       expect(s.pendingToolApprovals.size).toBe(0)
       expect(sm.getApprovals(s.workingDir).tools).toContain('Write')
     })
 
-    it('resolves pending tool approval with array value and updates Bash registry', () => {
+    it('resolves pending tool approval with array value and updates Bash registry (pattern-first)', () => {
       const s = sm.create('test', '/tmp')
       const resolve = vi.fn()
       s.pendingToolApprovals.set('req-1', { resolve, toolName: 'Bash', toolInput: { command: 'echo hi' }, requestId: 'req-1' })
 
-      sm.sendPromptResponse(s.id, ['always_allow'])
+      sm.sendPromptResponse(s.id, ['always_allow'], 'req-1')
 
       expect(resolve).toHaveBeenCalledWith({ allow: true, always: true })
-      expect(sm.getApprovals(s.workingDir).commands).toContain('echo hi')
+      // Pattern-first: 'echo' is patternable, so stored as pattern not exact command
+      expect(sm.getApprovals(s.workingDir).patterns).toContain('echo *')
     })
 
     it('resolves pending tool approval deny with array value', () => {
@@ -478,7 +520,7 @@ describe('SessionManager', () => {
       const resolve = vi.fn()
       s.pendingToolApprovals.set('req-1', { resolve, toolName: 'Bash', toolInput: { command: 'echo hi' }, requestId: 'req-1' })
 
-      sm.sendPromptResponse(s.id, ['deny'])
+      sm.sendPromptResponse(s.id, ['deny'], 'req-1')
 
       expect(resolve).toHaveBeenCalledWith({ allow: false, always: false })
     })
@@ -606,7 +648,8 @@ describe('SessionManager', () => {
       sm.sendPromptResponse(s.id, 'always_allow', 'req-1')
 
       expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow')
-      expect(sm.getApprovals(s.workingDir).commands).toContain('npm test')
+      // Pattern-first: 'npm test' is patternable, stored as pattern
+      expect(sm.getApprovals(s.workingDir).patterns).toContain('npm test *')
     })
 
     it('handles always_allow for non-Bash tool and persists', () => {
@@ -626,7 +669,7 @@ describe('SessionManager', () => {
       expect(sm.getApprovals(s.workingDir).tools).toContain('Write')
     })
 
-    it('falls back to oldest pending request when no requestId provided', () => {
+    it('falls through to sendMessage when no requestId provided (no fallback matching)', () => {
       const s = sm.create('test', '/tmp')
       const cp = fakeClaudeProcess(true)
       s.claudeProcess = cp
@@ -637,10 +680,11 @@ describe('SessionManager', () => {
         toolInput: { command: 'ls' },
       })
 
-      // No requestId provided
+      // No requestId provided — should NOT match to oldest, falls through to sendMessage
       sm.sendPromptResponse(s.id, 'allow')
 
-      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow')
+      expect(cp.sendControlResponse).not.toHaveBeenCalled()
+      expect(cp.sendMessage).toHaveBeenCalledWith('allow')
     })
 
     it('falls back to sendMessage when no pending control request found', () => {
@@ -743,18 +787,14 @@ describe('SessionManager', () => {
       await promise
     })
 
-    it('does NOT prefix-match git push across remotes', async () => {
+    it('auto-approves git push via prefix match (now patternable)', async () => {
       const s = sm.create('test', '/tmp')
       s.clients.add(fakeWs())
       ;(sm as any).addRepoApproval(s.workingDir, { command: 'git push origin main' })
 
-      // git push is not in the safe prefix list
-      const promise = sm.requestToolApproval(s.id, 'Bash', { command: 'git push evil-remote main' })
-      expect(s.pendingToolApprovals.size).toBe(1)
-
-      const pending = s.pendingToolApprovals.values().next().value!
-      pending.resolve({ allow: false, always: false })
-      await promise
+      // git push is now in PATTERNABLE_PREFIXES, so prefix matching works
+      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'git push other-remote main' })
+      expect(result).toEqual({ allow: true, always: true })
     })
 
     it('still allows exact match for dangerous commands', async () => {
@@ -1347,7 +1387,8 @@ describe('SessionManager', () => {
 
       sm.sendPromptResponse(s.id, ['always_allow'], 'req-1')
 
-      expect(sm.getApprovals(s.workingDir).commands).toContain('git status')
+      // Pattern-first: 'git status' is patternable, stored as pattern
+      expect(sm.getApprovals(s.workingDir).patterns).toContain('git status *')
       expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow')
     })
 

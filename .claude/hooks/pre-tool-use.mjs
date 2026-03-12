@@ -24,6 +24,29 @@ function isInProject(filePath, projectDir) {
   return resolved.startsWith(projResolved + '/') || resolved === projResolved;
 }
 
+/** Deny a tool and fire a best-effort notification to the UI so the user sees why. */
+async function denyWithNotification(ctx, toolName, toolInput, reason) {
+  const hubSessionId = ctx.env.hubSessionId;
+  if (hubSessionId) {
+    transport.notify({
+      sessionId: hubSessionId,
+      notificationType: 'hook_denial',
+      title: `Permission denied: ${toolName}`,
+      message: reason,
+      toolName,
+      toolInput,
+    });
+  }
+
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  };
+}
+
 createHook({
   transport,
   context: [new EnvContext()],
@@ -46,13 +69,7 @@ createHook({
     if (ctx.env.isWebhookSession) {
       const auth = await validateAuthToken(ctx.env.hubSessionId || ctx.env.sessionId);
       if (!auth.valid) {
-        return {
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason: auth.error,
-          },
-        };
+        return denyWithNotification(ctx, input.tool_name, input.tool_input, auth.error);
       }
 
       return {
@@ -79,13 +96,7 @@ createHook({
       });
 
       if (typeof decision?.allow !== 'boolean') {
-        return {
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason: 'Invalid server response',
-          },
-        };
+        return denyWithNotification(ctx, input.tool_name, input.tool_input, 'Invalid server response');
       }
 
       return {
@@ -97,13 +108,7 @@ createHook({
       };
     } catch (err) {
       // Server unavailable or timeout — fail closed
-      return {
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'deny',
-          permissionDecisionReason: `Server error: ${err.message}`,
-        },
-      };
+      return denyWithNotification(ctx, input.tool_name, input.tool_input, `Server error: ${err.message}`);
     }
   },
 });

@@ -49,27 +49,62 @@ export class ApprovalManager {
   }
 
   /**
-   * Command prefixes where prefix-based auto-approval is safe.
-   * Only commands whose behavior is determined by later arguments (not by target)
-   * should be listed here. Dangerous commands like rm, sudo, curl, etc. require
-   * exact match to prevent escalation (e.g. approving `rm -rf /tmp/x` should NOT
-   * also approve `rm -rf /`).
+   * Prefixes where pattern-based grouping is safe. Used by derivePattern()
+   * and compactExactCommands() to create "prefix *" patterns.
+   *
+   * IMPORTANT: Inclusion here does NOT auto-approve anything — the user
+   * still explicitly approves the pattern. It only means "we can group
+   * `git push origin feat/x` and `git push origin feat/y` into one
+   * `git push *` pattern" instead of storing each as an exact match.
    */
-  private static readonly SAFE_PREFIX_COMMANDS = new Set([
+  private static readonly PATTERNABLE_PREFIXES = new Set([
+    // Git operations — safe to group by subcommand
     'git add', 'git commit', 'git diff', 'git log', 'git show', 'git stash',
     'git status', 'git branch', 'git checkout', 'git switch', 'git rebase',
     'git fetch', 'git pull', 'git merge', 'git tag', 'git rev-parse',
+    'git push', 'git remote', 'git cherry-pick',
+    'git worktree', 'git archive',
+
+    // GitHub CLI
+    'gh pr', 'gh repo', 'gh run', 'gh search',
+    'gh issue', 'gh release',
+
+    // Package managers — Node
     'npm run', 'npm test', 'npm install', 'npm ci', 'npm exec',
-    'npx', 'node', 'bun', 'deno',
+    'npx', 'node',
+    'yarn', 'pnpm', 'pnpm test', 'pnpm run', 'pnpm install',
+    'pnpm --filter', 'pnpm typecheck',
+    'bun', 'bun run', 'bun test', 'bun install',
+    'deno',
+
+    // Build / compile
     'cargo build', 'cargo test', 'cargo run', 'cargo check', 'cargo clippy',
     'make', 'cmake',
     'python', 'python3', 'pip install',
     'go build', 'go test', 'go run', 'go vet',
     'tsc', 'eslint', 'prettier',
+
+    // Dev tools
+    'pm2',
+
+    // File inspection (read-only)
     'cat', 'head', 'tail', 'wc', 'sort', 'uniq', 'diff', 'less',
     'ls', 'pwd', 'echo', 'date', 'which', 'whoami', 'env', 'printenv',
     'find', 'grep', 'rg', 'ag', 'fd',
     'mkdir', 'touch',
+    'file', 'du', 'stat', 'tree',
+    'basename', 'dirname', 'realpath',
+  ])
+
+  /**
+   * Prefixes that should NEVER be auto-patterned, even if the user
+   * clicks "Always Allow". These are stored as exact match only.
+   */
+  private static readonly NEVER_PATTERN_PREFIXES = new Set([
+    'ssh', 'docker', 'docker-compose',
+    'rm', 'sudo', 'curl', 'wget',
+    'git reset', 'git clean',
+    'gh api',  // can perform DELETE/PUT — too broad to pattern
   ])
 
   /**
@@ -101,7 +136,7 @@ export class ApprovalManager {
       }
       // Prefix match only for safe commands
       const cmdPrefix = this.commandPrefix(cmd)
-      if (cmdPrefix && ApprovalManager.SAFE_PREFIX_COMMANDS.has(cmdPrefix)) {
+      if (cmdPrefix && ApprovalManager.PATTERNABLE_PREFIXES.has(cmdPrefix)) {
         for (const approved of approvals.commands) {
           if (this.commandPrefix(approved) === cmdPrefix) return true
         }
@@ -135,7 +170,7 @@ export class ApprovalManager {
         // Prefix match for safe commands
         if (!matched) {
           const cmdPrefix = this.commandPrefix(cmd)
-          if (cmdPrefix && ApprovalManager.SAFE_PREFIX_COMMANDS.has(cmdPrefix)) {
+          if (cmdPrefix && ApprovalManager.PATTERNABLE_PREFIXES.has(cmdPrefix)) {
             for (const approved of entry.commands) {
               if (this.commandPrefix(approved) === cmdPrefix) { matched = true; break }
             }
@@ -163,7 +198,7 @@ export class ApprovalManager {
   }
 
   /**
-   * Derive a glob pattern from a tool invocation for "Approve Pattern".
+   * Derive a glob pattern from a tool invocation for "Always Allow".
    * Returns a string like "cat *" or "git diff *", or null if no safe pattern applies.
    * Patterns use the format "<prefix> *" meaning "this prefix followed by anything".
    */
@@ -173,19 +208,20 @@ export class ApprovalManager {
     const tokens = cmd.split(/\s+/).filter(Boolean)
     if (tokens.length === 0) return null
 
-    // Check single-token safe commands (cat, grep, ls, etc.)
-    const first = tokens[0]
-    if (ApprovalManager.SAFE_PREFIX_COMMANDS.has(first)) {
-      return `${first} *`
-    }
+    // Never pattern commands with shell meta-characters — the pattern
+    // would be far broader than the specific command the user approved
+    if (/[|;&`$(){}]/.test(cmd) || cmd.includes('\n')) return null
 
-    // Check two-token safe commands (git diff, npm run, etc.)
-    if (tokens.length >= 2) {
-      const twoToken = `${tokens[0]} ${tokens[1]}`
-      if (ApprovalManager.SAFE_PREFIX_COMMANDS.has(twoToken)) {
-        return `${twoToken} *`
-      }
-    }
+    const first = tokens[0]
+    const twoToken = tokens.length >= 2 ? `${tokens[0]} ${tokens[1]}` : ''
+
+    // Check deny-list first
+    if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(first)) return null
+    if (twoToken && ApprovalManager.NEVER_PATTERN_PREFIXES.has(twoToken)) return null
+
+    // Check allow-list (two-token first for specificity)
+    if (twoToken && ApprovalManager.PATTERNABLE_PREFIXES.has(twoToken)) return `${twoToken} *`
+    if (ApprovalManager.PATTERNABLE_PREFIXES.has(first)) return `${first} *`
 
     return null
   }
@@ -202,12 +238,26 @@ export class ApprovalManager {
     return cmd === pattern
   }
 
-  /** Save an "Always Allow" approval for a tool/command. */
+  /**
+   * Save an "Always Allow" approval for a tool/command.
+   * For Bash commands, stores a pattern when derivable (e.g. "git push *"),
+   * falling back to exact match only for commands without a safe pattern.
+   */
   saveAlwaysAllow(workingDir: string, toolName: string, toolInput: Record<string, unknown>): void {
     if (toolName === 'Bash') {
       const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
+
+      // Try to derive a pattern first (e.g. "git diff *", "npm run *")
+      const pattern = this.derivePattern(toolName, toolInput)
+      if (pattern) {
+        this.addRepoApproval(workingDir, { pattern })
+        console.log(`[auto-approve] saved pattern for repo ${workingDir}: ${pattern}`)
+        return
+      }
+
+      // For commands with no safe pattern, store exact match
       this.addRepoApproval(workingDir, { command: cmd })
-      console.log(`[auto-approve] saved command for repo ${workingDir}: ${cmd.slice(0, 80)}`)
+      console.log(`[auto-approve] saved exact command for repo ${workingDir}: ${cmd.slice(0, 80)}`)
     } else {
       this.addRepoApproval(workingDir, { tool: toolName })
       console.log(`[auto-approve] saved tool for repo ${workingDir}: ${toolName}`)
@@ -348,6 +398,69 @@ export class ApprovalManager {
       console.log(`Restored repo approvals for ${Object.keys(data).length} repo(s) from disk`)
     } catch (err) {
       console.error('Failed to restore repo approvals from disk:', err)
+    }
+
+    this.compactExactCommands()
+  }
+
+  /** Compact exact commands that could be represented by existing patterns. */
+  private compactExactCommands(): void {
+    let totalRemoved = 0
+    for (const [, entry] of this.repoApprovals) {
+      if (entry.commands.size === 0) continue
+      const toRemove = new Set<string>()
+
+      // Phase 1: Remove exact commands already covered by existing patterns
+      if (entry.patterns.size > 0) {
+        for (const cmd of entry.commands) {
+          for (const pattern of entry.patterns) {
+            if (this.matchesPattern(pattern, cmd)) {
+              toRemove.add(cmd)
+              break
+            }
+          }
+        }
+      }
+
+      // Phase 2: If 3+ exact commands share a patternable prefix,
+      // create a pattern and mark the exact commands for removal.
+      const prefixGroups = new Map<string, string[]>()
+      for (const cmd of entry.commands) {
+        if (toRemove.has(cmd)) continue
+        let prefix = this.commandPrefix(cmd)
+        if (!prefix) continue
+        if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(prefix)) continue
+        // Two-token prefix not patternable — try single-token fallback
+        if (!ApprovalManager.PATTERNABLE_PREFIXES.has(prefix)) {
+          const firstToken = cmd.split(/\s+/)[0]
+          if (firstToken && ApprovalManager.PATTERNABLE_PREFIXES.has(firstToken)) {
+            prefix = firstToken
+          } else {
+            continue
+          }
+        }
+        // Skip commands with shell meta-characters
+        if (/[|;&`$(){}]/.test(cmd) || cmd.includes('\n')) continue
+        const group = prefixGroups.get(prefix) || []
+        group.push(cmd)
+        prefixGroups.set(prefix, group)
+      }
+      for (const [prefix, cmds] of prefixGroups) {
+        if (cmds.length >= 3) {
+          const pattern = `${prefix} *`
+          if (!entry.patterns.has(pattern)) {
+            entry.patterns.add(pattern)
+          }
+          for (const cmd of cmds) toRemove.add(cmd)
+        }
+      }
+
+      for (const cmd of toRemove) entry.commands.delete(cmd)
+      totalRemoved += toRemove.size
+    }
+    if (totalRemoved > 0) {
+      console.log(`[auto-approve] compacted ${totalRemoved} exact commands into patterns`)
+      this.persistRepoApprovals()
     }
   }
 }
