@@ -375,6 +375,158 @@ For project-scoped permissions (only apply to one repo), add `--project` flag or
 
 ---
 
+## Fix 6: Replace exact-command storage with pattern-first approvals
+
+**Problem:** The `repo-approvals.json` file accumulates exact Bash command strings via the "Always Allow" button. Real-world data shows the scale of the problem:
+
+- **270–315 exact commands per repo** for the main project
+- **61 unique `gh pr create` strings** (each with different title/body)
+- **52 unique `git push` strings** (each with different branch names)
+- **64 multi-line commands** stored verbatim (including full commit messages)
+- Average **249 characters per stored command**
+
+Meanwhile, the **28–29 patterns** per repo are what actually do the useful matching. The exact commands are almost never matched again (because the next `gh pr create` has a different title), so they just bloat the file with no benefit.
+
+### Root cause
+
+`saveAlwaysAllow()` stores the exact command string for Bash tools. The "Approve Pattern" button only appears when `derivePattern()` returns a safe prefix pattern (e.g., `git diff *`). For commands not in `SAFE_PREFIX_COMMANDS`, there's no pattern option — only exact match.
+
+### Solution: Pattern-first "Always Allow" for Bash
+
+Change the "Always Allow" behavior for Bash commands: instead of storing the exact command, **derive and store a pattern whenever possible**, falling back to exact match only for genuinely unsafe commands.
+
+### `server/approval-manager.ts` — Upgrade `saveAlwaysAllow()`
+
+```typescript
+saveAlwaysAllow(workingDir: string, toolName: string, toolInput: Record<string, unknown>): void {
+  if (toolName === 'Bash') {
+    const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
+
+    // Try to derive a pattern first (e.g. "git diff *", "npm run *")
+    const pattern = this.derivePattern(toolName, toolInput)
+    if (pattern) {
+      this.addRepoApproval(workingDir, { pattern })
+      console.log(`[auto-approve] saved pattern for repo ${workingDir}: ${pattern}`)
+      return
+    }
+
+    // For commands with no safe pattern, store exact match
+    this.addRepoApproval(workingDir, { command: cmd })
+    console.log(`[auto-approve] saved exact command for repo ${workingDir}: ${cmd.slice(0, 80)}`)
+  } else {
+    this.addRepoApproval(workingDir, { tool: toolName })
+    console.log(`[auto-approve] saved tool for repo ${workingDir}: ${toolName}`)
+  }
+}
+```
+
+This single change would have prevented ~90% of the exact command bloat. Most stored commands start with `gh`, `git`, `npm`, `cd`, or other safe prefixes that already have patterns in `SAFE_PREFIX_COMMANDS`.
+
+### Expand `SAFE_PREFIX_COMMANDS` with commonly approved commands
+
+Based on the real-world data, add these missing prefixes:
+
+```typescript
+private static readonly SAFE_PREFIX_COMMANDS = new Set([
+  // ... existing entries ...
+
+  // Git operations commonly approved
+  'git push', 'git remote', 'git cherry-pick', 'git reset',
+  'git clean', 'git worktree', 'git archive',
+
+  // GitHub CLI (read-safe operations)
+  'gh pr', 'gh api', 'gh repo', 'gh run', 'gh search',
+  'gh issue', 'gh release',
+
+  // Package managers
+  'yarn', 'pnpm', 'pnpm test', 'pnpm run', 'pnpm install',
+  'pnpm --filter', 'pnpm typecheck',
+  'bun run', 'bun test', 'bun install',
+
+  // Common dev tools
+  'docker', 'docker-compose',
+  'pm2',
+  'ssh',
+
+  // File inspection (harmless read commands)
+  'file', 'du', 'stat', 'tree',
+  'basename', 'dirname', 'realpath',
+])
+```
+
+**Note on `git push` / `git reset` / `ssh`:** These are in `SAFE_PREFIX_COMMANDS` for *pattern derivation*, not for *auto-approval*. Pattern derivation just means "we can safely group `git push origin feat/x` and `git push origin feat/y` into one `git push *` pattern". The user still explicitly approves the pattern — this doesn't bypass the prompt.
+
+### Add compaction for existing commands
+
+Add a one-time migration that runs on startup to compact existing exact commands into patterns:
+
+```typescript
+/** Compact exact commands that could be represented by existing patterns. */
+private compactExactCommands(): void {
+  let totalRemoved = 0
+  for (const [dir, entry] of this.repoApprovals) {
+    if (entry.commands.size === 0 || entry.patterns.size === 0) continue
+    const toRemove: string[] = []
+    for (const cmd of entry.commands) {
+      // If this command is already matched by an existing pattern, remove it
+      for (const pattern of entry.patterns) {
+        if (this.matchesPattern(pattern, cmd)) {
+          toRemove.push(cmd)
+          break
+        }
+      }
+    }
+    // Also: if there are 3+ exact commands sharing a safe prefix,
+    // create a pattern and remove the exact commands
+    const prefixGroups = new Map<string, string[]>()
+    for (const cmd of entry.commands) {
+      if (toRemove.includes(cmd)) continue
+      const prefix = this.commandPrefix(cmd)
+      if (prefix && ApprovalManager.SAFE_PREFIX_COMMANDS.has(prefix)) {
+        const group = prefixGroups.get(prefix) || []
+        group.push(cmd)
+        prefixGroups.set(prefix, group)
+      }
+    }
+    for (const [prefix, cmds] of prefixGroups) {
+      if (cmds.length >= 3) {
+        entry.patterns.add(`${prefix} *`)
+        toRemove.push(...cmds)
+      }
+    }
+
+    for (const cmd of toRemove) entry.commands.delete(cmd)
+    totalRemoved += toRemove.length
+  }
+  if (totalRemoved > 0) {
+    console.log(`[auto-approve] compacted ${totalRemoved} exact commands into patterns`)
+    this.persistRepoApprovals()
+  }
+}
+```
+
+Call `this.compactExactCommands()` at the end of `restoreRepoApprovalsFromDisk()`.
+
+### UI change: Merge "Always Allow" and "Approve Pattern" buttons
+
+Currently there are two separate buttons. With pattern-first storage, they can be merged:
+
+- **"Always Allow"** → stores pattern when available, exact match otherwise (as above)
+- **Remove the separate "Approve Pattern" button** — its behavior is now the default
+
+If the user wants to see what pattern will be stored, show it in the "Always Allow" button tooltip:
+
+```tsx
+// In PromptButtons.tsx, for the "Always Allow" button:
+title={approvePattern
+  ? `Auto-approve: ${approvePattern}`
+  : `Auto-approve this exact command`}
+```
+
+This simplifies the UI from 4 buttons (Allow / Always Allow / Approve Pattern / Deny) to 3 buttons (Allow / Always Allow / Deny) while being smarter about what gets stored.
+
+---
+
 ## Files Changed Summary
 
 | File | Change |
@@ -386,6 +538,8 @@ For project-scoped permissions (only apply to one repo), add `--project` flag or
 | `server/session-manager.ts` | Remove requestId fallback, add leave grace period + timer field |
 | `.claude/hooks/pre-tool-use.mjs` | Add `denyWithNotification()` helper, notify server on all deny paths |
 | `server/session-routes.ts` | Enhance `/api/hook-notify` to detect `hook_denial` and append access suggestion |
+| `server/approval-manager.ts` | Pattern-first `saveAlwaysAllow()`, expand `SAFE_PREFIX_COMMANDS`, add `compactExactCommands()` |
+| `src/components/PromptButtons.tsx` | Remove "Approve Pattern" button, show pattern in "Always Allow" tooltip |
 
 ## Test Plan
 
@@ -396,3 +550,6 @@ For project-scoped permissions (only apply to one repo), add `--project` flag or
 5. **Auto-allow countdown:** Verify the 15s countdown resets correctly when a new prompt becomes active after answering the previous one (guaranteed by `key` prop remount).
 6. **Silent denial visibility:** Stop the Codekin server, trigger a Bash command in an active session. Verify the hook denial appears as a system error message in the chat with a `claude config add allowedTools` suggestion.
 7. **Access suggestion accuracy:** Trigger denials for Bash, Write, and WebSearch tools. Verify each produces a correct, copy-pasteable `claude config` command.
+8. **Pattern-first storage:** Click "Always Allow" on a `git push origin feat/test` command. Verify `repo-approvals.json` stores pattern `git push *`, not the exact command string.
+9. **Compaction on startup:** Add 5 exact `gh pr create ...` commands to `repo-approvals.json` manually, restart server. Verify they're compacted into `gh pr *` pattern and exact entries are removed.
+10. **UI simplification:** Verify the "Approve Pattern" button is gone and "Always Allow" tooltip shows the pattern that will be stored (e.g., "Auto-approve: git diff *").
