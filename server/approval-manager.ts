@@ -62,7 +62,7 @@ export class ApprovalManager {
     'git add', 'git commit', 'git diff', 'git log', 'git show', 'git stash',
     'git status', 'git branch', 'git checkout', 'git switch', 'git rebase',
     'git fetch', 'git pull', 'git merge', 'git tag', 'git rev-parse',
-    'git push', 'git remote', 'git cherry-pick',
+    'git remote', 'git cherry-pick',
     'git worktree', 'git archive',
 
     // GitHub CLI
@@ -104,6 +104,7 @@ export class ApprovalManager {
     'ssh', 'docker', 'docker-compose',
     'rm', 'sudo', 'curl', 'wget',
     'git reset', 'git clean',
+    'git push',  // cross-remote escalation risk — require exact match
     'gh api',  // can perform DELETE/PUT — too broad to pattern
   ])
 
@@ -429,6 +430,8 @@ export class ApprovalManager {
         if (toRemove.has(cmd)) continue
         let prefix = this.commandPrefix(cmd)
         if (!prefix) continue
+        const firstToken = cmd.split(/\s+/)[0]
+        if (firstToken && ApprovalManager.NEVER_PATTERN_PREFIXES.has(firstToken)) continue
         if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(prefix)) continue
         // Two-token prefix not patternable — try single-token fallback
         if (!ApprovalManager.PATTERNABLE_PREFIXES.has(prefix)) {

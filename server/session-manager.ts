@@ -263,6 +263,7 @@ export class SessionManager {
       isProcessing: false,
       pendingControlRequests: new Map(),
       pendingToolApprovals: new Map(),
+      _leaveGraceTimer: null,
     }
     this.sessions.set(id, session)
     this.persistToDisk()
@@ -850,7 +851,12 @@ export class SessionManager {
 
     // Check for pending tool approval from PreToolUse hook
     if (!requestId) {
-      console.warn(`[prompt_response] no requestId provided, cannot match to pending approval`)
+      const hasPending = session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0
+      if (hasPending) {
+        console.warn(`[prompt_response] no requestId provided with ${session.pendingToolApprovals.size} tool approvals and ${session.pendingControlRequests.size} control requests pending — ignoring to prevent misrouted response`)
+        return
+      }
+      console.warn(`[prompt_response] no requestId provided, no pending prompts — forwarding as user message`)
     }
     const approval = requestId ? session.pendingToolApprovals.get(requestId) : undefined
     if (approval) {

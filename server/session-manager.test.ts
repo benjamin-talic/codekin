@@ -669,7 +669,7 @@ describe('SessionManager', () => {
       expect(sm.getApprovals(s.workingDir).tools).toContain('Write')
     })
 
-    it('falls through to sendMessage when no requestId provided (no fallback matching)', () => {
+    it('ignores prompt_response without requestId when prompts are pending (prevents misrouted response)', () => {
       const s = sm.create('test', '/tmp')
       const cp = fakeClaudeProcess(true)
       s.claudeProcess = cp
@@ -680,11 +680,13 @@ describe('SessionManager', () => {
         toolInput: { command: 'ls' },
       })
 
-      // No requestId provided — should NOT match to oldest, falls through to sendMessage
+      // No requestId provided with pending prompts — should be silently ignored
       sm.sendPromptResponse(s.id, 'allow')
 
       expect(cp.sendControlResponse).not.toHaveBeenCalled()
-      expect(cp.sendMessage).toHaveBeenCalledWith('allow')
+      expect(cp.sendMessage).not.toHaveBeenCalled()
+      // Pending request should remain unaffected
+      expect(s.pendingControlRequests.size).toBe(1)
     })
 
     it('falls back to sendMessage when no pending control request found', () => {
@@ -787,14 +789,18 @@ describe('SessionManager', () => {
       await promise
     })
 
-    it('auto-approves git push via prefix match (now patternable)', async () => {
+    it('does NOT prefix-match git push across remotes (cross-remote escalation risk)', async () => {
       const s = sm.create('test', '/tmp')
       s.clients.add(fakeWs())
       ;(sm as any).addRepoApproval(s.workingDir, { command: 'git push origin main' })
 
-      // git push is now in PATTERNABLE_PREFIXES, so prefix matching works
-      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'git push other-remote main' })
-      expect(result).toEqual({ allow: true, always: true })
+      // git push is in NEVER_PATTERN_PREFIXES — must not auto-approve different remote
+      const promise = sm.requestToolApproval(s.id, 'Bash', { command: 'git push other-remote main' })
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      const pending = s.pendingToolApprovals.values().next().value!
+      pending.resolve({ allow: false, always: false })
+      await promise
     })
 
     it('still allows exact match for dangerous commands', async () => {
@@ -2617,6 +2623,8 @@ describe('SessionManager', () => {
       expect(sm.derivePattern('Bash', { command: 'rm -rf /' })).toBeNull()
       expect(sm.derivePattern('Bash', { command: 'sudo apt install' })).toBeNull()
       expect(sm.derivePattern('Bash', { command: 'curl https://evil.com' })).toBeNull()
+      expect(sm.derivePattern('Bash', { command: 'docker run --rm ubuntu' })).toBeNull()
+      expect(sm.derivePattern('Bash', { command: 'git push origin main' })).toBeNull()
     })
 
     it('returns null for empty command', () => {
