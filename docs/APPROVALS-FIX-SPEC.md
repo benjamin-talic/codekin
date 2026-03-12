@@ -514,7 +514,9 @@ This ensures:
 
 ### Add compaction for existing commands
 
-Add a one-time migration that runs on startup to compact existing exact commands into patterns:
+Add a one-time migration that runs on startup to compact existing exact commands into patterns.
+
+**Note:** `commandPrefix(cmd)` is the existing helper (`approval-manager.ts:157-163`) that extracts the first two whitespace-separated tokens from a command string (e.g., `"git push origin main"` → `"git push"`). It's already used by `checkRepoApproval()` for prefix-based matching.
 
 ```typescript
 /** Compact exact commands that could be represented by existing patterns. */
@@ -616,10 +618,11 @@ This simplifies the UI from 4 buttons (Allow / Always Allow / Approve Pattern / 
 5. **Auto-allow countdown:** Verify the 15s countdown resets correctly when a new prompt becomes active after answering the previous one (guaranteed by `key` prop remount).
 6. **Silent denial visibility:** Stop the Codekin server, trigger a Bash command in an active session. Verify the hook denial appears as a system error message in the chat with a `claude config add allowedTools` suggestion.
 7. **Access suggestion accuracy:** Trigger denials for Bash, Write, and WebSearch tools. Verify each produces a correct, copy-pasteable `claude config` command.
-8. **Pattern-first storage:** Click "Always Allow" on a `git push origin feat/test` command. Verify `repo-approvals.json` stores a pattern (not the exact command string) and the pattern matches the original command.
+8. **Pattern-first storage:** Click "Always Allow" on a `git push origin feat/test` command. Verify `repo-approvals.json` stores the pattern `git push *` (not the exact command string) and that this pattern successfully auto-approves `git push origin feat/other` on a subsequent run.
 9. **Dangerous commands stay exact:** Click "Always Allow" on `ssh user@host "cmd"`, `docker run ...`, `curl ...`, and `gh api repos/x -X DELETE`. Verify each is stored as an exact command, not a pattern.
 10. **Shell meta-characters block patterns:** Click "Always Allow" on `git diff HEAD | cat` and a multi-line script. Verify exact match storage (no pattern derived).
 11. **Compaction on startup:** Add 5 exact `gh pr create ...` commands to `repo-approvals.json` manually, restart server. Verify they're compacted into a `gh pr *` pattern and exact entries are removed.
 12. **Compaction with zero existing patterns:** Create a repo entry with only exact commands (no patterns), restart. Verify compaction still creates patterns from 3+ grouped commands.
 13. **Compaction idempotency:** Restart the server twice. Verify the file is only rewritten on the first restart (no redundant persist on second).
 14. **UI simplification:** Verify the "Approve Pattern" button is gone and "Always Allow" tooltip shows the pattern that will be stored (e.g., "Auto-approve: git diff *").
+15. **Dangerous commands survive compaction:** Add 5 exact `ssh user@host ...` commands to `repo-approvals.json`, restart server. Verify they are NOT compacted into an `ssh *` pattern and remain as exact commands.
