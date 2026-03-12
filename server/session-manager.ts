@@ -39,6 +39,8 @@ const execFileAsync = promisify(execFile)
 const GIT_MAX_BUFFER = 2 * 1024 * 1024
 /** Timeout for git commands (10 seconds). */
 const GIT_TIMEOUT_MS = 10_000
+/** Max paths per git command to stay under ARG_MAX (~128 KB on Linux). */
+const GIT_PATH_CHUNK_SIZE = 200
 
 /** Run a git command as a fixed argv array (no shell interpolation). */
 async function execGit(args: string[], cwd: string): Promise<string> {
@@ -48,6 +50,16 @@ async function execGit(args: string[], cwd: string): Promise<string> {
     timeout: GIT_TIMEOUT_MS,
   })
   return stdout
+}
+
+/** Run a git command with paths chunked to avoid E2BIG. Concatenates stdout. */
+async function execGitChunked(baseArgs: string[], paths: string[], cwd: string): Promise<string> {
+  let result = ''
+  for (let i = 0; i < paths.length; i += GIT_PATH_CHUNK_SIZE) {
+    const chunk = paths.slice(i, i + GIT_PATH_CHUNK_SIZE)
+    result += await execGit([...baseArgs, '--', ...chunk], cwd)
+  }
+  return result
 }
 
 /** Get file statuses from `git status --porcelain` for given paths (or all). */
@@ -1409,18 +1421,17 @@ export class SessionManager {
         } else {
           restoreArgs.push('--worktree')
         }
-        restoreArgs.push('--', ...trackedPaths)
 
         try {
-          await execGit(restoreArgs, cwd)
+          await execGitChunked(restoreArgs, trackedPaths, cwd)
         } catch (err) {
           // Fallback for Git < 2.23
           console.warn('[discard] git restore failed, trying fallback:', err)
           if (scope === 'staged' || scope === 'all') {
-            await execGit(['reset', 'HEAD', '--', ...trackedPaths], cwd)
+            await execGitChunked(['reset', 'HEAD'], trackedPaths, cwd)
           }
           if (scope === 'unstaged' || scope === 'all') {
-            await execGit(['checkout', '--', ...trackedPaths], cwd)
+            await execGitChunked(['checkout'], trackedPaths, cwd)
           }
         }
       }
@@ -1429,10 +1440,10 @@ export class SessionManager {
       if (stagedNewPaths.length > 0) {
         if (scope === 'staged') {
           // Unstage only — leave on disk
-          await execGit(['rm', '--cached', '--', ...stagedNewPaths], cwd)
+          await execGitChunked(['rm', '--cached'], stagedNewPaths, cwd)
         } else if (scope === 'all') {
           // Remove from index and disk
-          await execGit(['rm', '--cached', '--', ...stagedNewPaths], cwd)
+          await execGitChunked(['rm', '--cached'], stagedNewPaths, cwd)
           for (const p of stagedNewPaths) {
             await fs.unlink(path.join(cwd, p)).catch(() => {})
           }
