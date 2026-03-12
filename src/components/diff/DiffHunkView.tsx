@@ -10,7 +10,6 @@ import 'react-diff-view/style/index.css'
 
 interface DiffHunkViewProps {
   hunks: DiffHunk[]
-  fileExtension: string
 }
 
 /** Convert our DiffHunk[] to react-diff-view's HunkData[] format. */
@@ -61,8 +60,8 @@ export function DiffHunkView({ hunks }: DiffHunkViewProps) {
   return (
     <div className="diff-hunk-view text-xs font-mono overflow-x-auto">
       <Diff viewType="unified" diffType="modify" hunks={rdvHunks}>
-        {(rdvHunks) => rdvHunks.map(hunk => (
-          <Hunk key={hunk.content} hunk={hunk} />
+        {(rdvHunks) => rdvHunks.map((hunk, i) => (
+          <Hunk key={`${hunk.oldStart}:${hunk.newStart}:${i}`} hunk={hunk} />
         ))}
       </Diff>
     </div>

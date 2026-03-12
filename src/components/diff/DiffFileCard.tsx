@@ -23,8 +23,6 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
   const [expanded, setExpanded] = useState(!isLarge)
   const [confirmDiscard, setConfirmDiscard] = useState(false)
 
-  const ext = file.path.split('.').pop() ?? ''
-
   const displayPath = file.status === 'renamed' && file.oldPath
     ? `${file.oldPath} → ${file.path}`
     : file.path
@@ -104,11 +102,11 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
             </div>
           ) : isLarge && file.hunks.length > 0 ? (
             <div className="px-4 py-3">
-              <DiffHunkView hunks={file.hunks} fileExtension={ext} />
+              <DiffHunkView hunks={file.hunks}  />
             </div>
           ) : file.hunks.length > 0 ? (
             <div className="px-0">
-              <DiffHunkView hunks={file.hunks} fileExtension={ext} />
+              <DiffHunkView hunks={file.hunks}  />
             </div>
           ) : (
             <div className="px-4 py-3 text-neutral-5 text-xs italic">No changes</div>

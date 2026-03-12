@@ -195,21 +195,9 @@ function parseHunk(lines: string[], startIdx: number): HunkParseResult | null {
     } else if (line.startsWith('\\')) {
       // "\ No newline at end of file" — skip
     } else if (line === '') {
-      // Could be an empty context line at end of hunk, or end of section
-      // Check if next line continues the hunk
-      if (idx + 1 < lines.length && /^[ +\-\\@]/.test(lines[idx + 1])) {
-        // Empty context line
-        diffLines.push({
-          type: 'context',
-          content: '',
-          oldLineNo: oldLineNo,
-          newLineNo: newLineNo,
-        })
-        oldLineNo++
-        newLineNo++
-      } else {
-        break
-      }
+      // Unified diff always prefixes lines with ' ', '+', or '-'.
+      // An empty string means end-of-section (from split at file boundaries).
+      break
     } else {
       break
     }

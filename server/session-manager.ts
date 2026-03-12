@@ -56,24 +56,34 @@ async function getFileStatuses(cwd: string, paths?: string[]): Promise<Record<st
   if (paths) args.push('--', ...paths)
   const raw = await execGit(args, cwd)
   const result: Record<string, DiffFileStatus> = {}
-  // Porcelain -z format: XY NUL path NUL (rename: XY NUL oldpath NUL newpath NUL)
-  const entries = raw.split('\0').filter(Boolean)
+  // Porcelain -z format: XY NUL path NUL
+  // For renames/copies: XY NUL oldpath NUL newpath NUL
+  const parts = raw.split('\0')
   let i = 0
-  while (i < entries.length) {
-    const entry = entries[i]
-    const xy = entry.slice(0, 2)
+  while (i < parts.length) {
+    const entry = parts[i]
+    if (entry.length < 3) { i++; continue } // skip empty trailing entries
+    const x = entry[0] // index status
+    const y = entry[1] // worktree status
     const filePath = entry.slice(3)
-    if (xy.includes('R')) {
-      result[filePath] = 'renamed'
-      i += 2 // skip the "new path" entry
-    } else if (xy.includes('D')) {
+    if (x === 'R' || x === 'C') {
+      // Rename/copy: next NUL-separated part is the new path
+      const newPath = parts[i + 1] ?? filePath
+      result[newPath] = 'renamed'
+      i += 2
+    } else if (x === 'D' || y === 'D') {
       result[filePath] = 'deleted'
-    } else if (xy === '??' || xy === 'A ' || xy === 'AM') {
+      i++
+    } else if (x === '?' && y === '?') {
       result[filePath] = 'added'
+      i++
+    } else if (x === 'A') {
+      result[filePath] = 'added'
+      i++
     } else {
       result[filePath] = 'modified'
+      i++
     }
-    i++
   }
   return result
 }
@@ -1265,8 +1275,16 @@ export class SessionManager {
       try {
         rawDiff = await execGit(diffArgs, cwd)
       } catch {
-        // git diff HEAD fails if no commits yet — fall back to empty
-        rawDiff = ''
+        // git diff HEAD fails if no commits yet — fall back to staged + unstaged
+        if (scope === 'all') {
+          const [staged, unstaged] = await Promise.all([
+            execGit(['diff', '--cached', '--find-renames', '--no-color', '--unified=3'], cwd).catch(() => ''),
+            execGit(['diff', '--find-renames', '--no-color', '--unified=3'], cwd).catch(() => ''),
+          ])
+          rawDiff = staged + unstaged
+        } else {
+          rawDiff = ''
+        }
       }
 
       const { files, truncated, truncationReason } = parseDiff(rawDiff)
@@ -1333,14 +1351,15 @@ export class SessionManager {
     const cwd = session.workingDir
 
     try {
-      // Validate paths
+      // Validate paths — enforce separator boundary to prevent /repoX matching /repo
       if (paths) {
+        const root = path.resolve(cwd) + path.sep
         for (const p of paths) {
           if (p.includes('..') || path.isAbsolute(p)) {
             return { type: 'diff_error', message: `Invalid path: ${p}` }
           }
           const resolved = path.resolve(cwd, p)
-          if (!resolved.startsWith(cwd)) {
+          if (resolved !== path.resolve(cwd) && !resolved.startsWith(root)) {
             return { type: 'diff_error', message: `Path escapes working directory: ${p}` }
           }
         }
@@ -1364,12 +1383,10 @@ export class SessionManager {
       for (const p of targetPaths) {
         const status = fileStatuses[p]
         if (status === 'added') {
-          // Need to determine if this is untracked or staged-new
-          // Check if in index
+          // Determine if untracked or staged-new by checking the index
           try {
-            await execGit(['ls-files', '--stage', '--', p], cwd)
-            const result = (await execGit(['ls-files', '--stage', '--', p], cwd)).trim()
-            if (result) {
+            const indexEntry = (await execGit(['ls-files', '--stage', '--', p], cwd)).trim()
+            if (indexEntry) {
               stagedNewPaths.push(p)
             } else {
               untrackedPaths.push(p)
