@@ -1,5 +1,6 @@
 /**
- * Chat input bar with textarea, file attachment, and skill menu.
+ * Chat input bar with textarea, file attachment, skill menu, and
+ * inline slash-command autocomplete.
  *
  * Supports Enter to send, Shift+Enter for newline, Ctrl+C to interrupt,
  * Escape to blur. Height is user-draggable via a top handle and persisted
@@ -9,7 +10,9 @@
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { IconSend, IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
+import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
+import type { SlashCommand } from '../lib/slashCommands'
 
 const MODELS = [
   { id: 'claude-opus-4-6', label: 'Opus 4.6' },
@@ -41,6 +44,8 @@ interface InputBarProps {
   onAddFiles: (files: File[]) => void
   onRemoveFile: (index: number) => void
   skillGroups?: SkillGroup[]
+  /** Unified list of all slash commands (skills + bundled + built-in). */
+  slashCommands?: SlashCommand[]
   initialValue?: string
   onValueChange?: (value: string) => void
   currentModel?: string | null
@@ -50,11 +55,13 @@ interface InputBarProps {
   isMobile?: boolean
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false }, ref) {
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false)
+  const [slashFilter, setSlashFilter] = useState('')
   const mobileMenuRef = useRef<HTMLDivElement>(null)
   const MOBILE_HEIGHT = 100
   const [height, setHeight] = useState(() => {
@@ -115,16 +122,64 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
   const handleSend = useCallback(() => {
     if (!value.trim() && pendingFiles.length === 0) return
+    setSlashMenuOpen(false)
     onSendInput(value)
     setValue('')
     onValueChange?.('')
   }, [value, pendingFiles, onSendInput, onValueChange])
 
+  // --- Slash autocomplete logic ---
+
+  /** Check if the current input should trigger slash autocomplete. */
+  const updateSlashMenu = useCallback((text: string) => {
+    const trimmed = text.trimStart()
+    if (trimmed.startsWith('/')) {
+      const spaceIdx = trimmed.indexOf(' ')
+      // Only show autocomplete while typing the command itself (before first space)
+      if (spaceIdx === -1) {
+        setSlashFilter(trimmed.slice(1)) // strip the leading /
+        setSlashMenuOpen(true)
+        return
+      }
+    }
+    setSlashMenuOpen(false)
+    setSlashFilter('')
+  }, [])
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value
+    setValue(newValue)
+    onValueChange?.(newValue)
+    updateSlashMenu(newValue)
+  }, [onValueChange, updateSlashMenu])
+
+  const handleSlashSelect = useCallback((cmd: SlashCommand) => {
+    // Insert the command + space, user can type args then press Enter
+    const text = cmd.command + ' '
+    setValue(text)
+    onValueChange?.(text)
+    setSlashMenuOpen(false)
+    setSlashFilter('')
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }, [onValueChange])
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing) return
-    if (e.key === 'Enter' && !e.shiftKey) {
+
+    // When slash menu is open, Escape closes it instead of blurring
+    if (slashMenuOpen && e.key === 'Escape') {
       e.preventDefault()
-      handleSend()
+      setSlashMenuOpen(false)
+      return
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey) {
+      // Don't send when slash menu is open — Enter selects the autocomplete item
+      // (cmdk handles this internally via its own keydown)
+      if (!slashMenuOpen) {
+        e.preventDefault()
+        handleSend()
+      }
     } else if (e.key === 'c' && e.ctrlKey) {
       e.preventDefault()
       onSendInput('\x03')
@@ -133,7 +188,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       textareaRef.current?.blur()
       onEscape()
     }
-  }, [handleSend, onSendInput, onEscape])
+  }, [slashMenuOpen, handleSend, onSendInput, onEscape])
 
   const handleFileSelect = useCallback(() => {
     fileInputRef.current?.click()
@@ -148,10 +203,22 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   }, [onAddFiles])
 
   const hasSkills = skillGroups && skillGroups.some(g => g.skills.length > 0)
+  const hasSlashCommands = slashCommands && slashCommands.length > 0
 
   return (
     <div className="app-input-bar relative flex flex-col border-t border-l border-neutral-9 bg-neutral-10" style={isMobile ? { minHeight: MOBILE_HEIGHT } : { height }}>
       <DropZone onUpload={onAddFiles} disabled={disabled} />
+
+      {/* Slash autocomplete popup */}
+      {slashMenuOpen && hasSlashCommands && (
+        <SlashAutocomplete
+          commands={slashCommands}
+          filter={slashFilter}
+          onSelect={handleSlashSelect}
+          onClose={() => setSlashMenuOpen(false)}
+        />
+      )}
+
       {/* Drag handle — desktop only */}
       {!isMobile && (
         <div
@@ -187,7 +254,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={e => { setValue(e.target.value); onValueChange?.(e.target.value) }}
+          onChange={handleChange}
           onKeyDown={handleKeyDown}
           disabled={disabled}
           autoFocus

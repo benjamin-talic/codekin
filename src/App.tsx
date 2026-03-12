@@ -19,6 +19,7 @@ import { useSessionOrchestration } from './hooks/useSessionOrchestration'
 import { useDocsBrowser } from './hooks/useDocsBrowser'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useSendMessage } from './hooks/useSendMessage'
+import { buildSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { Settings } from './components/Settings'
 import { ChatView } from './components/ChatView'
@@ -155,6 +156,38 @@ export default function App() {
     ...(activeRepo?.skills ?? []),
   ], [globalSkills, activeRepo?.skills])
 
+  // Unified slash command list for autocomplete (skills + bundled + built-in)
+  const allCommands = useMemo(() => buildSlashCommandList(allSkills), [allSkills])
+
+  // Handle built-in slash commands locally (not sent to Claude)
+  const handleBuiltinCommand = useCallback((command: string, args: string) => {
+    switch (command) {
+      case '/clear':
+      case '/reset':
+      case '/new':
+        leaveSession()
+        clearMessages()
+        if (activeWorkingDir) handleNewSessionForRepo()
+        break
+      case '/compact':
+        sendInput('Please compact the conversation context to save tokens while preserving important context.')
+        break
+      case '/model':
+        if (args) {
+          setModel(args)
+        } else {
+          sendInput(`Current model: ${currentModel ?? 'default'}. To change, use the model selector in the input bar.`)
+        }
+        break
+      case '/help':
+        sendInput('[Codekin] Available commands: /clear, /compact, /model, /cost, /status, /help. Skills: type / to see autocomplete.')
+        break
+      default:
+        sendInput(`[Codekin] Command ${command} is not available in the web UI.`)
+        break
+    }
+  }, [leaveSession, clearMessages, activeWorkingDir, handleNewSessionForRepo, sendInput, currentModel, setModel])
+
   // Message sending: file uploads, skill expansion, tentative queue
   const {
     handleSend: handleSendWithFiles,
@@ -173,6 +206,7 @@ export default function App() {
     sessions,
     allSkills,
     sendInput,
+    onBuiltinCommand: handleBuiltinCommand,
     tentativeQueues,
     addToQueue,
     clearQueue,
@@ -417,6 +451,7 @@ export default function App() {
                 onAddFiles={addFiles}
                 onRemoveFile={removeFile}
                 skillGroups={skillGroups}
+                slashCommands={allCommands}
                 placeholder="Ask Claude about this doc, or request changes..."
                 initialValue={activeSessionId ? (sessionInputs[activeSessionId] ?? '') : ''}
                 onValueChange={(v) => { if (activeSessionId) setSessionInputs(prev => ({ ...prev, [activeSessionId]: v })) }}
@@ -473,6 +508,7 @@ export default function App() {
               onAddFiles={addFiles}
               onRemoveFile={removeFile}
               skillGroups={skillGroups}
+              slashCommands={allCommands}
               initialValue={activeSessionId ? (sessionInputs[activeSessionId] ?? '') : ''}
               onValueChange={(v) => { if (activeSessionId) setSessionInputs(prev => ({ ...prev, [activeSessionId]: v })) }}
               currentModel={currentModel}
