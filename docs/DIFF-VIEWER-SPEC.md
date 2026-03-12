@@ -41,14 +41,15 @@ When Claude edits files during a session, the changes are visible only as tool a
 
 A compact list of changed files, grouped by status:
 
-| Icon | Status | Meaning |
-|------|--------|---------|
-| `M`  | Modified | File was edited (Edit tool) |
-| `A`  | Added | File was created (Write tool to new path) |
-| `D`  | Deleted | File was removed (Bash `rm` detected) |
+| Icon | Status | Color | Meaning |
+|------|--------|-------|---------|
+| `M`  | Modified | yellow | File was edited (Edit tool) |
+| `A`  | Added | green | File was created (Write tool to new path) |
+| `D`  | Deleted | red | File was removed (Bash `rm` detected) |
+| `R`  | Renamed | blue | File was moved/renamed; displayed as `old → new` |
 
 Each row shows:
-- Status badge (M/A/D) with color (yellow/green/red)
+- Status badge (M/A/D/R) with color per table above
 - Relative file path (relative to session `workingDir`)
 - Additions / deletions count (`+12 −3`)
 
@@ -58,9 +59,9 @@ Click a file to scroll the diff section to that file. The active file is highlig
 
 - **Unified diff** format, one file after another, scrollable.
 - Syntax-highlighted with the same theme as code blocks in chat.
-- Line numbers shown for both old and new versions.
+- **Two-gutter line numbers**: old line number on the left, new on the right. Added lines show a blank old gutter; deleted lines show a blank new gutter. Context lines show both.
 - Added lines highlighted green, removed lines highlighted red, context lines neutral.
-- **Collapsed by default** for files with >200 changed lines (click to expand).
+- **Collapsed by default** for files with >300 changed lines (additions + deletions), click to expand.
 - Each file section has a header bar with the file path and expand/collapse toggle.
 
 ### Summary Bar (sticky top)
@@ -87,13 +88,17 @@ We do **not** try to reconstruct diffs from tool events (too fragile — Bash co
 | { type: 'get_diff'; scope?: 'staged' | 'unstaged' | 'all' }
 ```
 
-- `scope` defaults to `'all'` (equivalent to `git diff HEAD`).
+- `scope` determines which git command runs:
+  - `'unstaged'` → `git diff --no-color --unified=3` (working tree vs index)
+  - `'staged'` → `git diff --cached --no-color --unified=3` (index vs HEAD)
+  - `'all'` (default) → `git diff HEAD --no-color --unified=3` (working tree vs HEAD, combines staged + unstaged)
 - Requests the current diff for the active session's working directory.
 
 #### Server → Client
 
 ```typescript
-| { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary }
+| { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; truncated?: boolean }
+| { type: 'diff_error'; message: string }
 ```
 
 ```typescript
@@ -101,9 +106,10 @@ interface DiffFile {
   path: string                     // relative to workingDir
   status: 'modified' | 'added' | 'deleted' | 'renamed'
   oldPath?: string                 // set when status is 'renamed'
-  additions: number
-  deletions: number
-  hunks: DiffHunk[]
+  isBinary: boolean                // true for binary files (no hunks emitted)
+  additions: number                // 0 for binary files
+  deletions: number                // 0 for binary files
+  hunks: DiffHunk[]                // empty for binary files
 }
 
 interface DiffHunk {
@@ -117,15 +123,17 @@ interface DiffHunk {
 
 interface DiffLine {
   type: 'add' | 'delete' | 'context'
-  content: string
-  oldLineNo?: number
-  newLineNo?: number
+  content: string                  // line text WITHOUT the leading +/-/space prefix, no trailing newline
+  oldLineNo?: number               // undefined for 'add' lines
+  newLineNo?: number               // undefined for 'delete' lines
 }
 
 interface DiffSummary {
   filesChanged: number
   insertions: number
   deletions: number
+  truncated: boolean               // true if output exceeded size limits
+  truncationReason?: string        // e.g. "Diff output exceeded 2 MB limit"
 }
 ```
 
@@ -134,16 +142,24 @@ interface DiffSummary {
 On receiving `get_diff`, the session manager:
 
 1. Validates the requesting client is joined to a session.
-2. Runs `git diff HEAD --no-color --unified=3` in the session's `workingDir`.
-3. Parses the unified diff output into the `DiffFile[]` structure.
-4. Sends `diff_result` back to the requesting client only (not broadcast).
+2. Resolves the `workingDir` from the server-side session record (never from client input).
+3. Runs `git diff` (per scope, see above) with `--find-renames --no-color --unified=3` as a fixed argv array (no shell interpolation). Also runs `git ls-files --others --exclude-standard` to discover untracked files.
+4. For each untracked file, generates a synthetic "added" diff by diffing `/dev/null` against the file content (does **not** mutate the index with `git add -N`).
+5. Parses the combined output into `DiffFile[]`. If raw output exceeds **2 MB**, parsing stops, `truncated` is set to `true`, and files parsed so far are returned.
+6. Sends `diff_result` back to the requesting client only (not broadcast). On error (e.g. not a git repo, git not found), sends `diff_error` instead.
 
-A `parseDiff(raw: string): DiffFile[]` utility handles the parsing. This is a new server module: `server/diff-parser.ts`.
+**Constraints:**
+- Git commands run with a **10-second timeout** and **2 MB stdout cap** (`maxBuffer`).
+- `workingDir` must match a known session — no arbitrary path execution.
+- Binary files are detected via `Binary files ... differ` or `GIT binary patch` markers; the parser sets `isBinary: true` and emits no hunks.
+
+A `parseDiff(raw: string): { files: DiffFile[]; truncated: boolean }` utility handles the parsing. This is a new server module: `server/diff-parser.ts`.
 
 ### Auto-Refresh
 
 The diff panel auto-refreshes after:
-- A `tool_done` event where `toolName` is `Edit`, `Write`, or `Bash` (debounced 500ms).
+- A `tool_done` event where `toolName` is `Edit` or `Write` (always, debounced 500ms).
+- A `tool_done` event where `toolName` is `Bash` **only if** the tool summary suggests a file-mutating command (heuristic: summary does not start with common read-only commands like `ls`, `cat`, `echo`, `grep`, `git log`, `git status`, `pwd`, `which`, `node -e`). When in doubt, refresh — false positives are cheap, missed updates are confusing.
 - The user clicks the manual "Refresh" button.
 
 The panel does **not** poll on an interval. It refreshes reactively.
@@ -192,10 +208,10 @@ The panel does **not** poll on an interval. It refreshes reactively.
 
 - **No git repo**: If the session's `workingDir` is not inside a git repository, the diff panel shows an info message: "Not a git repository — diff view unavailable."
 - **No changes**: Shows "No changes detected" with a subtle icon.
-- **Binary files**: Listed in the file tree with a "binary" badge; no inline diff shown.
-- **Large diffs**: Files with >500 changed lines are collapsed by default with a warning: "Large diff (N lines) — click to expand."
-- **Uncommitted new files**: `git diff HEAD` won't show untracked files. The server should run `git add -N .` (intent-to-add) before diffing, or use `git diff HEAD` + `git ls-files --others --exclude-standard` to also capture new untracked files.
-- **Renamed files**: Detected via `git diff --find-renames` and displayed with `oldPath → newPath`.
+- **Binary files**: Listed in the file tree with a "binary" badge (`isBinary: true`); no inline diff shown, additions/deletions reported as 0.
+- **Large diffs**: Files with >300 changed lines (additions + deletions) are collapsed by default with a note: "Large diff (N lines) — click to expand." If the entire diff payload was truncated (>2 MB), a banner reads: "Diff truncated — showing partial results."
+- **Uncommitted new files**: Untracked files are discovered via `git ls-files --others --exclude-standard` and diffed as synthetic additions (compare `/dev/null` to file content). The server does **not** run `git add -N` or otherwise mutate the index.
+- **Renamed files**: Detected via `git diff --find-renames` and displayed in the file tree as `R old → new` with a blue badge.
 - **Session without active Claude process**: Diff is still available — it reads the filesystem, not the process.
 
 ---
