@@ -317,26 +317,29 @@ router.post('/api/hook-notify', (req, res) => {
 The `buildAccessSuggestion()` helper generates a CLI command the user can run on their machine to pre-approve the tool:
 
 ```typescript
+/** CLIs where the subcommand matters for pattern scoping (e.g. "git push *" not "git *"). */
+const KNOWN_TWO_TOKEN_CLIS = new Set(['git', 'gh', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'cargo', 'go', 'docker'])
+
 function buildAccessSuggestion(toolName: string, toolInput: Record<string, unknown>, workingDir: string): string {
   // Claude Code's native permission system uses exact-match or pattern rules
   // stored in .claude/settings.local.json under permissions.allow[]
-  //
-  // Format: "ToolName" for non-Bash tools, "Bash(command)" for exact Bash commands
-  // Users can also add to ~/.claude/settings.local.json manually
   //
   // The claude CLI has a built-in way to manage permissions:
   //   claude config add allowedTools "Bash(npm install*)"
 
   if (toolName === 'Bash') {
     const cmd = String(toolInput.command || '')
-    // Derive a safe pattern — use the first token(s) as a prefix
-    const firstToken = cmd.split(/\s+/)[0]
-    const pattern = `Bash(${firstToken} *)`
-    return `💡 To allow this in future, run on your machine:\n\`claude config add allowedTools "${pattern}"\``
+    const tokens = cmd.split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) return ''
+    // Use two-token prefix for known CLIs (git push, npm run, gh pr, etc.)
+    const twoToken = tokens.length >= 2 ? `${tokens[0]} ${tokens[1]}` : ''
+    const prefix = KNOWN_TWO_TOKEN_CLIS.has(tokens[0]) && twoToken ? twoToken : tokens[0]
+    const pattern = `Bash(${prefix} *)`
+    return `To allow this in future, run on your machine:\n\`claude config add allowedTools "${pattern}"\``
   }
 
   if (['Write', 'Edit', 'WebFetch', 'WebSearch', 'Agent'].includes(toolName)) {
-    return `💡 To allow ${toolName} in future, run on your machine:\n\`claude config add allowedTools "${toolName}"\``
+    return `To allow ${toolName} in future, run on your machine:\n\`claude config add allowedTools "${toolName}"\``
   }
 
   return ''
@@ -351,7 +354,7 @@ function buildAccessSuggestion(toolName: string, toolInput: Record<string, unkno
 
 ```
 ⚠ Permission denied: Bash: Server error: fetch failed
-💡 To allow this in future, run on your machine:
+To allow this in future, run on your machine:
 `claude config add allowedTools "Bash(yarn *)"`
 ```
 
@@ -422,20 +425,29 @@ saveAlwaysAllow(workingDir: string, toolName: string, toolInput: Record<string, 
 
 This single change would have prevented ~90% of the exact command bloat. Most stored commands start with `gh`, `git`, `npm`, `cd`, or other safe prefixes that already have patterns in `SAFE_PREFIX_COMMANDS`.
 
-### Expand `SAFE_PREFIX_COMMANDS` with commonly approved commands
+### Rename `SAFE_PREFIX_COMMANDS` to `PATTERNABLE_PREFIXES` and add risk tiers
 
-Based on the real-world data, add these missing prefixes:
+The current name implies safety, but the set is used for *pattern derivation* (grouping similar commands), not auto-approval. Rename to clarify intent and split into tiers:
 
 ```typescript
-private static readonly SAFE_PREFIX_COMMANDS = new Set([
-  // ... existing entries ...
+/**
+ * Prefixes where pattern-based grouping is safe. Used by derivePattern()
+ * and compactExactCommands() to create "prefix *" patterns.
+ *
+ * IMPORTANT: Inclusion here does NOT auto-approve anything — the user
+ * still explicitly approves the pattern. It only means "we can group
+ * `git push origin feat/x` and `git push origin feat/y` into one
+ * `git push *` pattern" instead of storing each as an exact match.
+ */
+private static readonly PATTERNABLE_PREFIXES = new Set([
+  // ... existing entries (git add, git diff, npm run, etc.) ...
 
-  // Git operations commonly approved
-  'git push', 'git remote', 'git cherry-pick', 'git reset',
-  'git clean', 'git worktree', 'git archive',
+  // Git operations — safe to group by subcommand
+  'git push', 'git remote', 'git cherry-pick',
+  'git worktree', 'git archive',
 
-  // GitHub CLI (read-safe operations)
-  'gh pr', 'gh api', 'gh repo', 'gh run', 'gh search',
+  // GitHub CLI
+  'gh pr', 'gh repo', 'gh run', 'gh search',
   'gh issue', 'gh release',
 
   // Package managers
@@ -443,18 +455,62 @@ private static readonly SAFE_PREFIX_COMMANDS = new Set([
   'pnpm --filter', 'pnpm typecheck',
   'bun run', 'bun test', 'bun install',
 
-  // Common dev tools
-  'docker', 'docker-compose',
+  // Dev tools
   'pm2',
-  'ssh',
 
-  // File inspection (harmless read commands)
+  // File inspection (read-only)
   'file', 'du', 'stat', 'tree',
   'basename', 'dirname', 'realpath',
 ])
+
+/**
+ * Prefixes that should NEVER be auto-patterned, even if the user
+ * clicks "Always Allow". These are stored as exact match only.
+ * The risk of `ssh *` or `docker *` patterns is too high.
+ */
+private static readonly NEVER_PATTERN_PREFIXES = new Set([
+  'ssh', 'docker', 'docker-compose',
+  'rm', 'sudo', 'curl', 'wget',
+  'git reset', 'git clean',
+  'gh api',  // can perform DELETE/PUT — too broad to pattern
+])
 ```
 
-**Note on `git push` / `git reset` / `ssh`:** These are in `SAFE_PREFIX_COMMANDS` for *pattern derivation*, not for *auto-approval*. Pattern derivation just means "we can safely group `git push origin feat/x` and `git push origin feat/y` into one `git push *` pattern". The user still explicitly approves the pattern — this doesn't bypass the prompt.
+The `derivePattern()` method should check `NEVER_PATTERN_PREFIXES` first and return `null` for those. Additionally, `derivePattern()` should return `null` for commands containing shell meta-characters that make a broad pattern dangerous:
+
+```typescript
+derivePattern(toolName: string, toolInput: Record<string, unknown>): string | null {
+  if (toolName !== 'Bash') return null
+  const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
+  const tokens = cmd.split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return null
+
+  // Never pattern commands with shell meta-characters — the pattern
+  // would be far broader than the specific command the user approved
+  if (/[|;&`$(){}]/.test(cmd) || cmd.includes('\n')) return null
+
+  const first = tokens[0]
+  const twoToken = tokens.length >= 2 ? `${tokens[0]} ${tokens[1]}` : ''
+
+  // Check deny-list first
+  if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(first)) return null
+  if (twoToken && ApprovalManager.NEVER_PATTERN_PREFIXES.has(twoToken)) return null
+
+  // Check allow-list
+  if (twoToken && ApprovalManager.PATTERNABLE_PREFIXES.has(twoToken)) return `${twoToken} *`
+  if (ApprovalManager.PATTERNABLE_PREFIXES.has(first)) return `${first} *`
+
+  return null
+}
+```
+
+This ensures:
+- `git push origin feat/x` → pattern `git push *` (safe to group)
+- `ssh user@host "rm -rf /"` → exact match only (never patterned)
+- `docker run --privileged ...` → exact match only
+- `gh api repos/x/y -X DELETE` → exact match only
+- `git diff HEAD | cat` → exact match only (contains pipe)
+- Multi-line scripts → exact match only (contains newline)
 
 ### Add compaction for existing commands
 
@@ -465,38 +521,49 @@ Add a one-time migration that runs on startup to compact existing exact commands
 private compactExactCommands(): void {
   let totalRemoved = 0
   for (const [dir, entry] of this.repoApprovals) {
-    if (entry.commands.size === 0 || entry.patterns.size === 0) continue
-    const toRemove: string[] = []
-    for (const cmd of entry.commands) {
-      // If this command is already matched by an existing pattern, remove it
-      for (const pattern of entry.patterns) {
-        if (this.matchesPattern(pattern, cmd)) {
-          toRemove.push(cmd)
-          break
+    if (entry.commands.size === 0) continue
+    const toRemove = new Set<string>()
+
+    // Phase 1: Remove exact commands already covered by existing patterns
+    if (entry.patterns.size > 0) {
+      for (const cmd of entry.commands) {
+        for (const pattern of entry.patterns) {
+          if (this.matchesPattern(pattern, cmd)) {
+            toRemove.add(cmd)
+            break
+          }
         }
       }
     }
-    // Also: if there are 3+ exact commands sharing a safe prefix,
-    // create a pattern and remove the exact commands
+
+    // Phase 2: If 3+ exact commands share a patternable prefix,
+    // create a pattern and mark the exact commands for removal.
+    // Skip commands already marked and commands on the deny-list.
     const prefixGroups = new Map<string, string[]>()
     for (const cmd of entry.commands) {
-      if (toRemove.includes(cmd)) continue
+      if (toRemove.has(cmd)) continue
       const prefix = this.commandPrefix(cmd)
-      if (prefix && ApprovalManager.SAFE_PREFIX_COMMANDS.has(prefix)) {
-        const group = prefixGroups.get(prefix) || []
-        group.push(cmd)
-        prefixGroups.set(prefix, group)
-      }
+      if (!prefix) continue
+      if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(prefix)) continue
+      if (!ApprovalManager.PATTERNABLE_PREFIXES.has(prefix)) continue
+      // Skip commands with shell meta-characters (pipes, &&, subshells)
+      if (/[|;&`$(){}]/.test(cmd) || cmd.includes('\n')) continue
+      const group = prefixGroups.get(prefix) || []
+      group.push(cmd)
+      prefixGroups.set(prefix, group)
     }
     for (const [prefix, cmds] of prefixGroups) {
       if (cmds.length >= 3) {
-        entry.patterns.add(`${prefix} *`)
-        toRemove.push(...cmds)
+        const pattern = `${prefix} *`
+        if (!entry.patterns.has(pattern)) {
+          entry.patterns.add(pattern)
+        }
+        for (const cmd of cmds) toRemove.add(cmd)
       }
     }
 
     for (const cmd of toRemove) entry.commands.delete(cmd)
-    totalRemoved += toRemove.length
+    totalRemoved += toRemove.size
   }
   if (totalRemoved > 0) {
     console.log(`[auto-approve] compacted ${totalRemoved} exact commands into patterns`)
@@ -534,12 +601,11 @@ This simplifies the UI from 4 buttons (Allow / Always Allow / Approve Pattern / 
 | `src/hooks/usePromptState.ts` | Rewrite: single state → Map-based queue |
 | `src/hooks/useChatSocket.ts` | Wire up queue API, fix dismiss routing, update return shape |
 | `src/App.tsx` | Consume `activePrompt` + `promptQueueSize` instead of 6 fields |
-| `src/components/PromptButtons.tsx` | No changes needed (receives same props, `key` prop handles remount) |
+| `src/components/PromptButtons.tsx` | Remove "Approve Pattern" button, show pattern in "Always Allow" tooltip (Fix 6); receives same props via `key` remount (Fix 1) |
 | `server/session-manager.ts` | Remove requestId fallback, add leave grace period + timer field |
 | `.claude/hooks/pre-tool-use.mjs` | Add `denyWithNotification()` helper, notify server on all deny paths |
 | `server/session-routes.ts` | Enhance `/api/hook-notify` to detect `hook_denial` and append access suggestion |
-| `server/approval-manager.ts` | Pattern-first `saveAlwaysAllow()`, expand `SAFE_PREFIX_COMMANDS`, add `compactExactCommands()` |
-| `src/components/PromptButtons.tsx` | Remove "Approve Pattern" button, show pattern in "Always Allow" tooltip |
+| `server/approval-manager.ts` | Rename to `PATTERNABLE_PREFIXES`, add `NEVER_PATTERN_PREFIXES`, pattern-first `saveAlwaysAllow()`, shell-meta guard in `derivePattern()`, add `compactExactCommands()` |
 
 ## Test Plan
 
@@ -550,6 +616,10 @@ This simplifies the UI from 4 buttons (Allow / Always Allow / Approve Pattern / 
 5. **Auto-allow countdown:** Verify the 15s countdown resets correctly when a new prompt becomes active after answering the previous one (guaranteed by `key` prop remount).
 6. **Silent denial visibility:** Stop the Codekin server, trigger a Bash command in an active session. Verify the hook denial appears as a system error message in the chat with a `claude config add allowedTools` suggestion.
 7. **Access suggestion accuracy:** Trigger denials for Bash, Write, and WebSearch tools. Verify each produces a correct, copy-pasteable `claude config` command.
-8. **Pattern-first storage:** Click "Always Allow" on a `git push origin feat/test` command. Verify `repo-approvals.json` stores pattern `git push *`, not the exact command string.
-9. **Compaction on startup:** Add 5 exact `gh pr create ...` commands to `repo-approvals.json` manually, restart server. Verify they're compacted into `gh pr *` pattern and exact entries are removed.
-10. **UI simplification:** Verify the "Approve Pattern" button is gone and "Always Allow" tooltip shows the pattern that will be stored (e.g., "Auto-approve: git diff *").
+8. **Pattern-first storage:** Click "Always Allow" on a `git push origin feat/test` command. Verify `repo-approvals.json` stores a pattern (not the exact command string) and the pattern matches the original command.
+9. **Dangerous commands stay exact:** Click "Always Allow" on `ssh user@host "cmd"`, `docker run ...`, `curl ...`, and `gh api repos/x -X DELETE`. Verify each is stored as an exact command, not a pattern.
+10. **Shell meta-characters block patterns:** Click "Always Allow" on `git diff HEAD | cat` and a multi-line script. Verify exact match storage (no pattern derived).
+11. **Compaction on startup:** Add 5 exact `gh pr create ...` commands to `repo-approvals.json` manually, restart server. Verify they're compacted into a `gh pr *` pattern and exact entries are removed.
+12. **Compaction with zero existing patterns:** Create a repo entry with only exact commands (no patterns), restart. Verify compaction still creates patterns from 3+ grouped commands.
+13. **Compaction idempotency:** Restart the server twice. Verify the file is only rewritten on the first restart (no redundant persist on second).
+14. **UI simplification:** Verify the "Approve Pattern" button is gone and "Always Allow" tooltip shows the pattern that will be stored (e.g., "Auto-approve: git diff *").
