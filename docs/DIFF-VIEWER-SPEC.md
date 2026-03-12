@@ -46,7 +46,17 @@ When Claude edits files during a session, the changes are visible only as tool a
 - The chat area shrinks to accommodate the diff panel (flexbox).
 - Width preference persisted in `localStorage` (`codekin-diff-panel-width`).
 
-### File Tree (top section)
+### Toolbar (sticky top)
+
+The top of the panel contains controls and summary info:
+
+- **Branch indicator**: Shows the current branch name (read-only, informational). When in detached HEAD state (`git rev-parse --abbrev-ref HEAD` returns `"HEAD"`), display the short commit SHA instead (via `git rev-parse --short HEAD`) prefixed with "detached at".
+- **Scope selector**: Dropdown to switch between `Uncommitted changes` (default, `git diff HEAD`), `Staged`, and `Unstaged`. Changing scope re-fetches the diff. The dropdown label includes a file count badge (e.g. `Uncommitted changes (5)`).
+- **Discard all**: A destructive action button (red text, confirmation required) that reverts all changes visible in the current scope. Behavior varies by scope — see [Discard Behavior](#discard-behavior) below. Always shown (disabled when no changes).
+- **Summary line**: Total files changed, total insertions, total deletions. Example: `5 files changed  +87 −23`
+- **Refresh button**: Re-fetch the current diff state.
+
+### File Tree
 
 A compact list of changed files, grouped by status:
 
@@ -87,16 +97,6 @@ Each card header contains:
 - **Collapsed by default** for files with >300 changed lines (additions + deletions), with a note: "Large diff (N lines) — click to expand."
 - Cards for binary files show a "Binary file" badge with no diff content.
 
-### Toolbar (sticky top)
-
-The top of the panel contains controls and summary info:
-
-- **Branch indicator**: Shows the current branch name (read-only, informational). When in detached HEAD state (`git rev-parse --abbrev-ref HEAD` returns `"HEAD"`), display the short commit SHA instead (via `git rev-parse --short HEAD`) prefixed with "detached at".
-- **Scope selector**: Dropdown to switch between `Uncommitted changes` (default, `git diff HEAD`), `Staged`, and `Unstaged`. Changing scope re-fetches the diff. The dropdown label includes a file count badge (e.g. `Uncommitted changes (5)`).
-- **Discard all**: A destructive action button (red text, confirmation required) that reverts all changes visible in the current scope. Behavior varies by scope — see [Discard Behavior](#discard-behavior) below. Always shown (disabled when no changes).
-- **Summary line**: Total files changed, total insertions, total deletions. Example: `5 files changed  +87 −23`
-- **Refresh button**: Re-fetch the current diff state.
-
 ---
 
 ## Data Flow
@@ -113,7 +113,7 @@ We do **not** try to reconstruct diffs from tool events (too fragile — Bash co
 
 ```typescript
 | { type: 'get_diff'; scope?: 'staged' | 'unstaged' | 'all' }
-| { type: 'discard_changes'; scope: 'staged' | 'unstaged' | 'all'; paths?: string[] }
+| { type: 'discard_changes'; scope: 'staged' | 'unstaged' | 'all'; paths?: string[]; statuses?: Record<string, DiffFile['status']> }
 ```
 
 **`get_diff`**:
@@ -126,6 +126,7 @@ We do **not** try to reconstruct diffs from tool events (too fragile — Bash co
 **`discard_changes`**:
 - `scope` — required, determines which changes to discard. Must match the currently active scope in the UI.
 - `paths` — optional array of relative file paths to discard. If omitted, discards all changes in the given scope.
+- `statuses` — optional map of `path → status` for the files being discarded. When `paths` is provided, this tells the server each file's status so it can pick the correct discard command per the [Per-status handling](#per-status-handling) table. If omitted (e.g. discard-all), the server runs `git status --porcelain` to determine statuses before discarding.
 - Behavior per scope — see [Discard Behavior](#discard-behavior).
 - Server sends a `diff_result` after discarding (auto-refresh).
 
@@ -181,8 +182,8 @@ On receiving `get_diff`, the session manager:
 1. Validates the requesting client is joined to a session.
 2. Resolves the `workingDir` from the server-side session record (never from client input).
 3. Runs `git rev-parse --abbrev-ref HEAD` to get the current branch name (included in the response as `branch`). If the result is `"HEAD"` (detached state), falls back to `git rev-parse --short HEAD` and prefixes with `"detached at "` (e.g. `"detached at a1b2c3d"`).
-4. Runs `git diff` (per scope, see above) with `--find-renames --no-color --unified=3` as a fixed argv array (no shell interpolation). Also runs `git ls-files --others --exclude-standard` to discover untracked files.
-5. For each untracked file, generates a synthetic "added" diff by diffing `/dev/null` against the file content (does **not** mutate the index with `git add -N`).
+4. Runs `git diff` (per scope, see above) with `--find-renames --no-color --unified=3` as a fixed argv array (no shell interpolation). For `'unstaged'` and `'all'` scopes only, also runs `git ls-files --others --exclude-standard` to discover untracked files. (Skipped for `'staged'` — untracked files cannot be staged.)
+5. For each untracked file (when applicable), generates a synthetic "added" diff by diffing `/dev/null` against the file content (does **not** mutate the index with `git add -N`).
 6. Parses the combined output into `DiffFile[]`. If raw output exceeds **2 MB**, parsing stops, `truncated` is set to `true`, and files parsed so far are returned.
 7. Sends `diff_result` (including `branch` and `scope`) back to the requesting client only (not broadcast). On error (e.g. not a git repo, git not found), sends `diff_error` instead.
 
@@ -231,7 +232,7 @@ When `paths` is omitted, replace `<paths>` with `.` to affect all files.
 - `workingDir` must match a known session — no arbitrary path execution.
 - Binary files are detected via `Binary files ... differ` or `GIT binary patch` markers; the parser sets `isBinary: true` and emits no hunks.
 
-A `parseDiff(raw: string): { files: DiffFile[]; truncated: boolean }` utility handles the parsing. This is a new server module: `server/diff-parser.ts`.
+A `parseDiff(raw: string, maxBytes?: number): { files: DiffFile[]; truncated: boolean; truncationReason?: string }` utility handles the parsing. This is a new server module: `server/diff-parser.ts`.
 
 ### Auto-Refresh
 
@@ -252,7 +253,7 @@ The diff rendering inside each file card uses [`react-diff-view`](https://github
 
 - **What it handles**: Hunk rendering, line number gutters, line type styling (add/delete/context), widget insertion points.
 - **What we handle**: Panel layout, file tree, file cards, toolbar, scope/discard logic, auto-refresh, resize.
-- **Syntax highlighting**: Use `react-diff-view`'s `tokenize` utility with `refractor` (Prism-based) to syntax-highlight diff lines, matching the theme used for code blocks in chat.
+- **Syntax highlighting**: Use `react-diff-view`'s `tokenize` utility with `refractor` (Prism-based) to syntax-highlight diff lines. **Note:** The rest of Codekin uses `highlight.js` for code blocks. Adding `refractor` introduces a second highlighting library. This is acceptable because `react-diff-view`'s tokenizer is designed around `refractor` and adapting it to `highlight.js` would require significant custom work. Ensure the Prism theme CSS is mapped to match the existing Codekin code block colors for visual consistency.
 - **Styling**: Override `react-diff-view`'s default CSS with Codekin theme colors (see Styling section). Import the base stylesheet and layer custom styles on top.
 
 ```
@@ -355,7 +356,7 @@ These are explicitly out of scope for the initial implementation:
 
 ## Implementation Order
 
-1. **Server**: `diff-parser.ts` + `get_diff` / `discard_changes` message handlers in session-manager.
+1. **Server**: `diff-parser.ts` + `get_diff` / `discard_changes` cases in `ws-message-handler.ts` (follows existing `switch(msg.type)` dispatch pattern), with implementation methods in `session-manager.ts`.
 2. **Types**: Add new message types and interfaces to `src/types.ts` and `server/types.ts`.
 3. **Hook**: `useDiff.ts` — WebSocket integration, scope management, discard actions, auto-refresh logic.
 4. **Components**: `DiffPanel` → `DiffToolbar` → `DiffFileTree` → `DiffFileCard` → `DiffHunkView`.
