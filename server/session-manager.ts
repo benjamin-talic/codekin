@@ -17,16 +17,66 @@
  */
 
 import { randomUUID } from 'crypto'
+import { execFile } from 'child_process'
+import { promises as fs } from 'fs'
+import path from 'path'
+import { promisify } from 'util'
 import type { WebSocket } from 'ws'
 import { ClaudeProcess } from './claude-process.js'
 import { SessionArchive } from './session-archive.js'
-import type { PromptQuestion, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
+import type { DiffFileStatus, DiffScope, DiffSummary, PromptQuestion, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
 import { PORT } from './config.js'
 import { ApprovalManager } from './approval-manager.js'
 import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
 import { deriveSessionToken } from './crypto-utils.js'
+import { parseDiff, createUntrackedFileDiff } from './diff-parser.js'
+
+const execFileAsync = promisify(execFile)
+
+/** Max stdout for git commands (2 MB). */
+const GIT_MAX_BUFFER = 2 * 1024 * 1024
+/** Timeout for git commands (10 seconds). */
+const GIT_TIMEOUT_MS = 10_000
+
+/** Run a git command as a fixed argv array (no shell interpolation). */
+async function execGit(args: string[], cwd: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, {
+    cwd,
+    maxBuffer: GIT_MAX_BUFFER,
+    timeout: GIT_TIMEOUT_MS,
+  })
+  return stdout
+}
+
+/** Get file statuses from `git status --porcelain` for given paths (or all). */
+async function getFileStatuses(cwd: string, paths?: string[]): Promise<Record<string, DiffFileStatus>> {
+  const args = ['status', '--porcelain', '-z']
+  if (paths) args.push('--', ...paths)
+  const raw = await execGit(args, cwd)
+  const result: Record<string, DiffFileStatus> = {}
+  // Porcelain -z format: XY NUL path NUL (rename: XY NUL oldpath NUL newpath NUL)
+  const entries = raw.split('\0').filter(Boolean)
+  let i = 0
+  while (i < entries.length) {
+    const entry = entries[i]
+    const xy = entry.slice(0, 2)
+    const filePath = entry.slice(3)
+    if (xy.includes('R')) {
+      result[filePath] = 'renamed'
+      i += 2 // skip the "new path" entry
+    } else if (xy.includes('D')) {
+      result[filePath] = 'deleted'
+    } else if (xy === '??' || xy === 'A ' || xy === 'AM') {
+      result[filePath] = 'added'
+    } else {
+      result[filePath] = 'modified'
+    }
+    i++
+  }
+  return result
+}
 
 /** Max messages retained in a session's output history buffer. */
 const MAX_HISTORY = 2000
@@ -1172,6 +1222,219 @@ export class SessionManager {
   removeClient(ws: WebSocket): void {
     for (const session of this.sessions.values()) {
       session.clients.delete(ws)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Diff viewer
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Run git diff in a session's workingDir and return structured results.
+   * Includes untracked file discovery for 'unstaged' and 'all' scopes.
+   */
+  async getDiff(sessionId: string, scope: DiffScope = 'all'): Promise<WsServerMessage> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return { type: 'diff_error', message: 'Session not found' }
+
+    const cwd = session.workingDir
+    try {
+      // Get branch name
+      let branch: string
+      try {
+        const branchResult = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd)
+        branch = branchResult.trim()
+        if (branch === 'HEAD') {
+          const shaResult = await execGit(['rev-parse', '--short', 'HEAD'], cwd)
+          branch = `detached at ${shaResult.trim()}`
+        }
+      } catch {
+        branch = 'unknown'
+      }
+
+      // Build diff command based on scope
+      const diffArgs = ['diff', '--find-renames', '--no-color', '--unified=3']
+      if (scope === 'staged') {
+        diffArgs.push('--cached')
+      } else if (scope === 'all') {
+        diffArgs.push('HEAD')
+      }
+      // 'unstaged' uses bare `git diff` (working tree vs index)
+
+      let rawDiff: string
+      try {
+        rawDiff = await execGit(diffArgs, cwd)
+      } catch {
+        // git diff HEAD fails if no commits yet — fall back to empty
+        rawDiff = ''
+      }
+
+      const { files, truncated, truncationReason } = parseDiff(rawDiff)
+
+      // Discover untracked files for 'unstaged' and 'all' scopes
+      if (scope !== 'staged') {
+        try {
+          const untrackedRaw = await execGit(
+            ['ls-files', '--others', '--exclude-standard'],
+            cwd,
+          )
+          const untrackedPaths = untrackedRaw.trim().split('\n').filter(Boolean)
+          for (const relPath of untrackedPaths) {
+            try {
+              const fullPath = path.join(cwd, relPath)
+              // Check if binary by attempting to read as utf-8
+              const content = await fs.readFile(fullPath, 'utf-8')
+              files.push(createUntrackedFileDiff(relPath, content))
+            } catch {
+              // Binary or unreadable — add as binary
+              files.push({
+                path: relPath,
+                status: 'added',
+                isBinary: true,
+                additions: 0,
+                deletions: 0,
+                hunks: [],
+              })
+            }
+          }
+        } catch {
+          // ls-files failed — skip untracked
+        }
+      }
+
+      const summary: DiffSummary = {
+        filesChanged: files.length,
+        insertions: files.reduce((sum, f) => sum + f.additions, 0),
+        deletions: files.reduce((sum, f) => sum + f.deletions, 0),
+        truncated,
+        truncationReason,
+      }
+
+      return { type: 'diff_result', files, summary, branch, scope }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to get diff'
+      return { type: 'diff_error', message }
+    }
+  }
+
+  /**
+   * Discard changes in a session's workingDir per the given scope and paths.
+   * Returns a fresh diff_result after discarding.
+   */
+  async discardChanges(
+    sessionId: string,
+    scope: DiffScope,
+    paths?: string[],
+    statuses?: Record<string, DiffFileStatus>,
+  ): Promise<WsServerMessage> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return { type: 'diff_error', message: 'Session not found' }
+
+    const cwd = session.workingDir
+
+    try {
+      // Validate paths
+      if (paths) {
+        for (const p of paths) {
+          if (p.includes('..') || path.isAbsolute(p)) {
+            return { type: 'diff_error', message: `Invalid path: ${p}` }
+          }
+          const resolved = path.resolve(cwd, p)
+          if (!resolved.startsWith(cwd)) {
+            return { type: 'diff_error', message: `Path escapes working directory: ${p}` }
+          }
+        }
+      }
+
+      // Determine file statuses if not provided
+      let fileStatuses = statuses ?? {}
+      if (!statuses && paths) {
+        fileStatuses = await getFileStatuses(cwd, paths)
+      } else if (!statuses && !paths) {
+        fileStatuses = await getFileStatuses(cwd)
+      }
+
+      const targetPaths = paths ?? Object.keys(fileStatuses)
+
+      // Separate files by status for different handling
+      const trackedPaths: string[] = []
+      const untrackedPaths: string[] = []
+      const stagedNewPaths: string[] = []
+
+      for (const p of targetPaths) {
+        const status = fileStatuses[p]
+        if (status === 'added') {
+          // Need to determine if this is untracked or staged-new
+          // Check if in index
+          try {
+            await execGit(['ls-files', '--stage', '--', p], cwd)
+            const result = (await execGit(['ls-files', '--stage', '--', p], cwd)).trim()
+            if (result) {
+              stagedNewPaths.push(p)
+            } else {
+              untrackedPaths.push(p)
+            }
+          } catch {
+            untrackedPaths.push(p)
+          }
+        } else {
+          trackedPaths.push(p)
+        }
+      }
+
+      // Handle tracked files (modified, deleted, renamed) with git restore
+      if (trackedPaths.length > 0) {
+        const restoreArgs = ['restore']
+        if (scope === 'staged') {
+          restoreArgs.push('--staged')
+        } else if (scope === 'all') {
+          restoreArgs.push('--staged', '--worktree')
+        } else {
+          restoreArgs.push('--worktree')
+        }
+        restoreArgs.push('--', ...trackedPaths)
+
+        try {
+          await execGit(restoreArgs, cwd)
+        } catch (err) {
+          // Fallback for Git < 2.23
+          console.warn('[discard] git restore failed, trying fallback:', err)
+          if (scope === 'staged' || scope === 'all') {
+            await execGit(['reset', 'HEAD', '--', ...trackedPaths], cwd)
+          }
+          if (scope === 'unstaged' || scope === 'all') {
+            await execGit(['checkout', '--', ...trackedPaths], cwd)
+          }
+        }
+      }
+
+      // Handle staged new files
+      if (stagedNewPaths.length > 0) {
+        if (scope === 'staged') {
+          // Unstage only — leave on disk
+          await execGit(['rm', '--cached', '--', ...stagedNewPaths], cwd)
+        } else if (scope === 'all') {
+          // Remove from index and disk
+          await execGit(['rm', '--cached', '--', ...stagedNewPaths], cwd)
+          for (const p of stagedNewPaths) {
+            await fs.unlink(path.join(cwd, p)).catch(() => {})
+          }
+        }
+        // 'unstaged' scope: N/A for staged-new files
+      }
+
+      // Handle untracked files (delete from disk)
+      if (untrackedPaths.length > 0 && scope !== 'staged') {
+        for (const p of untrackedPaths) {
+          await fs.unlink(path.join(cwd, p)).catch(() => {})
+        }
+      }
+
+      // Return fresh diff
+      return await this.getDiff(sessionId, scope)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to discard changes'
+      return { type: 'diff_error', message }
     }
   }
 
