@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   IconKey, IconPalette, IconBrandGithub, IconCopy, IconCheck,
   IconChevronDown, IconChevronRight, IconCircleCheckFilled, IconCircleXFilled,
-  IconRobot, IconArchive, IconBrain,
+  IconRobot, IconArchive,
 } from '@tabler/icons-react'
 import type { Settings as SettingsType } from '../types'
 import {
@@ -112,10 +112,6 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
   useEffect(() => {
     if (!open || !settings.token) return
     getRetentionDays(settings.token).then(setRetentionDays).catch(() => {})
-    getSupportProvider(settings.token).then(({ preferred, available }) => {
-      setSupportProviderState(preferred)
-      setAvailableProviders(available)
-    }).catch(() => {})
     getReposPath(settings.token).then(setReposPath).catch(() => {})
     getWebhookConfig(settings.token).then(setWebhookConfig).catch(() => {})
     getWebhookEvents(settings.token).then(setWebhookEvents).catch(() => {})
@@ -257,40 +253,6 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
                 />
               </div>
 
-              {/* Support LLM Provider — full width */}
-              <div className="col-span-2">
-                <label className="mb-1.5 block text-[15px] text-neutral-4">
-                  <span className="flex items-center gap-1.5">
-                    <IconBrain size={14} className="text-neutral-5" />
-                    Support LLM Provider
-                  </span>
-                </label>
-                <select
-                  value={supportProvider}
-                  onChange={e => {
-                    const provider = e.target.value as SupportProvider
-                    setSupportProviderState(provider)
-                    setSupportProvider(settings.token, provider).catch(() => setSaveError('Failed to save provider setting'))
-                  }}
-                  className="w-full rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
-                >
-                  {(Object.keys(PROVIDER_LABELS) as SupportProvider[]).map(key => {
-                    const isUnavailable = key !== 'auto' && !availableProviders.includes(key)
-                    return (
-                      <option key={key} value={key} disabled={isUnavailable}>
-                        {PROVIDER_LABELS[key]}{isUnavailable ? ' (no API key)' : ''}
-                      </option>
-                    )
-                  })}
-                </select>
-                {supportProvider !== 'auto' && (
-                  <div className="mt-1.5 rounded border border-neutral-9 bg-neutral-10/50 px-3 py-1.5">
-                    <span className="text-[13px] text-neutral-5">Model: </span>
-                    <span className="text-[13px] font-mono text-neutral-3">{PROVIDER_MODELS[supportProvider]}</span>
-                  </div>
-                )}
-                <p className="mt-1 text-[13px] text-neutral-6">Used for session naming and other background tasks</p>
-              </div>
             </div>
           </SectionCard>
 

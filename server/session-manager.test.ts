@@ -13,15 +13,6 @@ vi.mock('fs', async (importOriginal) => {
   }
 })
 
-const mockGenerateText = vi.fn()
-vi.mock('ai', () => ({
-  generateText: (...args: any[]) => mockGenerateText(...args),
-}))
-vi.mock('@ai-sdk/groq', () => ({ createGroq: () => (model: string) => ({ modelId: model }) }))
-vi.mock('@ai-sdk/openai', () => ({ createOpenAI: () => (model: string) => ({ modelId: model }) }))
-vi.mock('@ai-sdk/google', () => ({ createGoogleGenerativeAI: () => (model: string) => ({ modelId: model }) }))
-vi.mock('@ai-sdk/anthropic', () => ({ createAnthropic: () => (model: string) => ({ modelId: model }) }))
-
 // Mock better-sqlite3 so SessionArchive doesn't try to open a real database file
 vi.mock('better-sqlite3', () => {
   class MockDatabase {
@@ -37,20 +28,62 @@ vi.mock('better-sqlite3', () => {
   return { default: MockDatabase }
 })
 
-// Set API key for naming tests
-process.env.GROQ_API_KEY = 'test-key'
+// Mock node:child_process.spawn for session naming (which uses `claude -p`)
+const mockSpawn = vi.hoisted(() => vi.fn())
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return {
+    ...actual,
+    spawn: (...args: any[]) => mockSpawn(...args),
+  }
+})
 
 import { SessionManager } from './session-manager.js'
 import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync } from 'fs'
+import { EventEmitter } from 'node:events'
 
-/** Helper to configure the AI SDK mock to return a given session name. */
-function mockCliNaming(text: string): void {
-  mockGenerateText.mockResolvedValue({ text })
+/** Create a fake child process that resolves with the given stdout text.
+ *  Uses queueMicrotask for close event to work with fake timers. */
+function fakeCliProc(stdout: string, code = 0, stderr = '') {
+  const proc = Object.assign(new EventEmitter(), {
+    stdin: { write: vi.fn(), end: vi.fn() },
+    stdout: Object.assign(new EventEmitter(), { on: vi.fn() }),
+    stderr: Object.assign(new EventEmitter(), { on: vi.fn() }),
+    kill: vi.fn(),
+  })
+
+  proc.stdout.on = vi.fn((event: string, cb: (chunk: Buffer) => void) => {
+    if (event === 'data') {
+      queueMicrotask(() => cb(Buffer.from(stdout)))
+    }
+  })
+  proc.stderr.on = vi.fn((event: string, cb: (chunk: Buffer) => void) => {
+    if (event === 'data' && stderr) {
+      queueMicrotask(() => cb(Buffer.from(stderr)))
+    }
+  })
+
+  // Use queueMicrotask chain to fire close after data events, avoiding
+  // setTimeout which is intercepted by vi.useFakeTimers()
+  queueMicrotask(() => queueMicrotask(() => proc.emit('close', code)))
+  return proc
 }
 
-/** Helper to configure the AI SDK mock to reject with an error. */
-function mockCliNamingError(message: string): void {
-  mockGenerateText.mockRejectedValue(new Error(message))
+/** Helper to configure the CLI mock to return a given session name. */
+function mockCliNaming(text: string): void {
+  mockSpawn.mockImplementation(() => fakeCliProc(text))
+}
+
+/** Helper to configure the CLI mock to fail. */
+function mockCliNamingError(): void {
+  mockSpawn.mockImplementation(() => fakeCliProc('', 1, 'error'))
+}
+
+/** Flush pending microtasks (needed when spawn mock fires events via queueMicrotask). */
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 10; i++) {
+    await new Promise(r => queueMicrotask(r))
+  }
 }
 
 // Minimal fake WebSocket
@@ -1476,7 +1509,7 @@ describe('SessionManager', () => {
 
   describe('scheduleSessionNaming()', () => {
     beforeEach(() => {
-      mockGenerateText.mockReset()
+      mockSpawn.mockReset()
     })
 
     it('schedules a naming timer for hub: sessions', () => {
@@ -1503,7 +1536,7 @@ describe('SessionManager', () => {
       sm.scheduleSessionNaming('nonexistent-id')
     })
 
-    it('calls API after 30s delay', async () => {
+    it('calls CLI after initial delay', async () => {
       vi.useFakeTimers()
       mockCliNaming('Dark Mode Support')
       const s = sm.create('hub:abc', '/tmp')
@@ -1512,11 +1545,12 @@ describe('SessionManager', () => {
 
       sm.scheduleSessionNaming(s.id)
 
-      expect(mockGenerateText).not.toHaveBeenCalled()
+      expect(mockSpawn).not.toHaveBeenCalled()
 
-      await vi.advanceTimersByTimeAsync(30_000)
+      await vi.advanceTimersByTimeAsync(20_000)
+      await flushMicrotasks()
 
-      expect(mockGenerateText).toHaveBeenCalledOnce()
+      expect(mockSpawn).toHaveBeenCalledOnce()
       vi.useRealTimers()
     })
 
@@ -1528,7 +1562,8 @@ describe('SessionManager', () => {
       s.outputHistory.push({ type: 'output', data: 'Fixing login.' })
 
       sm.scheduleSessionNaming(s.id)
-      await vi.advanceTimersByTimeAsync(30_000)
+      await vi.advanceTimersByTimeAsync(20_000)
+      await flushMicrotasks()
 
       expect(s.name).toBe('Fix Login Bug')
       vi.useRealTimers()
@@ -1542,7 +1577,8 @@ describe('SessionManager', () => {
       s.outputHistory.push({ type: 'output', data: 'Fixing.' })
 
       sm.scheduleSessionNaming(s.id)
-      await vi.advanceTimersByTimeAsync(30_000)
+      await vi.advanceTimersByTimeAsync(20_000)
+      await flushMicrotasks()
 
       expect(s.name).toBe('Fix Login Bug')
       vi.useRealTimers()
@@ -1556,7 +1592,8 @@ describe('SessionManager', () => {
       s.outputHistory.push({ type: 'output', data: 'Done.' })
 
       sm.scheduleSessionNaming(s.id)
-      await vi.advanceTimersByTimeAsync(30_000)
+      await vi.advanceTimersByTimeAsync(20_000)
+      await flushMicrotasks()
 
       expect(s.name).toBe('hub:abc')
       expect(s._namingAttempts).toBe(1)
@@ -1572,7 +1609,8 @@ describe('SessionManager', () => {
       s.outputHistory.push({ type: 'output', data: 'Done.' })
 
       sm.scheduleSessionNaming(s.id)
-      await vi.advanceTimersByTimeAsync(30_000)
+      await vi.advanceTimersByTimeAsync(20_000)
+      await flushMicrotasks()
 
       expect(s.name).toBe('hub:abc')
       expect(s._namingAttempts).toBe(1)
@@ -1582,13 +1620,14 @@ describe('SessionManager', () => {
 
     it('keeps hub: name if CLI errors and schedules retry', async () => {
       vi.useFakeTimers()
-      mockCliNamingError('Command failed')
+      mockCliNamingError()
       const s = sm.create('hub:abc', '/tmp')
       s._lastUserInput = 'fix login'
       s.outputHistory.push({ type: 'output', data: 'Fixing.' })
 
       sm.scheduleSessionNaming(s.id)
-      await vi.advanceTimersByTimeAsync(30_000)
+      await vi.advanceTimersByTimeAsync(20_000)
+      await flushMicrotasks()
 
       expect(s.name).toBe('hub:abc')
       expect(s._namingAttempts).toBe(1)
@@ -1598,16 +1637,17 @@ describe('SessionManager', () => {
 
     it('retries with increasing delays up to max attempts', async () => {
       vi.useFakeTimers()
-      mockCliNamingError('fail')
+      mockCliNamingError()
       const s = sm.create('hub:abc', '/tmp')
       s._lastUserInput = 'fix login'
       s.outputHistory.push({ type: 'output', data: 'Fixing.' })
 
       sm.scheduleSessionNaming(s.id)
 
-      const delays = [30_000, 60_000, 120_000, 240_000, 240_000]
+      const delays = [20_000, 60_000, 120_000, 240_000, 240_000]
       for (let i = 0; i < delays.length; i++) {
         await vi.advanceTimersByTimeAsync(delays[i])
+        await flushMicrotasks()
         expect(s._namingAttempts).toBe(i + 1)
       }
 
@@ -1632,7 +1672,7 @@ describe('SessionManager', () => {
 
     it('does not rename if session was manually renamed before timer fires', async () => {
       vi.useFakeTimers()
-      mockCliNaming('Auto Name')
+      mockCliNaming('Auto Name Three Words')
       const s = sm.create('hub:abc', '/tmp')
       s._lastUserInput = 'fix login'
       s.outputHistory.push({ type: 'output', data: 'Fixing.' })
@@ -1640,7 +1680,8 @@ describe('SessionManager', () => {
       sm.scheduleSessionNaming(s.id)
       sm.rename(s.id, 'Manual Name')
 
-      await vi.advanceTimersByTimeAsync(30_000)
+      await vi.advanceTimersByTimeAsync(20_000)
+      await flushMicrotasks()
 
       expect(s.name).toBe('Manual Name')
       vi.useRealTimers()
@@ -1648,7 +1689,7 @@ describe('SessionManager', () => {
 
     it('clears naming timer on session delete', async () => {
       vi.useFakeTimers()
-      mockCliNaming('Some Name')
+      mockCliNaming('Some Session Name')
       const s = sm.create('hub:abc', '/tmp')
       s._lastUserInput = 'fix login'
       s.outputHistory.push({ type: 'output', data: 'Fixing.' })
@@ -1658,15 +1699,16 @@ describe('SessionManager', () => {
 
       sm.delete(s.id)
 
-      await vi.advanceTimersByTimeAsync(30_000)
-      expect(mockGenerateText).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(20_000)
+      await flushMicrotasks()
+      expect(mockSpawn).not.toHaveBeenCalled()
       vi.useRealTimers()
     })
   })
 
   describe('retrySessionNamingOnInteraction()', () => {
     beforeEach(() => {
-      mockGenerateText.mockReset()
+      mockSpawn.mockReset()
     })
 
     it('schedules naming with short delay for unnamed sessions', async () => {
@@ -1681,7 +1723,8 @@ describe('SessionManager', () => {
       expect(s._namingTimer).toBeDefined()
 
       await vi.advanceTimersByTimeAsync(5_000)
-      expect(mockGenerateText).toHaveBeenCalled()
+      await flushMicrotasks()
+      expect(mockSpawn).toHaveBeenCalled()
       expect(s.name).toBe('Fix Login Bug')
       vi.useRealTimers()
     })

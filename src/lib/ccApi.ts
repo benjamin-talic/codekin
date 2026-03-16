@@ -330,18 +330,6 @@ export async function browseDirs(token: string, path?: string): Promise<{ path: 
   return res.json()
 }
 
-/** Supported AI provider identifiers for support actions. */
-export type SupportProvider = 'auto' | 'groq' | 'openai' | 'gemini' | 'anthropic'
-
-/** Get the preferred support provider and list of available providers. */
-export async function getSupportProvider(token: string): Promise<{ preferred: SupportProvider; available: string[] }> {
-  const res = await authFetch(`${BASE}/api/settings/support-provider`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Failed to get support provider: ${res.status}`)
-  return res.json()
-}
-
 /** Webhook configuration (public subset, no secret). */
 export interface WebhookConfigInfo {
   enabled: boolean
@@ -367,16 +355,6 @@ export async function getWebhookEvents(token: string): Promise<Array<{ id: strin
   if (!res.ok) throw new Error(`Failed to get webhook events: ${res.status}`)
   const data = await res.json()
   return data.events ?? []
-}
-
-/** Set the preferred support provider. */
-export async function setSupportProvider(token: string, provider: SupportProvider): Promise<void> {
-  const res = await authFetch(`${BASE}/api/settings/support-provider`, {
-    method: 'PUT',
-    headers: headers(token),
-    body: JSON.stringify({ provider }),
-  })
-  if (!res.ok) throw new Error(`Failed to set support provider: ${res.status}`)
 }
 
 /**
