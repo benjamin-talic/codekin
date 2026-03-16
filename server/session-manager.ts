@@ -188,26 +188,38 @@ export class SessionManager {
     if (!session) return null
 
     try {
+      // Resolve the actual git repo root — workingDir may be a subdirectory
+      const { stdout: repoRootRaw } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+        cwd: workingDir,
+        timeout: 5000,
+      })
+      const repoRoot = repoRootRaw.trim()
+
       const prefix = this.getWorktreeBranchPrefix()
       const shortId = sessionId.slice(0, 8)
       const branchName = `${prefix}${shortId}`
-      const projectName = path.basename(workingDir)
-      const worktreePath = path.resolve(workingDir, '..', `${projectName}-wt-${shortId}`)
+      const projectName = path.basename(repoRoot)
+      const worktreePath = path.resolve(repoRoot, '..', `${projectName}-wt-${shortId}`)
 
       // Clean up stale state from previous failed attempts:
-      // 1. Remove orphaned worktree entry (directory gone but git still tracks it)
-      await execFileAsync('git', ['worktree', 'prune'], { cwd: workingDir, timeout: 5000 }).catch(() => {})
-      // 2. Delete the branch if it exists (leftover from a failed worktree add)
-      await execFileAsync('git', ['branch', '-D', branchName], { cwd: workingDir, timeout: 5000 }).catch(() => {})
+      // 1. Prune orphaned worktree entries (directory gone but git still tracks it)
+      await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, timeout: 5000 })
+        .catch((e: unknown) => console.warn(`[worktree] prune failed:`, e instanceof Error ? e.message : e))
+      // 2. Remove existing worktree directory if leftover from a partial failure
+      await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot, timeout: 5000 })
+        .catch(() => {}) // Expected to fail if no prior worktree exists
+      // 3. Delete the branch if it exists (leftover from a failed worktree add)
+      await execFileAsync('git', ['branch', '-D', branchName], { cwd: repoRoot, timeout: 5000 })
+        .catch((e: unknown) => console.debug(`[worktree] branch cleanup (expected if fresh):`, e instanceof Error ? e.message : e))
 
       // Create the worktree with a new branch
       await execFileAsync('git', ['worktree', 'add', '-b', branchName, worktreePath], {
-        cwd: workingDir,
+        cwd: repoRoot,
         timeout: 15000,
       })
 
       // Update session to use the worktree as its working directory
-      session.groupDir = workingDir  // Group under original repo in sidebar
+      session.groupDir = repoRoot  // Group under original repo in sidebar
       session.workingDir = worktreePath
       session.worktreePath = worktreePath
       this.persistToDisk()
