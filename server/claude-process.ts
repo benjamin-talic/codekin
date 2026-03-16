@@ -16,7 +16,7 @@ import { createInterface, type Interface } from 'readline'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { homedir } from 'os'
-import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultEvent, ClaudeStreamEvent, TaskItem, PromptQuestion } from './types.js'
+import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultEvent, ClaudeStreamEvent, TaskItem, PromptQuestion, PermissionMode } from './types.js'
 import { SCREENSHOTS_DIR } from './config.js'
 import { redactSecrets } from './crypto-utils.js'
 
@@ -77,7 +77,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
    *                    (e.g. `CC_WS_PORT`, `CC_AUTH_TOKEN` for port-forwarding and auth).
    * @param model       Claude model ID override (e.g. 'claude-opus-4-6'). Omit to use the CLI default.
    */
-  constructor(private workingDir: string, sessionId?: string, extraEnv?: Record<string, string>, private model?: string) {
+  constructor(private workingDir: string, sessionId?: string, extraEnv?: Record<string, string>, private model?: string, private permissionMode?: PermissionMode) {
     super()
     this.sessionId = sessionId || randomUUID()
     this.extraEnv = extraEnv || {}
@@ -108,7 +108,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     const args = [
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
-      '--permission-mode', 'acceptEdits',
+      '--permission-mode', this.permissionMode || 'acceptEdits',
       '--allowedTools', 'Bash(git:*)',
       '--add-dir', SCREENSHOTS_DIR,
       '--include-partial-messages',

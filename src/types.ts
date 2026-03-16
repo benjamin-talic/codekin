@@ -43,6 +43,20 @@ export interface RepoManifest {
   generatedAt: string
 }
 
+/**
+ * Permission modes supported by the Claude CLI `--permission-mode` flag.
+ * Controls how tool permissions are handled during a session.
+ */
+export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
+
+/** Permission mode metadata for the UI selector. */
+export const PERMISSION_MODES: { id: PermissionMode; label: string; description: string; icon: string; dangerous?: boolean }[] = [
+  { id: 'default', label: 'Ask permissions', description: 'Always ask before making changes', icon: 'shield' },
+  { id: 'acceptEdits', label: 'Auto accept edits', description: 'Automatically accept all file edits', icon: 'pencil' },
+  { id: 'plan', label: 'Plan mode', description: 'Create a plan before making changes', icon: 'map' },
+  { id: 'bypassPermissions', label: 'Bypass permissions', description: 'Accepts all permissions without asking', icon: 'warning', dangerous: true },
+]
+
 /** Client-side session info (subset of server Session, safe to serialize). */
 export interface Session {
   id: string
@@ -79,11 +93,12 @@ export interface Session {
  */
 export type WsClientMessage =
   | { type: 'auth'; token: string }
-  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean }
+  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }
   | { type: 'set_model'; model: string }
+  | { type: 'set_permission_mode'; permissionMode: PermissionMode }
   | { type: 'stop' }
   | { type: 'input'; data: string; displayText?: string }
   | { type: 'prompt_response'; value: string | string[]; requestId?: string }

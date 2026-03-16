@@ -12,7 +12,7 @@
  */
 
 import { useRef, useCallback, useEffect, useState } from 'react'
-import type { WsClientMessage, WsServerMessage, ChatMessage, TaskItem } from '../types'
+import type { WsClientMessage, WsServerMessage, ChatMessage, TaskItem, PermissionMode } from '../types'
 import { usePromptState } from './usePromptState'
 import { useWsConnection } from './useWsConnection'
 
@@ -446,8 +446,8 @@ export function useChatSocket({
     send({ type: 'join_session', sessionId })
   }, [send])
 
-  const createSession = useCallback((name: string, workingDir: string, useWorktree?: boolean) => {
-    send({ type: 'create_session', name, workingDir, useWorktree })
+  const createSession = useCallback((name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode) => {
+    send({ type: 'create_session', name, workingDir, useWorktree, permissionMode })
   }, [send])
 
   const sendInput = useCallback((data: string, displayText?: string) => {
@@ -495,6 +495,16 @@ export function useChatSocket({
     localStorage.setItem('claude-model', model)
   }, [send])
 
+  const [currentPermissionMode, setCurrentPermissionMode] = useState<PermissionMode>(() =>
+    (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
+  )
+
+  const setPermissionMode = useCallback((mode: PermissionMode) => {
+    send({ type: 'set_permission_mode', permissionMode: mode })
+    setCurrentPermissionMode(mode)
+    localStorage.setItem('claude-permission-mode', mode)
+  }, [send])
+
   return {
     connState,
     messages,
@@ -518,5 +528,7 @@ export function useChatSocket({
     reconnect,
     restoreSession,
     setModel,
+    currentPermissionMode,
+    setPermissionMode,
   }
 }

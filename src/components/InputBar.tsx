@@ -8,11 +8,23 @@
  */
 
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
-import { IconSend, IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch } from '@tabler/icons-react'
+import { IconSend, IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
+import { PERMISSION_MODES, type PermissionMode } from '../types'
+
+const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
+  shield: IconShieldCheck,
+  pencil: IconPencil,
+  map: IconMap2,
+  warning: IconAlertTriangle,
+}
+
+function shortPermissionLabel(mode: PermissionMode): string {
+  return PERMISSION_MODES.find(m => m.id === mode)?.label ?? mode
+}
 
 const MODELS = [
   { id: 'claude-opus-4-6', label: 'Opus 4.6' },
@@ -59,16 +71,22 @@ interface InputBarProps {
   useWorktree?: boolean
   /** Callback when the worktree toggle is changed. */
   onWorktreeChange?: (checked: boolean) => void
+  /** Current permission mode. */
+  currentPermissionMode?: PermissionMode
+  /** Callback when the permission mode is changed. */
+  onPermissionModeChange?: (mode: PermissionMode) => void
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange }, ref) {
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const [permMenuOpen, setPermMenuOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
   const [slashFilter, setSlashFilter] = useState('')
   const mobileMenuRef = useRef<HTMLDivElement>(null)
+  const permMenuRef = useRef<HTMLDivElement>(null)
   const MOBILE_HEIGHT = 100
   const [height, setHeight] = useState(() => {
     if (isMobile) return MOBILE_HEIGHT
@@ -106,6 +124,18 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [mobileMenuOpen])
+
+  // Close permission mode menu on outside click
+  useEffect(() => {
+    if (!permMenuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (permMenuRef.current && !permMenuRef.current.contains(e.target as Node)) {
+        setPermMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [permMenuOpen])
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -208,6 +238,21 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     e.target.value = ''
   }, [onAddFiles])
 
+  const handlePermissionModeSelect = useCallback((mode: PermissionMode) => {
+    if (mode === 'bypassPermissions') {
+      // Require confirmation for dangerous mode
+      const confirmed = window.confirm(
+        'Warning: Bypass permissions mode will accept ALL tool calls without asking.\n\n' +
+        'This includes file writes, bash commands, and web requests. ' +
+        'Only use this if you fully trust the task.\n\n' +
+        'Are you sure?'
+      )
+      if (!confirmed) return
+    }
+    onPermissionModeChange?.(mode)
+    setPermMenuOpen(false)
+  }, [onPermissionModeChange])
+
   const hasSkills = skillGroups && skillGroups.some(g => g.skills.length > 0)
   const hasSlashCommands = slashCommands && slashCommands.length > 0
 
@@ -293,6 +338,62 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           {/* Desktop: show all buttons inline */}
           {!isMobile && (
             <>
+              {/* Permission mode selector */}
+              {currentPermissionMode && onPermissionModeChange && (
+                <div className="relative" ref={permMenuRef}>
+                  <button
+                    onClick={() => setPermMenuOpen(!permMenuOpen)}
+                    className={`flex items-center gap-0.5 rounded px-1.5 pb-1 pt-0.5 text-[13px] font-medium transition-colors ${
+                      currentPermissionMode === 'bypassPermissions'
+                        ? 'text-error-5 hover:text-error-4 hover:bg-error-9/30'
+                        : 'text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7'
+                    }`}
+                    title="Permission mode"
+                  >
+                    {(() => {
+                      const mode = PERMISSION_MODES.find(m => m.id === currentPermissionMode)
+                      const ModeIcon = PERMISSION_MODE_ICONS[mode?.icon ?? 'shield']
+                      return <ModeIcon size={14} stroke={2} />
+                    })()}
+                    <span className="hidden lg:inline ml-0.5">{shortPermissionLabel(currentPermissionMode)}</span>
+                    <IconChevronDown size={12} stroke={2} />
+                  </button>
+                  {permMenuOpen && (
+                    <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[260px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+                      {PERMISSION_MODES.map(m => {
+                        const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
+                        const isActive = m.id === currentPermissionMode
+                        return (
+                          <button
+                            key={m.id}
+                            onClick={() => handlePermissionModeSelect(m.id)}
+                            className={`w-full text-left px-3 py-2 hover:bg-neutral-7 transition-colors flex items-start gap-2.5 ${
+                              m.dangerous ? 'hover:bg-error-9/20' : ''
+                            }`}
+                          >
+                            <ModeIcon
+                              size={16}
+                              stroke={2}
+                              className={`mt-0.5 flex-shrink-0 ${m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-neutral-4'}`}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className={`text-[13px] font-medium ${m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-neutral-2'}`}>
+                                {m.label}
+                              </div>
+                              <div className={`text-[12px] ${m.dangerous ? 'text-error-6' : 'text-neutral-5'}`}>
+                                {m.description}
+                              </div>
+                            </div>
+                            {isActive && (
+                              <IconCheck size={14} stroke={2.5} className="mt-0.5 flex-shrink-0 text-primary-4" />
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
               {currentModel && onModelChange && (
                 <div className="relative">
                   <button
@@ -377,7 +478,37 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   <IconDots size={24} stroke={2} />
                 </button>
                 {mobileMenuOpen && (
-                  <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[180px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+                  <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[220px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+                    {/* Permission mode selector */}
+                    {currentPermissionMode && onPermissionModeChange && (
+                      <>
+                        <div className="px-3 py-1.5 text-[12px] text-neutral-5 uppercase tracking-wider">Permissions</div>
+                        {PERMISSION_MODES.map(m => {
+                          const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
+                          const isActive = m.id === currentPermissionMode
+                          return (
+                            <button
+                              key={m.id}
+                              onClick={() => { handlePermissionModeSelect(m.id); setMobileMenuOpen(false) }}
+                              className={`w-full text-left px-3 py-2 text-[14px] hover:bg-neutral-7 transition-colors flex items-center gap-2 ${
+                                m.dangerous ? 'hover:bg-error-9/20' : ''
+                              }`}
+                            >
+                              <ModeIcon
+                                size={16}
+                                stroke={2}
+                                className={m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-neutral-4'}
+                              />
+                              <span className={m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-neutral-2'}>
+                                {m.label}
+                              </span>
+                              {isActive && <IconCheck size={14} stroke={2.5} className="ml-auto text-primary-4" />}
+                            </button>
+                          )
+                        })}
+                        <div className="my-1 border-t border-neutral-7" />
+                      </>
+                    )}
                     {/* Model selector */}
                     {currentModel && onModelChange && (
                       <>

@@ -23,7 +23,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
 
   switch (msg.type) {
     case 'create_session': {
-      const session = sessions.create(msg.name, msg.workingDir, { model: msg.model })
+      const session = sessions.create(msg.name, msg.workingDir, { model: msg.model, permissionMode: msg.permissionMode })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
 
@@ -141,6 +141,14 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
         sessions.setModel(sessionId, msg.model)
+      }
+      break
+    }
+
+    case 'set_permission_mode': {
+      const sessionId = clientSessions.get(ws)
+      if (sessionId) {
+        sessions.setPermissionMode(sessionId, msg.permissionMode)
       }
       break
     }

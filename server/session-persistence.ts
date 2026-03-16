@@ -24,6 +24,7 @@ export interface PersistedSession {
   created: string
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow'
   model?: string
+  permissionMode?: string
   claudeSessionId: string | null
   wasActive?: boolean
   outputHistory: WsServerMessage[]
@@ -48,6 +49,7 @@ export class SessionPersistence {
       created: s.created,
       source: s.source,
       model: s.model,
+      permissionMode: s.permissionMode,
       claudeSessionId: s.claudeSessionId,
       wasActive: s.claudeProcess?.isAlive() ?? false,
       outputHistory: s.outputHistory,
@@ -89,6 +91,7 @@ export class SessionPersistence {
           created: s.created,
           source: s.source ?? 'manual',
           model: s.model,
+          permissionMode: s.permissionMode as Session['permissionMode'],
           claudeProcess: null,
           clients: new Set(),
           outputHistory: s.outputHistory || [],
