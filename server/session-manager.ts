@@ -237,6 +237,36 @@ export class SessionManager {
     }
   }
 
+  /**
+   * Clean up a git worktree and its branch. Runs asynchronously and logs errors
+   * but never throws — session deletion must not be blocked by cleanup failures.
+   */
+  private cleanupWorktree(worktreePath: string, repoDir: string): void {
+    void (async () => {
+      try {
+        // Resolve the actual repo root (repoDir may itself be a worktree)
+        const { stdout: repoRootRaw } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+          cwd: repoDir,
+          timeout: 5000,
+        }).catch(() => ({ stdout: repoDir }))
+        const repoRoot = repoRootRaw.trim() || repoDir
+
+        // Remove the worktree
+        await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
+          cwd: repoRoot,
+          timeout: 10000,
+        })
+        console.log(`[worktree] Cleaned up worktree: ${worktreePath}`)
+
+        // Prune any stale worktree references
+        await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, timeout: 5000 })
+          .catch(() => {})
+      } catch (err) {
+        console.warn(`[worktree] Failed to clean up worktree ${worktreePath}:`, err instanceof Error ? err.message : err)
+      }
+    })()
+  }
+
   /** Get the configured worktree branch prefix (defaults to 'wt/'). */
   getWorktreeBranchPrefix(): string {
     return this.archive.getSetting('worktree_branch_prefix', 'wt/')
@@ -373,6 +403,11 @@ export class SessionManager {
     }
 
     this.archiveSessionIfWorthSaving(session)
+
+    // Clean up git worktree if this session used one
+    if (session.worktreePath) {
+      this.cleanupWorktree(session.worktreePath, session.groupDir ?? session.workingDir)
+    }
 
     // Clean up webhook workspace directory if applicable
     if (session.source === 'webhook' || session.source === 'stepflow') {

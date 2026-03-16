@@ -29,12 +29,23 @@ vi.mock('better-sqlite3', () => {
 })
 
 // Mock node:child_process.spawn for session naming (which uses `claude -p`)
+// and execFile for worktree operations
 const mockSpawn = vi.hoisted(() => vi.fn())
+const mockExecFile = vi.hoisted(() => vi.fn())
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>()
   return {
     ...actual,
     spawn: (...args: any[]) => mockSpawn(...args),
+    execFile: (...args: any[]) => mockExecFile(...args),
+  }
+})
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>()
+  return {
+    ...actual,
+    spawn: (...args: any[]) => mockSpawn(...args),
+    execFile: (...args: any[]) => mockExecFile(...args),
   }
 })
 
@@ -429,6 +440,38 @@ describe('SessionManager', () => {
 
       // Session is deleted so we can't check it, but the stop was called
       expect(cp.stop).toHaveBeenCalledOnce()
+    })
+
+    it('cleans up git worktree when session has worktreePath', () => {
+      const s = sm.create('wt-test', '/repos/myproject')
+      s.worktreePath = '/repos/myproject-wt-abc123'
+      s.groupDir = '/repos/myproject'
+
+      // Mock execFile to succeed (callback-style: (cmd, args, opts, cb) => cb(null, stdout, stderr))
+      mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: any, cb?: any) => {
+        if (typeof cb === 'function') cb(null, '/repos/myproject\n', '')
+        return { on: vi.fn() }
+      })
+
+      sm.delete(s.id)
+
+      // Session should be removed
+      expect(sm.get(s.id)).toBeUndefined()
+
+      // execFile should have been called for worktree cleanup (git rev-parse, git worktree remove, etc.)
+      // It runs asynchronously so we just verify the calls were initiated
+      expect(mockExecFile).toHaveBeenCalled()
+    })
+
+    it('does not call worktree cleanup when session has no worktreePath', () => {
+      const s = sm.create('normal-test', '/repos/myproject')
+
+      mockExecFile.mockClear()
+      sm.delete(s.id)
+
+      expect(sm.get(s.id)).toBeUndefined()
+      // No git worktree commands should be called
+      expect(mockExecFile).not.toHaveBeenCalled()
     })
   })
 
