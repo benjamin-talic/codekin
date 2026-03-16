@@ -43,7 +43,8 @@ npm install
 
 ## 2. Environment Variables
 
-All API keys and secrets are stored in a single file and sourced from `~/.bashrc`:
+Secrets and configuration are stored in a single file and sourced from `~/.bashrc`.
+Session naming uses the Claude CLI (`claude -p`), so no separate API keys are needed.
 
 ```bash
 # Create the codekin config directory
@@ -56,11 +57,7 @@ nano ~/.codekin/env
 Contents of `~/.codekin/env`:
 
 ```bash
-export GEMINI_API_KEY="your-gemini-key"
-export OPENAI_API_KEY="your-openai-key"
-export OPENAI_MODEL="gpt-5.2"
 export GITHUB_WEBHOOK_SECRET="your-webhook-secret"
-# ANTHROPIC_API_KEY is set separately (e.g. via claude CLI config)
 ```
 
 Source it from `~/.bashrc` so it's available to all shells and systemd user services:
@@ -431,7 +428,7 @@ codekin/
 
 | Path                                          | Purpose                        |
 |-----------------------------------------------|--------------------------------|
-| `~/.codekin/env` (or `CODEKIN_ENV_FILE`)      | API keys and secrets           |
+| `~/.codekin/env` (or `CODEKIN_ENV_FILE`)      | Secrets and configuration      |
 | Web root (set via `FRONTEND_WEB_ROOT` or `settings.json`) | Deployed frontend |
 | `~/.codekin/auth-token` (or `AUTH_FILE`)      | codekin auth token              |
 | `~/.codekin/repos.yml`                        | Optional repo list             |

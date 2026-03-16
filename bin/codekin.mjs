@@ -8,7 +8,7 @@
  *   codekin service install        Install + start background service
  *   codekin service uninstall      Remove background service
  *   codekin service status         Show service status
- *   codekin config                  Update API keys and settings
+ *   codekin config                  Update settings
  *   codekin token                  Print access URL with auth token
  *   codekin upgrade                Upgrade to latest version
  *   codekin uninstall              Remove Codekin entirely
@@ -137,27 +137,7 @@ async function cmdSetup({ regenerate = false } = {}) {
     console.log('Auth token: generated')
   }
 
-  // API keys for session auto-naming
-  console.log('\nSession auto-naming uses an LLM to generate descriptive session names.')
-  console.log('Configure at least one API key below (all optional, press Enter to skip).\n')
-
-  const apiKeys = [
-    { env: 'GROQ_API_KEY',      label: 'Groq',      hint: 'free tier available — groq.com' },
-    { env: 'OPENAI_API_KEY',    label: 'OpenAI',     hint: 'platform.openai.com' },
-    { env: 'GEMINI_API_KEY',    label: 'Gemini',     hint: 'aistudio.google.com' },
-    { env: 'ANTHROPIC_API_KEY', label: 'Anthropic',  hint: 'console.anthropic.com' },
-  ]
-
-  for (const { env, label, hint } of apiKeys) {
-    const current = existing[env]
-    const mask = current ? ` (current: ${current.slice(0, 6)}...${current.slice(-4)})` : ''
-    const answer = await prompt(`  ${label} API key${mask} [${hint}]: `)
-    if (answer) {
-      existing[env] = answer
-    }
-  }
-
-
+  console.log('\nSession auto-naming uses the Claude CLI — no extra API keys needed.')
 
   // Write env file
   const frontendDist = findFrontendDist()
@@ -168,15 +148,7 @@ async function cmdSetup({ regenerate = false } = {}) {
   if (frontendDist) envVars.FRONTEND_DIST = frontendDist
   writeEnvFile(envVars)
 
-  // Show which naming provider will be used
-  const namingProvider = apiKeys.find(k => envVars[k.env])
-  if (namingProvider) {
-    console.log(`\nSession naming provider: ${namingProvider.label}`)
-  } else {
-    console.log('\nNo API keys configured — session auto-naming will be disabled.')
-  }
-
-  console.log(`Config saved to ${CONFIG_DIR}`)
+  console.log(`\nConfig saved to ${CONFIG_DIR}`)
 
   printAccessUrl()
 }
@@ -497,7 +469,7 @@ Usage:
   codekin start                   Run server in foreground
   codekin setup                   First-time setup wizard
   codekin setup --regenerate      Regenerate auth token
-  codekin config                  Update API keys and settings
+  codekin config                  Update settings
   codekin service install         Install + start background service
   codekin service uninstall       Remove background service
   codekin service status          Show service status
