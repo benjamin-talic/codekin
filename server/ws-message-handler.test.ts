@@ -1,5 +1,9 @@
 /** Tests for handleWsMessage (ws-message-handler) — verifies WebSocket client message routing, session interactions, and server response payloads. */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+// Mock config so REPOS_ROOT covers test paths
+vi.mock('./config.js', () => ({ REPOS_ROOT: '/projects' }))
+
 import { handleWsMessage, type WsHandlerContext } from './ws-message-handler.js'
 import type { WsClientMessage, WsServerMessage, Session } from './types.js'
 
