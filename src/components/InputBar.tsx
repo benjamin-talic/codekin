@@ -407,31 +407,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   )}
                 </div>
               )}
-              {currentModel && onModelChange && (
-                <div className="relative" ref={modelMenuRef}>
-                  <button
-                    onClick={() => { closeAllPopups('model'); setModelMenuOpen(!modelMenuOpen) }}
-                    className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
-                    title="Change model"
-                  >
-                    {shortModelLabel(currentModel)}
-                    <IconChevronDown size={12} stroke={2} />
-                  </button>
-                  {modelMenuOpen && (
-                    <div className="absolute bottom-full mb-1 left-0 z-50 min-w-[160px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
-                      {MODELS.map(m => (
-                        <button
-                          key={m.id}
-                          onClick={() => { onModelChange(m.id); setModelMenuOpen(false) }}
-                          className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-neutral-7 transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
               {/* Worktree: indicator when active, toggle before first message, or move button mid-session */}
               {worktreePath ? (
                 <span
@@ -464,6 +439,33 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   <span className="hidden lg:inline">Worktree</span>
                 </button>
               ) : null}
+            </div>
+            <div className="flex items-center gap-1">
+              {currentModel && onModelChange && (
+                <div className="relative" ref={modelMenuRef}>
+                  <button
+                    onClick={() => { closeAllPopups('model'); setModelMenuOpen(!modelMenuOpen) }}
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
+                    title="Change model"
+                  >
+                    {shortModelLabel(currentModel)}
+                    <IconChevronDown size={12} stroke={2} />
+                  </button>
+                  {modelMenuOpen && (
+                    <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[160px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+                      {MODELS.map(m => (
+                        <button
+                          key={m.id}
+                          onClick={() => { onModelChange(m.id); setModelMenuOpen(false) }}
+                          className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-neutral-7 transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {hasSkills && (
                 <div className="relative">
                   <button
@@ -489,8 +491,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   )}
                 </div>
               )}
-            </div>
-            <div className="flex items-center gap-1">
               <button
                 onClick={handleFileSelect}
                 disabled={disabled}
