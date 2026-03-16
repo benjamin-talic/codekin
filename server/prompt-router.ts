@@ -10,7 +10,6 @@
  */
 
 import { randomUUID } from 'crypto'
-import type { WebSocket } from 'ws'
 import { ApprovalManager } from './approval-manager.js'
 import type { ClaudeProcess } from './claude-process.js'
 import type { PromptQuestion, Session, WsServerMessage } from './types.js'
