@@ -2,6 +2,7 @@
 // Hook 3: PermissionRequest — Approval Simplification
 // Webhook sessions: auto-allow after auth validation.
 // Manual sessions: forward to Codekin server for UI-based approval.
+// On failure: return null to fall back to control_request (in-process UI prompt).
 import { createHook } from './lib/handler.mjs';
 import { EnvContext } from './lib/context/env.mjs';
 import { HttpTransport } from './lib/transport/http.mjs';
@@ -44,15 +45,15 @@ createHook({
       return { hookSpecificOutput: null };
     }
 
-    // Manual sessions: forward to server, which prompts the UI client
+    // Manual sessions: forward to server, which prompts the UI client.
+    // On any failure (missing session ID, server error, invalid response),
+    // return null so Claude Code falls back to the control_request path —
+    // that goes directly through the ClaudeProcess event emitter to the
+    // session manager, which can still prompt the UI without HTTP.
     try {
       if (!hubSessionId) {
-        return {
-          hookSpecificOutput: {
-            hookEventName: 'PermissionRequest',
-            decision: { behavior: 'deny', message: 'No CODEKIN_SESSION_ID — cannot route approval request' },
-          },
-        };
+        // No session ID to route — fall back to control_request prompt
+        return { hookSpecificOutput: null };
       }
 
       const decision = await transport.requestDecision({
@@ -65,12 +66,8 @@ createHook({
 
       // Validate server response shape
       if (typeof decision?.allow !== 'boolean') {
-        return {
-          hookSpecificOutput: {
-            hookEventName: 'PermissionRequest',
-            decision: { behavior: 'deny', message: 'Hook schema validation failed — manual approval required' },
-          },
-        };
+        // Invalid response — fall back to control_request prompt
+        return { hookSpecificOutput: null };
       }
 
       return {
@@ -84,13 +81,9 @@ createHook({
         },
       };
     } catch (err) {
-      // Server unavailable or timeout — fail closed
-      return {
-        hookSpecificOutput: {
-          hookEventName: 'PermissionRequest',
-          decision: { behavior: 'deny', message: `Server error: ${err.message} — manual approval required` },
-        },
-      };
+      // Server unavailable or timeout — fall back to control_request prompt
+      // instead of silently denying (which leaves the UI with no approval dialog)
+      return { hookSpecificOutput: null };
     }
   },
 });
