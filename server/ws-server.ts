@@ -31,6 +31,7 @@ import { initWorkflowEngine, shutdownWorkflowEngine, type WorkflowEvent } from '
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
 import { CommitEventHandler } from './commit-event-handler.js'
+import { checkForUpdates, getUpdateNotification } from './version-check.js'
 import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
 import { createAuthRouter } from './auth-routes.js'
 import { createSessionRouter } from './session-routes.js'
@@ -382,6 +383,11 @@ wss.on('connection', (ws: WebSocket, req) => {
       authenticated = true
       clearTimeout(authTimeout)
       send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet })
+
+      // Notify client if a newer version is available
+      void getUpdateNotification().then(text => {
+        if (text) send({ type: 'system_message', subtype: 'notification', text })
+      })
       return
     }
 
@@ -428,6 +434,9 @@ wss.on('close', () => clearInterval(heartbeat))
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`Codekin WebSocket server listening on port ${port}`)
+
+  // Check for newer version on npm (non-blocking)
+  void checkForUpdates()
 
   // Auto-restart sessions that were active before the server went down
   sessions.restoreActiveSessions()
