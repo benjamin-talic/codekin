@@ -758,11 +758,11 @@ export class SessionManager {
         try { listener(sessionId, code, signal, true) } catch { /* listener error */ }
       }
 
-      // If Claude exited with code=1 on first attempt and we had a saved
-      // session ID, it may be stale/invalid. Clear it so the next retry
-      // starts a fresh session instead of repeating the same failure.
-      if (code === 1 && attempt === 1 && session.claudeSessionId) {
-        console.log(`[restart] Clearing potentially stale claudeSessionId for session ${sessionId}`)
+      // Always clear the session ID before retrying — the previous Claude
+      // process may not have released its lock yet, and reusing the ID causes
+      // "Session ID already in use" errors that burn through all retry attempts.
+      if (session.claudeSessionId) {
+        console.log(`[restart] Clearing claudeSessionId for session ${sessionId} before retry (attempt ${attempt})`)
         session.claudeSessionId = null
       }
 
