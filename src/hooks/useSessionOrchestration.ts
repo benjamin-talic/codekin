@@ -130,10 +130,14 @@ export function useSessionOrchestration({
   const handleNewSessionForRepo = useCallback(() => {
     if (!activeWorkingDir) return
     const repo = repos.find(r => r.workingDir === activeWorkingDir)
-    const repoId = repo?.id ?? activeWorkingDir.split('/').pop() ?? 'session'
+    // Always use the repo root for new sessions — never a worktree path.
+    // The repo's workingDir is the canonical root; activeWorkingDir may be a
+    // worktree path if groupDir was missing on the active session.
+    const workingDir = repo?.workingDir ?? activeWorkingDir
+    const repoId = repo?.id ?? workingDir.split('/').pop() ?? 'session'
     clearMessages()
     leaveSession()
-    wsCreateSession(`hub:${repoId}`, activeWorkingDir, useWorktreeRef.current, permissionModeRef.current)
+    wsCreateSession(`hub:${repoId}`, workingDir, useWorktreeRef.current, permissionModeRef.current)
   }, [activeWorkingDir, repos, clearMessages, leaveSession, wsCreateSession, permissionModeRef, useWorktreeRef])
 
   const handleNewSessionFromArchive = useCallback((workingDir: string, context: string) => {
