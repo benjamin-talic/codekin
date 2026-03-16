@@ -179,7 +179,6 @@ describe('SessionNaming', () => {
 
   // 9. executeSessionNaming — rejects names with too few words
   it('rejects names with fewer than 3 words and re-schedules', async () => {
-    vi.useFakeTimers()
     const session = fakeSession()
     const deps = makeDeps({ getSession: vi.fn(() => session) })
     const naming = new SessionNaming(deps)
@@ -191,7 +190,6 @@ describe('SessionNaming', () => {
     expect(deps.rename).not.toHaveBeenCalled()
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('invalid name'))
     expect(session._namingTimer).toBeDefined()
-    vi.useRealTimers()
   })
 
   // 10. executeSessionNaming — truncates names over 60 chars
@@ -223,7 +221,10 @@ describe('SessionNaming', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockSpawn.mockReturnValue(fakeProc('', 1, 'some error'))
 
-    await naming.executeSessionNaming('s1')
+    const promise = naming.executeSessionNaming('s1')
+    // Advance timers so the fakeProc 'close' event fires (setTimeout 5ms)
+    await vi.advanceTimersByTimeAsync(10)
+    await promise
 
     expect(deps.rename).not.toHaveBeenCalled()
     expect(session._namingTimer).toBeDefined()
