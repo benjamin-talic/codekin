@@ -194,6 +194,10 @@ export class SessionManager {
         timeout: 5000,
       })
       const repoRoot = repoRootRaw.trim()
+      if (!repoRoot || !path.isAbsolute(repoRoot)) {
+        console.error(`[worktree] Invalid repo root resolved: "${repoRoot}"`)
+        return null
+      }
 
       const prefix = this.getWorktreeBranchPrefix()
       const shortId = sessionId.slice(0, 8)
@@ -903,10 +907,10 @@ export class SessionManager {
     const { isDeny, isAlwaysAllow, isApprovePattern } = this.decodeApprovalValue(value)
 
     if (isAlwaysAllow && !isDeny) {
-      this._approvalManager.saveAlwaysAllow(session.workingDir, approval.toolName, approval.toolInput)
+      this._approvalManager.saveAlwaysAllow(session.groupDir ?? session.workingDir, approval.toolName, approval.toolInput)
     }
     if (isApprovePattern && !isDeny) {
-      this._approvalManager.savePatternApproval(session.workingDir, approval.toolName, approval.toolInput)
+      this._approvalManager.savePatternApproval(session.groupDir ?? session.workingDir, approval.toolName, approval.toolInput)
     }
 
     console.log(`[tool-approval] resolving: allow=${!isDeny} always=${isAlwaysAllow} pattern=${isApprovePattern} tool=${approval.toolName}`)
@@ -961,10 +965,10 @@ export class SessionManager {
     const { isDeny, isAlwaysAllow, isApprovePattern } = this.decodeApprovalValue(value)
 
     if (isAlwaysAllow) {
-      this._approvalManager.saveAlwaysAllow(session.workingDir, pending.toolName, pending.toolInput)
+      this._approvalManager.saveAlwaysAllow(session.groupDir ?? session.workingDir, pending.toolName, pending.toolInput)
     }
     if (isApprovePattern) {
-      this._approvalManager.savePatternApproval(session.workingDir, pending.toolName, pending.toolInput)
+      this._approvalManager.savePatternApproval(session.groupDir ?? session.workingDir, pending.toolName, pending.toolInput)
     }
 
     const behavior = isDeny ? 'deny' : 'allow'
@@ -1060,7 +1064,7 @@ export class SessionManager {
    * has no clients and is a non-interactive source, or 'prompt' if the user needs to decide.
    */
   private resolveAutoApproval(session: Session, toolName: string, toolInput: Record<string, unknown>): 'registry' | 'headless' | 'prompt' {
-    if (this._approvalManager.checkAutoApproval(session.workingDir, toolName, toolInput)) {
+    if (this._approvalManager.checkAutoApproval(session.groupDir ?? session.workingDir, toolName, toolInput)) {
       return 'registry'
     }
     if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow')) {
