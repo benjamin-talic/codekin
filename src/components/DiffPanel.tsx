@@ -12,7 +12,7 @@ import { DiffFileTree } from './diff/DiffFileTree'
 import { DiffFileCard } from './diff/DiffFileCard'
 
 const MIN_WIDTH = 280
-const MAX_WIDTH = 600
+const MAX_WIDTH = 1200
 const DEFAULT_WIDTH = 400
 const STORAGE_KEY = 'codekin-diff-panel-width'
 
