@@ -35,6 +35,7 @@ import { PromptButtons } from './components/PromptButtons'
 import { RepoSelector } from './components/RepoSelector'
 import { DiffPanel } from './components/DiffPanel'
 import { IconEye } from '@tabler/icons-react'
+import type { PermissionMode } from './types'
 
 export default function App() {
   const { settings, updateSettings } = useSettings()
@@ -85,6 +86,11 @@ export default function App() {
     localStorage.setItem('codekin-use-worktree', String(v))
   }, [])
 
+  /** Permission mode ref for session orchestration (read at session creation time). */
+  const permissionModeRef = useRef<PermissionMode>(
+    (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
+  )
+
   const inputBarRef = useRef<InputBarHandle>(null)
   const [sessionInputs, setSessionInputs] = useState<Record<string, string>>({})
 
@@ -108,6 +114,8 @@ export default function App() {
     currentModel,
     setModel,
     send: wsSend,
+    currentPermissionMode,
+    setPermissionMode,
   } = useChatSocket({
     token: settings.token,
     onSessionCreated: (sessionId) => {
@@ -150,6 +158,9 @@ export default function App() {
     },
   })
 
+  // Keep permissionModeRef in sync so session orchestration reads the latest value
+  useEffect(() => { permissionModeRef.current = currentPermissionMode }, [currentPermissionMode])
+
   // Reset file-change tracking when switching sessions
   useEffect(() => {
     setHasFileChanges(false) // eslint-disable-line react-hooks/set-state-in-effect -- sync with session change
@@ -177,6 +188,7 @@ export default function App() {
     removeSession,
     pendingContextRef,
     useWorktreeRef,
+    permissionModeRef,
   })
 
   // Derive active repo from the active session
@@ -502,6 +514,8 @@ export default function App() {
                 currentModel={currentModel}
                 onModelChange={setModel}
                 isMobile={isMobile}
+                currentPermissionMode={currentPermissionMode}
+                onPermissionModeChange={setPermissionMode}
               />
             ) : (
               <div className="px-4 py-3 border-t border-neutral-10">
@@ -588,6 +602,8 @@ export default function App() {
               showWorktreeToggle={messages.length === 0}
               useWorktree={useWorktree}
               onWorktreeChange={setUseWorktree}
+              currentPermissionMode={currentPermissionMode}
+              onPermissionModeChange={setPermissionMode}
             />
           </div>
         ) : (

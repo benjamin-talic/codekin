@@ -135,6 +135,8 @@ export interface CreateSessionOptions {
   model?: string
   /** When true, create a git worktree as a sibling of workingDir and run Claude there. */
   useWorktree?: boolean
+  /** Permission mode for the Claude CLI process. */
+  permissionMode?: import('./types.js').PermissionMode
 }
 
 
@@ -254,6 +256,7 @@ export class SessionManager {
       created: new Date().toISOString(),
       source: options?.source ?? 'manual',
       model: options?.model,
+      permissionMode: options?.permissionMode,
       claudeProcess: null,
       clients: new Set(),
       outputHistory: [],
@@ -537,7 +540,7 @@ export class SessionManager {
     if (process.env.CLAUDE_PROJECT_DIR) {
       extraEnv.CLAUDE_PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR
     }
-    const cp = new ClaudeProcess(session.workingDir, session.claudeSessionId || undefined, extraEnv, session.model)
+    const cp = new ClaudeProcess(session.workingDir, session.claudeSessionId || undefined, extraEnv, session.model, session.permissionMode)
 
     this.wireClaudeEvents(cp, session, sessionId)
 
@@ -1178,6 +1181,20 @@ export class SessionManager {
     session.model = model || undefined
     this.persistToDiskDebounced()
     // Restart Claude with the new model if it's running
+    if (session.claudeProcess?.isAlive()) {
+      this.stopClaude(sessionId)
+      setTimeout(() => this.startClaude(sessionId), 500)
+    }
+    return true
+  }
+
+  /** Update the permission mode for a session and restart Claude with the new mode. */
+  setPermissionMode(sessionId: string, permissionMode: import('./types.js').PermissionMode): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    session.permissionMode = permissionMode
+    this.persistToDiskDebounced()
+    // Restart Claude with the new permission mode if it's running
     if (session.claudeProcess?.isAlive()) {
       this.stopClaude(sessionId)
       setTimeout(() => this.startClaude(sessionId), 500)

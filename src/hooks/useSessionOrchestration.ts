@@ -6,7 +6,7 @@
  */
 
 import { useCallback } from 'react'
-import type { Repo, Session } from '../types'
+import type { Repo, Session, PermissionMode } from '../types'
 
 /** Use groupDir (if set) for tab grouping, falling back to workingDir. */
 export function groupKey(s: Session): string {
@@ -21,11 +21,13 @@ export interface UseSessionOrchestrationParams {
   joinSession: (sessionId: string) => void
   leaveSession: () => void
   clearMessages: () => void
-  wsCreateSession: (name: string, workingDir: string, useWorktree?: boolean) => void
+  wsCreateSession: (name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode) => void
   removeSession: (sessionId: string) => Promise<void>
   pendingContextRef: React.MutableRefObject<string | null>
   /** Ref to the current worktree preference (read at session creation time). */
   useWorktreeRef: React.MutableRefObject<boolean>
+  /** Ref to the current permission mode preference (read at session creation time). */
+  permissionModeRef: React.MutableRefObject<PermissionMode>
 }
 
 export interface UseSessionOrchestrationReturn {
@@ -52,6 +54,7 @@ export function useSessionOrchestration({
   removeSession,
   pendingContextRef,
   useWorktreeRef,
+  permissionModeRef,
 }: UseSessionOrchestrationParams): UseSessionOrchestrationReturn {
   // Derive active session and grouping key
   const activeSession = activeSessionId ? sessions.find(s => s.id === activeSessionId) ?? null : null
@@ -68,8 +71,8 @@ export function useSessionOrchestration({
     }
     clearMessages()
     leaveSession()
-    wsCreateSession(`hub:${repo.id}`, repo.workingDir, useWorktreeRef.current)
-  }, [sessions, joinSession, wsCreateSession, leaveSession, clearMessages, useWorktreeRef])
+    wsCreateSession(`hub:${repo.id}`, repo.workingDir, useWorktreeRef.current, permissionModeRef.current)
+  }, [sessions, joinSession, wsCreateSession, leaveSession, clearMessages, useWorktreeRef, permissionModeRef])
 
   const handleSelectSession = useCallback((sessionId: string) => {
     if (sessionId === activeSessionId) return
@@ -130,8 +133,8 @@ export function useSessionOrchestration({
     const repoId = repo?.id ?? activeWorkingDir.split('/').pop() ?? 'session'
     clearMessages()
     leaveSession()
-    wsCreateSession(`hub:${repoId}`, activeWorkingDir, useWorktreeRef.current)
-  }, [activeWorkingDir, repos, clearMessages, leaveSession, wsCreateSession, useWorktreeRef])
+    wsCreateSession(`hub:${repoId}`, activeWorkingDir, useWorktreeRef.current, permissionModeRef.current)
+  }, [activeWorkingDir, repos, clearMessages, leaveSession, wsCreateSession, permissionModeRef, useWorktreeRef])
 
   const handleNewSessionFromArchive = useCallback((workingDir: string, context: string) => {
     const repo = repos.find(r => r.workingDir === workingDir)
@@ -139,8 +142,8 @@ export function useSessionOrchestration({
     pendingContextRef.current = context
     clearMessages()
     leaveSession()
-    wsCreateSession(`hub:${repo.id}`, repo.workingDir, useWorktreeRef.current)
-  }, [repos, clearMessages, leaveSession, wsCreateSession, pendingContextRef, useWorktreeRef])
+    wsCreateSession(`hub:${repo.id}`, repo.workingDir, useWorktreeRef.current, permissionModeRef.current)
+  }, [repos, clearMessages, leaveSession, wsCreateSession, pendingContextRef, permissionModeRef, useWorktreeRef])
 
   return {
     activeSession,

@@ -10,6 +10,11 @@ import type { WebSocket } from 'ws'
 import type { ClaudeProcess } from './claude-process.js'
 
 /**
+ * Permission modes supported by the Claude CLI `--permission-mode` flag.
+ */
+export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
+
+/**
  * Server-side session state. Holds the Claude child process, connected
  * WebSocket clients, output history for replay, and permission registries.
  */
@@ -34,6 +39,8 @@ export interface Session {
   claudeSessionId: string | null
   /** Preferred model to pass via --model flag (e.g. 'claude-opus-4-6'). Defaults to Claude's default. */
   model?: string
+  /** Permission mode passed to the Claude CLI via --permission-mode flag. */
+  permissionMode?: PermissionMode
   /** Number of auto-restarts since last cooldown reset. */
   restartCount: number
   lastRestartAt: number | null
@@ -244,11 +251,12 @@ export type WsServerMessage =
 /** Messages sent from browser clients to the server over WebSocket. */
 export type WsClientMessage =
   | { type: 'auth'; token: string }
-  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean }
+  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }
   | { type: 'set_model'; model: string }
+  | { type: 'set_permission_mode'; permissionMode: PermissionMode }
   | { type: 'stop' }
   | { type: 'input'; data: string; displayText?: string }
   | { type: 'prompt_response'; value: string | string[]; requestId?: string }
