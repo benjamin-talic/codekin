@@ -501,3 +501,11 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
 process.on('SIGTERM', () => { void gracefulShutdown('SIGTERM') })
 process.on('SIGINT', () => { void gracefulShutdown('SIGINT') })
+
+process.on('uncaughtException', (err) => {
+  console.error('[fatal] Uncaught exception:', err)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] Unhandled rejection:', reason)
+})
