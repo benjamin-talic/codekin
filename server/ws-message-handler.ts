@@ -206,8 +206,13 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           sessions.addToHistory(session, notifMsg)
           sessions.broadcast(session, notifMsg)
         } else {
-          send({ type: 'system_message', subtype: 'error', text: 'Failed to create worktree.' })
+          send({ type: 'system_message', subtype: 'error', text: 'Failed to create worktree. Check server logs for details.' })
         }
+        // Always restart Claude — in the worktree on success, or original dir on failure
+        sessions.startClaude(sessionId)
+      }).catch((err) => {
+        console.error('[worktree] move_to_worktree failed:', err)
+        send({ type: 'system_message', subtype: 'error', text: 'Failed to move to worktree.' })
         sessions.startClaude(sessionId)
       })
       break
