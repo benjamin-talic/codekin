@@ -317,6 +317,28 @@ export async function setReposPath(token: string, path: string): Promise<string>
   return data.path
 }
 
+/** Get the queue messages setting. */
+export async function getQueueMessages(token: string): Promise<boolean> {
+  const res = await authFetch(`${BASE}/api/settings/queue-messages`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to get queue messages setting: ${res.status}`)
+  const data = await res.json()
+  return data.enabled
+}
+
+/** Set the queue messages setting. */
+export async function setQueueMessages(token: string, enabled: boolean): Promise<boolean> {
+  const res = await authFetch(`${BASE}/api/settings/queue-messages`, {
+    method: 'PUT',
+    headers: headers(token),
+    body: JSON.stringify({ enabled }),
+  })
+  if (!res.ok) throw new Error(`Failed to update queue messages setting: ${res.status}`)
+  const data = await res.json()
+  return data.enabled
+}
+
 /** Get the worktree branch prefix setting. */
 export async function getWorktreePrefix(token: string): Promise<string> {
   const res = await authFetch(`${BASE}/api/settings/worktree-prefix`, {

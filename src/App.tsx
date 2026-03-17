@@ -21,6 +21,7 @@ import { useIsMobile } from './hooks/useIsMobile'
 import { useSendMessage } from './hooks/useSendMessage'
 import { buildSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
+import { getQueueMessages } from './lib/ccApi'
 import { Settings } from './components/Settings'
 import { ChatView } from './components/ChatView'
 import { DocsBrowser } from './components/DocsBrowser'
@@ -85,6 +86,13 @@ export default function App() {
     setUseWorktreeRaw(v)
     localStorage.setItem('codekin-use-worktree', String(v))
   }, [])
+
+  /** Queue messages setting — fetched from server, default off. */
+  const [queueEnabled, setQueueEnabled] = useState(false)
+  useEffect(() => {
+    if (!settings.token) return
+    getQueueMessages(settings.token).then(setQueueEnabled).catch(() => {})
+  }, [settings.token])
 
   /** Permission mode ref for session orchestration (read at session creation time). */
   const permissionModeRef = useRef<PermissionMode>(
@@ -265,6 +273,7 @@ export default function App() {
       selectedFile: docsBrowser.selectedFile,
       repoWorkingDir: docsBrowser.repoWorkingDir,
     },
+    queueEnabled,
   })
 
   // Keep sendInputRef in sync so onSessionCreated can use it

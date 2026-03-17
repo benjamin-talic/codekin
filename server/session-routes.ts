@@ -169,6 +169,26 @@ export function createSessionRouter(
     res.json({ prefix: final })
   })
 
+  // --- Queue messages setting ---
+
+  router.get('/api/settings/queue-messages', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const enabled = sessions.archive.getSetting('queue_messages', 'false')
+    res.json({ enabled: enabled === 'true' })
+  })
+
+  router.put('/api/settings/queue-messages', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const { enabled } = req.body
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'enabled must be a boolean' })
+    }
+    sessions.archive.setSetting('queue_messages', String(enabled))
+    res.json({ enabled })
+  })
+
   // --- Repos path settings ---
 
   router.get('/api/settings/repos-path', (req, res) => {

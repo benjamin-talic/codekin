@@ -28,6 +28,7 @@ interface UseSendMessageOptions {
   addToQueue: (sessionId: string, text: string, files?: File[]) => void
   clearQueue: (sessionId: string) => void
   docsContext: { isOpen: boolean; selectedFile: string | null; repoWorkingDir: string | null }
+  queueEnabled: boolean
 }
 
 export function useSendMessage({
@@ -42,6 +43,7 @@ export function useSendMessage({
   addToQueue,
   clearQueue,
   docsContext,
+  queueEnabled,
 }: UseSendMessageOptions) {
   const [uploadStatus, setUploadStatus] = useState<string | null>(null)
   const [sessionPendingFiles, setSessionPendingFiles] = useState<Record<string, File[]>>({})
@@ -132,11 +134,11 @@ export function useSendMessage({
       : ''
 
     // Tentative mode: hold message if another session for the same repo is processing,
-    // or if this session already has queued messages
+    // or if this session already has queued messages (only when queue is enabled)
     const isAlreadyTentative = (tentativeQueues[activeSessionId ?? '']?.length ?? 0) > 0
     const hasConflict = !!activeWorkingDir &&
       sessions.some(s => groupKey(s) === activeWorkingDir && s.isProcessing && s.id !== activeSessionId)
-    if (activeSessionId && (isAlreadyTentative || hasConflict)) {
+    if (queueEnabled && activeSessionId && (isAlreadyTentative || hasConflict)) {
       if (pendingFiles.length > 0) {
         setSessionPendingFiles(prev => ({ ...prev, [activeSessionId]: [] }))
         setUploadStatus('Uploading files...')
@@ -171,7 +173,7 @@ export function useSendMessage({
       setUploadStatus(`Upload failed: ${err instanceof Error ? err.message : 'unknown error'}`)
       setTimeout(() => setUploadStatus(null), 3000)
     }
-  }, [token, activeSessionId, activeWorkingDir, sessions, tentativeQueues, addToQueue, pendingFiles, processSlashCommand, sendInput, docsContext.isOpen, docsContext.selectedFile, docsContext.repoWorkingDir])
+  }, [token, activeSessionId, activeWorkingDir, sessions, tentativeQueues, addToQueue, pendingFiles, processSlashCommand, sendInput, docsContext.isOpen, docsContext.selectedFile, docsContext.repoWorkingDir, queueEnabled])
 
   const handleExecuteTentative = useCallback(async (sessionId: string) => {
     const queue = tentativeQueues[sessionId] ?? []
