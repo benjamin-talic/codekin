@@ -422,9 +422,13 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       const first = structuredQuestions[0]
       this.emit('prompt', 'question', first.question, first.options, first.multiSelect, undefined, toolInput, request_id, structuredQuestions)
     } else if (toolName === 'ExitPlanMode') {
-      // ExitPlanMode needs user confirmation — forward to UI as a prompt
-      console.log(`[control_request] forwarding ExitPlanMode to session manager for user approval`)
-      this.emit('control_request', request_id, toolName, toolInput)
+      // ExitPlanMode user confirmation is handled by the PreToolUse hook (which
+      // prompts via the server's requestToolApproval flow). Auto-approve the
+      // control_request to avoid a double-gate: if BOTH the hook and the
+      // control_request prompt the user, the second gate can time out or conflict,
+      // causing is_error=true and leaving plan mode stuck.
+      console.log(`[control_request] auto-approving ExitPlanMode (user confirmation handled by PreToolUse hook)`)
+      this.sendControlResponse(request_id, 'allow')
     } else if (ClaudeProcess.AUTO_APPROVE_TOOLS.has(toolName)) {
       // Known-safe tools: auto-approve without prompting
       console.log(`[control_request] auto-approving safe tool: ${toolName}`)
