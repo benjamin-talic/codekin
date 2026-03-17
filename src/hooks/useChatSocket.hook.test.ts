@@ -725,7 +725,7 @@ describe('useChatSocket hook', () => {
       expect(result.current.waitingSessions).toEqual({ s1: true })
       act(() => result.current.sendInput('response'))
       expect(result.current.activePrompt).toBeNull()
-      expect(result.current.waitingSessions).toEqual({ s1: false })
+      expect(result.current.waitingSessions).toEqual({})
       unmount()
     })
   })

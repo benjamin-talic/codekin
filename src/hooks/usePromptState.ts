@@ -1,13 +1,13 @@
 /**
- * Prompt queue for a chat session.
+ * Session-scoped prompt queue.
  *
- * Manages a Map<requestId, PromptEntry> of pending prompts, exposing the
- * oldest entry as the "active" prompt. Replaces the previous single-slot
- * PromptState that would lose prompts when two arrived before the user
- * answered the first.
+ * Manages a Map<sessionId, Map<requestId, PromptEntry>> of pending prompts.
+ * Each session has its own queue so prompts don't "travel" between sessions
+ * when switching in the sidebar. The `waitingSessions` derived state replaces
+ * the manually-tracked state that was previously in useChatSocket.
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import type { PromptOption, PromptQuestion, WsServerMessage } from '../types'
 
 export interface PromptEntry {
@@ -20,23 +20,27 @@ export interface PromptEntry {
   approvePattern?: string
 }
 
-interface UsePromptStateReturn {
-  /** The prompt the user should see (oldest in queue, i.e. first-in-first-served). */
-  active: PromptEntry | null
-  /** Total number of pending prompts (for badge/indicator). */
-  queueSize: number
-  /** Add a prompt to the queue. */
-  enqueue: (msg: WsServerMessage & { type: 'prompt' }) => void
-  /** Remove a specific prompt by requestId. If undefined, removes the oldest entry. */
+export interface UsePromptStateReturn {
+  /** The prompt the user should see for the given session (oldest in that session's queue). */
+  getActive: (sessionId: string | null) => PromptEntry | null
+  /** Total number of pending prompts for the given session. */
+  getQueueSize: (sessionId: string | null) => number
+  /** Derived: sessionIds with non-empty queues → { [sid]: true }. */
+  waitingSessions: Record<string, boolean>
+  /** Add a prompt to a session's queue. */
+  enqueue: (msg: WsServerMessage & { type: 'prompt' }, sessionId: string) => void
+  /** Remove a specific prompt by requestId (scans all sessions — UUIDs are globally unique). */
   dismiss: (requestId?: string) => void
-  /** Remove all prompts (used on session leave/switch). */
+  /** Remove all prompts for a single session. */
+  clearForSession: (sessionId: string) => void
+  /** Remove all prompts across all sessions. */
   clearAll: () => void
 }
 
 export function usePromptState(): UsePromptStateReturn {
-  const [queue, setQueue] = useState<Map<string, PromptEntry>>(new Map())
+  const [queues, setQueues] = useState<Map<string, Map<string, PromptEntry>>>(new Map())
 
-  const enqueue = useCallback((msg: WsServerMessage & { type: 'prompt' }) => {
+  const enqueue = useCallback((msg: WsServerMessage & { type: 'prompt' }, sessionId: string) => {
     const requestId = msg.requestId
       ?? crypto?.randomUUID?.()
       ?? `local-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -49,36 +53,73 @@ export function usePromptState(): UsePromptStateReturn {
       questions: msg.questions,
       approvePattern: msg.approvePattern,
     }
-    setQueue(prev => {
+    setQueues(prev => {
       const next = new Map(prev)
-      next.set(requestId, entry)
+      const sessionQueue = new Map(prev.get(sessionId) ?? new Map())
+      sessionQueue.set(requestId, entry)
+      next.set(sessionId, sessionQueue)
       return next
     })
   }, [])
 
   const dismiss = useCallback((requestId?: string) => {
-    setQueue(prev => {
+    setQueues(prev => {
       if (requestId) {
-        if (!prev.has(requestId)) return prev
-        const next = new Map(prev)
-        next.delete(requestId)
-        return next
+        // Find across all sessions
+        for (const [sid, sessionQueue] of prev) {
+          if (sessionQueue.has(requestId)) {
+            const next = new Map(prev)
+            const newSessionQueue = new Map(sessionQueue)
+            newSessionQueue.delete(requestId)
+            if (newSessionQueue.size === 0) {
+              next.delete(sid)
+            } else {
+              next.set(sid, newSessionQueue)
+            }
+            return next
+          }
+        }
+        return prev // not found
       }
-      // No requestId — delete the oldest entry (first key)
-      if (prev.size === 0) return prev
+      // No requestId — no-op (callers should always provide one now)
+      return prev
+    })
+  }, [])
+
+  const clearForSession = useCallback((sessionId: string) => {
+    setQueues(prev => {
+      if (!prev.has(sessionId)) return prev
       const next = new Map(prev)
-      const firstKey = next.keys().next().value
-      if (firstKey !== undefined) next.delete(firstKey)
+      next.delete(sessionId)
       return next
     })
   }, [])
 
   const clearAll = useCallback(() => {
-    setQueue(prev => prev.size === 0 ? prev : new Map())
+    setQueues(prev => prev.size === 0 ? prev : new Map())
   }, [])
 
-  // Active prompt is the oldest entry (first in insertion order)
-  const active = queue.size > 0 ? queue.values().next().value ?? null : null
+  const getActive = useCallback((sessionId: string | null): PromptEntry | null => {
+    if (!sessionId) return null
+    const sessionQueue = queues.get(sessionId)
+    if (!sessionQueue || sessionQueue.size === 0) return null
+    return sessionQueue.values().next().value ?? null
+  }, [queues])
 
-  return { active, queueSize: queue.size, enqueue, dismiss, clearAll }
+  const getQueueSize = useCallback((sessionId: string | null): number => {
+    if (!sessionId) return 0
+    return queues.get(sessionId)?.size ?? 0
+  }, [queues])
+
+  const waitingSessions = useMemo(() => {
+    const result: Record<string, boolean> = {}
+    for (const [sid, sessionQueue] of queues) {
+      if (sessionQueue.size > 0) {
+        result[sid] = true
+      }
+    }
+    return result
+  }, [queues])
+
+  return { getActive, getQueueSize, waitingSessions, enqueue, dismiss, clearForSession, clearAll }
 }
