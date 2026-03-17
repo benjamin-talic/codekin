@@ -17,6 +17,7 @@ import {
   getWebhookConfig, getWebhookEvents, type WebhookConfigInfo,
   getReposPath, setReposPath as setReposPathApi,
   getWorktreePrefix, setWorktreePrefix as setWorktreePrefixApi,
+  getQueueMessages, setQueueMessages as setQueueMessagesApi,
 } from '../lib/ccApi'
 import { FolderPicker } from './FolderPicker'
 
@@ -99,6 +100,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
   const [retentionDays, setRetentionDays] = useState(7)
   const [reposPath, setReposPath] = useState('')
   const [worktreePrefix, setWorktreePrefix] = useState('wt/')
+  const [queueMessages, setQueueMessages] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
   // Webhook state
@@ -116,6 +118,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
     getRetentionDays(settings.token).then(setRetentionDays).catch(() => {})
     getReposPath(settings.token).then(setReposPath).catch(() => {})
     getWorktreePrefix(settings.token).then(setWorktreePrefix).catch(() => {})
+    getQueueMessages(settings.token).then(setQueueMessages).catch(() => {})
     getWebhookConfig(settings.token).then(setWebhookConfig).catch(() => {})
     getWebhookEvents(settings.token).then(setWebhookEvents).catch(() => {})
   }, [open, settings.token])
@@ -239,6 +242,33 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
                   <span className="text-[15px] text-neutral-5">days</span>
                 </div>
                 <p className="mt-1 text-[13px] text-neutral-6">Auto-delete archived sessions older than this</p>
+              </div>
+
+              {/* Queue Messages */}
+              <div className="col-span-2">
+                <label className="mb-1.5 block text-[15px] text-neutral-4">Queue Messages</label>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      const next = !queueMessages
+                      setQueueMessages(next)
+                      setQueueMessagesApi(settings.token, next).catch(() => setSaveError('Failed to save queue messages setting'))
+                    }}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                      queueMessages ? 'bg-primary-7' : 'bg-neutral-8'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
+                        queueMessages ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                  <span className="text-[15px] text-neutral-4">{queueMessages ? 'On' : 'Off'}</span>
+                </div>
+                <p className="mt-1 text-[13px] text-neutral-6">
+                  When enabled, messages sent while another session for the same repo is processing will be queued and sent automatically when it finishes.
+                </p>
               </div>
 
               {/* Repos Path — full width */}
