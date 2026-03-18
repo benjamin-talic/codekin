@@ -319,7 +319,7 @@ export function LeftSidebar({
             onClick={() => { onNavigateToWorkflows(); if (isMobile) onMobileClose?.() }}
             className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
               view === 'workflows'
-                ? 'text-accent-3 bg-accent-11/20'
+                ? 'bg-accent-9/30 text-accent-2'
                 : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
             }`}
           >
@@ -330,7 +330,7 @@ export function LeftSidebar({
             onClick={() => { onNavigateToShepherd(); if (isMobile) onMobileClose?.() }}
             className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
               view === 'shepherd'
-                ? 'text-accent-3 bg-accent-11/20'
+                ? 'bg-accent-9/30 text-accent-2'
                 : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
             }`}
           >
@@ -343,7 +343,7 @@ export function LeftSidebar({
                 onClick={() => setModulesOpen(!modulesOpen)}
                 className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
                   modulesOpen
-                    ? 'text-accent-3 bg-accent-11/20'
+                    ? 'bg-accent-9/30 text-accent-2'
                     : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6/50'
                 }`}
               >
