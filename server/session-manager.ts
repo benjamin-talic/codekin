@@ -235,15 +235,14 @@ export class SessionManager {
 
       // Migrate Claude CLI session data to a new session ID so the restarted
       // process can resume conversation context without hitting a "Session ID
-      // already in use" lock conflict.  Because CLAUDE_PROJECT_DIR is set to
-      // groupDir (the original repo root), the CLI still looks for sessions
-      // in the original project storage — so we copy the JSONL there under a
-      // new UUID rather than copying it to the worktree project dir.
+      // already in use" lock conflict.  Claude CLI determines session storage
+      // from the CWD (not CLAUDE_PROJECT_DIR), so the JSONL must be copied
+      // into the worktree's project storage directory.
       if (session.claudeSessionId) {
         try {
           const oldId = session.claudeSessionId
           const newId = randomUUID()
-          this.migrateClaudeSession(oldId, newId, workingDir, session)
+          this.migrateClaudeSession(oldId, newId, workingDir, worktreePath, session)
           session.claudeSessionId = newId
           console.log(`[worktree] Migrated Claude session ${oldId} → ${newId}`)
         } catch (err) {
@@ -272,18 +271,15 @@ export class SessionManager {
   }
 
   /**
-   * Migrate Claude CLI session data to a new session ID within the same
-   * project storage directory.  Copies the JSONL and optional subdirectory
-   * from oldId to newId so the restarted CLI can resume with --session-id
-   * without hitting the lock held by the old (now-dead) process.
-   *
-   * CLAUDE_PROJECT_DIR is set to groupDir (the original repo root) for
-   * worktree sessions, so the CLI resolves storage relative to the original
-   * working directory — not the worktree CWD.
+   * Migrate Claude CLI session data from the original project storage to
+   * the target directory's project storage under a new session ID.
+   * Claude CLI determines session storage from the CWD, so for worktree
+   * migrations the JSONL must be placed in the worktree's project dir.
    */
-  private migrateClaudeSession(oldId: string, newId: string, originalDir: string, session?: Session): void {
-    const projectDir = this.claudeProjectPath(originalDir)
-    const srcJsonl = path.join(projectDir, `${oldId}.jsonl`)
+  private migrateClaudeSession(oldId: string, newId: string, originalDir: string, targetDir: string, session?: Session): void {
+    const srcProjectDir = this.claudeProjectPath(originalDir)
+    const dstProjectDir = this.claudeProjectPath(targetDir)
+    const srcJsonl = path.join(srcProjectDir, `${oldId}.jsonl`)
 
     if (!existsSync(srcJsonl)) {
       console.warn(`[worktree] No session JSONL at ${srcJsonl}, conversation history will not be preserved`)
@@ -299,13 +295,17 @@ export class SessionManager {
       return
     }
 
-    copyFileSync(srcJsonl, path.join(projectDir, `${newId}.jsonl`))
-    console.log(`[worktree] Copied session JSONL ${oldId} → ${newId} in ${projectDir}`)
+    // Claude CLI determines session storage from the CWD, not CLAUDE_PROJECT_DIR.
+    // The worktree has a different CWD, so we must copy the JSONL into the
+    // worktree's project storage directory for --session-id to find it.
+    mkdirSync(dstProjectDir, { recursive: true })
+    copyFileSync(srcJsonl, path.join(dstProjectDir, `${newId}.jsonl`))
+    console.log(`[worktree] Copied session JSONL ${oldId} → ${newId} (${srcProjectDir} → ${dstProjectDir})`)
 
     // Copy session subdirectory (subagents/, tool-results/) if it exists
-    const srcSessionDir = path.join(projectDir, oldId)
+    const srcSessionDir = path.join(srcProjectDir, oldId)
     if (existsSync(srcSessionDir) && statSync(srcSessionDir).isDirectory()) {
-      this.copyDirRecursive(srcSessionDir, path.join(projectDir, newId))
+      this.copyDirRecursive(srcSessionDir, path.join(dstProjectDir, newId))
       console.log(`[worktree] Copied session subdirectory ${oldId} → ${newId}`)
     }
   }
@@ -579,11 +579,10 @@ export class SessionManager {
       CODEKIN_AUTH_TOKEN: sessionToken,
       CODEKIN_SESSION_TYPE: session.source || 'manual',
     }
-    // Pass CLAUDE_PROJECT_DIR so hooks and session storage resolve correctly
+    // Pass CLAUDE_PROJECT_DIR so hooks and CLAUDE.md resolve correctly
     // even when the session's working directory differs from the project root
-    // (e.g. worktrees, webhook workspaces).  For worktree sessions, use the
-    // original repo root (groupDir) so Claude CLI finds the existing session
-    // storage and can resume conversation context with --session-id.
+    // (e.g. worktrees, webhook workspaces).  Note: this does NOT control
+    // session storage path — Claude CLI uses the CWD for that.
     if (session.groupDir) {
       extraEnv.CLAUDE_PROJECT_DIR = session.groupDir
     } else if (process.env.CLAUDE_PROJECT_DIR) {
