@@ -428,7 +428,6 @@ export default function App() {
   // Derive session name for mobile top bar
   const activeSession = sessions.find(s => s.id === activeSessionId)
   const activeSessionName = activeSession?.name ?? null
-  const chatVariant = (activeSession?.source === 'joe' || activeSession?.source === 'shepherd') ? 'joe' as const : 'default' as const
   const activeRepoName = activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? null
 
   return (
@@ -525,7 +524,7 @@ export default function App() {
                     planningMode={planningMode}
                     activityLabel={activityLabel}
                     isMobile={isMobile}
-                    variant={chatVariant}
+                    variant="joe"
                   />
                   <TodoPanel tasks={tasks} />
                 </div>
@@ -544,7 +543,7 @@ export default function App() {
                 )}
                 <InputBar
                   key={`shepherd-${activeSessionId}`}
-                  variant={chatVariant}
+                  variant="joe"
                   ref={inputBarRef}
                   onSendInput={handleSendWithFiles}
                   isWaiting={!!activePrompt}
@@ -634,7 +633,6 @@ export default function App() {
                 planningMode={planningMode}
                 activityLabel={activityLabel}
                 isMobile={isMobile}
-                variant={chatVariant}
               />
               <TodoPanel tasks={tasks} />
 
@@ -685,7 +683,6 @@ export default function App() {
             <InputBar
               key={activeSessionId ?? 'no-session'}
               ref={inputBarRef}
-              variant={chatVariant}
               onSendInput={handleSendWithFiles}
               isWaiting={!!activePrompt}
               disabled={!settings.token}
