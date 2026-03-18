@@ -234,11 +234,9 @@ export class SessionManager {
       session.worktreePath = worktreePath
 
       // Copy Claude CLI session data to the worktree's project storage dir.
-      // We keep the same session ID so the JSONL's internal sessionId fields
-      // match --session-id — using a new ID causes Claude to ignore the copied
-      // history because the internal IDs don't match the filename/flag.
-      // stopClaudeAndWait() releases the session lock before we get here,
-      // so there's no "Session ID already in use" conflict.
+      // startClaude() will use --resume (not --session-id) to continue the
+      // session, which should find the JSONL globally. The copy here ensures
+      // it's also available in the worktree's project dir as a safety net.
       if (session.claudeSessionId) {
         try {
           this.migrateClaudeSession(session.claudeSessionId, session.claudeSessionId, workingDir, worktreePath, session)
@@ -587,7 +585,11 @@ export class SessionManager {
     } else if (process.env.CLAUDE_PROJECT_DIR) {
       extraEnv.CLAUDE_PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR
     }
-    const cp = new ClaudeProcess(session.workingDir, session.claudeSessionId || undefined, extraEnv, session.model, session.permissionMode)
+    // When claudeSessionId exists, the session has run before and a JSONL file
+    // exists on disk.  Use --resume (not --session-id) to continue it — --session-id
+    // creates a *new* session and fails with "already in use" if the JSONL exists.
+    const resume = !!session.claudeSessionId
+    const cp = new ClaudeProcess(session.workingDir, session.claudeSessionId || undefined, extraEnv, session.model, session.permissionMode, resume)
 
     this.wireClaudeEvents(cp, session, sessionId)
 
@@ -857,14 +859,6 @@ export class SessionManager {
         try { listener(sessionId, code, signal, true) } catch { /* listener error */ }
       }
 
-      // Always clear the session ID before retrying — the previous Claude
-      // process may not have released its lock yet, and reusing the ID causes
-      // "Session ID already in use" errors that burn through all retry attempts.
-      if (session.claudeSessionId) {
-        console.log(`[restart] Clearing claudeSessionId for session ${sessionId} before retry (attempt ${action.attempt})`)
-        session.claudeSessionId = null
-      }
-
       const msg: WsServerMessage = {
         type: 'system_message',
         subtype: 'restart',
@@ -876,12 +870,14 @@ export class SessionManager {
       setTimeout(() => {
         // Verify session still exists and hasn't been stopped
         if (!this.sessions.has(sessionId) || session._stoppedByUser) return
+        // startClaude uses --resume when claudeSessionId exists, so the CLI
+        // picks up the full conversation history from the JSONL automatically.
         this.startClaude(sessionId)
 
-        // Since we cleared claudeSessionId, Claude starts a fresh session.
-        // Inject conversation context so it can resume meaningfully (same
-        // pattern as restoreActiveSessions).
-        if (session.claudeProcess && session.outputHistory.length > 0) {
+        // Fallback: if claudeSessionId was already null (fresh session that
+        // crashed before system_init), inject a context summary so the new
+        // session has some awareness of prior conversation.
+        if (!session.claudeSessionId && session.claudeProcess && session.outputHistory.length > 0) {
           session.claudeProcess.once('system_init', () => {
             const context = this.buildSessionContext(session)
             if (context) {
@@ -1580,30 +1576,11 @@ export class SessionManager {
       setTimeout(() => {
         if (session.claudeProcess?.isAlive()) return // already running
 
-        // Clear the old claudeSessionId — after a server restart, the
-        // previous Claude process may not have released its session lock,
-        // causing "Session ID already in use" errors and a restart loop.
-        // Claude CLI will start a fresh session; Codekin's own
-        // outputHistory provides continuity for the user.
-        const oldId = session.claudeSessionId
-        session.claudeSessionId = null
-
-        console.log(`[restore] Starting Claude for session ${session.id} (${session.name}) (previous claudeSessionId=${oldId} cleared)`)
+        // startClaude uses --resume when claudeSessionId exists (which it always
+        // does here — the restore loop filters on it), so Claude CLI picks up
+        // the full conversation history from its JSONL automatically.
+        console.log(`[restore] Starting Claude for session ${session.id} (${session.name}) (claudeSessionId=${session.claudeSessionId})`)
         this.startClaude(session.id)
-
-        // Wait for Claude CLI to finish initializing before sending the
-        // continuation message. Writing to stdin before system_init causes
-        // the CLI to exit immediately with code=1.
-        if (session.claudeProcess) {
-          session.claudeProcess.once('system_init', () => {
-            // Since we cleared the claudeSessionId, Claude starts fresh —
-            // provide conversation context so it can resume meaningfully.
-            const context = this.buildSessionContext(session)
-            const continueMsg = (context ? context + '\n\n' : '')
-              + '[Session restored after server restart. Continue where you left off. If you were in the middle of a task, resume it.]'
-            session.claudeProcess?.sendMessage(continueMsg)
-          })
-        }
 
         const msg: WsServerMessage = {
           type: 'system_message',

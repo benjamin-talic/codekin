@@ -69,6 +69,9 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   /** Additional env vars passed to the child process (session ID, port, token). */
   private extraEnv: Record<string, string>
 
+  /** When true, use `--resume` instead of `--session-id` to resume an existing session. */
+  private resume: boolean
+
   /**
    * @param workingDir  Absolute path to the git repo where the Claude CLI runs.
    * @param sessionId   Claude session UUID for `--session-id`. Defaults to a random UUID
@@ -76,10 +79,15 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
    * @param extraEnv    Additional environment variables merged into the child process env
    *                    (e.g. `CC_WS_PORT`, `CC_AUTH_TOKEN` for port-forwarding and auth).
    * @param model       Claude model ID override (e.g. 'claude-opus-4-6'). Omit to use the CLI default.
+   * @param resume      When true and sessionId is provided, use `--resume <id>` instead
+   *                    of `--session-id <id>`. `--session-id` creates a new session and
+   *                    fails with "already in use" if a JSONL already exists for that ID.
+   *                    `--resume` is designed to continue an existing session.
    */
-  constructor(private workingDir: string, sessionId?: string, extraEnv?: Record<string, string>, private model?: string, private permissionMode?: PermissionMode) {
+  constructor(private workingDir: string, sessionId?: string, extraEnv?: Record<string, string>, private model?: string, private permissionMode?: PermissionMode, resume?: boolean) {
     super()
     this.sessionId = sessionId || randomUUID()
+    this.resume = !!(resume && sessionId)
     this.extraEnv = extraEnv || {}
   }
 
@@ -113,7 +121,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       '--add-dir', SCREENSHOTS_DIR,
       '--include-partial-messages',
       '--verbose',
-      '--session-id', this.sessionId,
+      ...(this.resume ? ['--resume', this.sessionId] : ['--session-id', this.sessionId]),
       ...(this.model ? ['--model', this.model] : []),
       '--append-system-prompt', [
         'You are running inside a web-based terminal (Codekin).',
