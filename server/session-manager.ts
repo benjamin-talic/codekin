@@ -233,15 +233,21 @@ export class SessionManager {
       session.workingDir = worktreePath
       session.worktreePath = worktreePath
 
-      // Copy Claude CLI session data so the restarted process can resume
-      // conversation context.  The CLI derives its storage path from cwd,
-      // so the worktree gets a different project dir and won't find the
-      // original session unless we copy it across.
+      // Migrate Claude CLI session data to a new session ID so the restarted
+      // process can resume conversation context without hitting a "Session ID
+      // already in use" lock conflict.  Because CLAUDE_PROJECT_DIR is set to
+      // groupDir (the original repo root), the CLI still looks for sessions
+      // in the original project storage — so we copy the JSONL there under a
+      // new UUID rather than copying it to the worktree project dir.
       if (session.claudeSessionId) {
         try {
-          this.copyClaudeSessionData(session.claudeSessionId, workingDir, worktreePath, session)
+          const oldId = session.claudeSessionId
+          const newId = randomUUID()
+          this.migrateClaudeSession(oldId, newId, workingDir, session)
+          session.claudeSessionId = newId
+          console.log(`[worktree] Migrated Claude session ${oldId} → ${newId}`)
         } catch (err) {
-          console.warn(`[worktree] Failed to copy session data:`, err instanceof Error ? err.message : err)
+          console.warn(`[worktree] Failed to migrate session data:`, err instanceof Error ? err.message : err)
         }
       }
 
@@ -266,16 +272,18 @@ export class SessionManager {
   }
 
   /**
-   * Copy Claude CLI session data (JSONL + optional subdirectory) from the
-   * original project storage to the worktree project storage so the CLI
-   * can resume conversation context after a worktree move.
+   * Migrate Claude CLI session data to a new session ID within the same
+   * project storage directory.  Copies the JSONL and optional subdirectory
+   * from oldId to newId so the restarted CLI can resume with --session-id
+   * without hitting the lock held by the old (now-dead) process.
+   *
+   * CLAUDE_PROJECT_DIR is set to groupDir (the original repo root) for
+   * worktree sessions, so the CLI resolves storage relative to the original
+   * working directory — not the worktree CWD.
    */
-  private copyClaudeSessionData(claudeSessionId: string, originalDir: string, worktreeDir: string, session?: Session): void {
-    const srcDir = this.claudeProjectPath(originalDir)
-    const dstDir = this.claudeProjectPath(worktreeDir)
-
-    const jsonlFile = `${claudeSessionId}.jsonl`
-    const srcJsonl = path.join(srcDir, jsonlFile)
+  private migrateClaudeSession(oldId: string, newId: string, originalDir: string, session?: Session): void {
+    const projectDir = this.claudeProjectPath(originalDir)
+    const srcJsonl = path.join(projectDir, `${oldId}.jsonl`)
 
     if (!existsSync(srcJsonl)) {
       console.warn(`[worktree] No session JSONL at ${srcJsonl}, conversation history will not be preserved`)
@@ -291,15 +299,14 @@ export class SessionManager {
       return
     }
 
-    mkdirSync(dstDir, { recursive: true })
-    copyFileSync(srcJsonl, path.join(dstDir, jsonlFile))
-    console.log(`[worktree] Copied session JSONL to ${dstDir}`)
+    copyFileSync(srcJsonl, path.join(projectDir, `${newId}.jsonl`))
+    console.log(`[worktree] Copied session JSONL ${oldId} → ${newId} in ${projectDir}`)
 
     // Copy session subdirectory (subagents/, tool-results/) if it exists
-    const srcSessionDir = path.join(srcDir, claudeSessionId)
+    const srcSessionDir = path.join(projectDir, oldId)
     if (existsSync(srcSessionDir) && statSync(srcSessionDir).isDirectory()) {
-      this.copyDirRecursive(srcSessionDir, path.join(dstDir, claudeSessionId))
-      console.log(`[worktree] Copied session directory to ${dstDir}`)
+      this.copyDirRecursive(srcSessionDir, path.join(projectDir, newId))
+      console.log(`[worktree] Copied session subdirectory ${oldId} → ${newId}`)
     }
   }
 
