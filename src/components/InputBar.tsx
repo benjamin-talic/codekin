@@ -522,14 +522,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           </>
         )}
 
-        {/* Joe variant: minimal toolbar — badge + attach + pill send */}
+        {/* Joe variant: minimal toolbar — attach + send only */}
         {!isMobile && isJoe && (
           <>
-            <div className="flex items-center gap-1">
-              <span className="joe-badge flex items-center gap-1.5 rounded-full bg-accent-9/40 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-accent-5">
-                Joe
-              </span>
-            </div>
+            <div className="flex-1" />
             <div className="flex items-center gap-1.5">
               <button
                 onClick={handleFileSelect}
@@ -665,12 +661,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           </>
         )}
 
-        {/* Mobile Joe: badge + attach + pill send */}
+        {/* Mobile Joe: attach + send only */}
         {isMobile && isJoe && (
           <>
-            <span className="joe-badge flex items-center gap-1.5 rounded-full bg-accent-9/40 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-accent-5">
-              Joe
-            </span>
+            <div className="flex-1" />
             <div className="flex items-center gap-1.5">
               <button
                 onClick={handleFileSelect}

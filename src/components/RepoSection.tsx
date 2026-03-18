@@ -8,7 +8,7 @@
 import { useState, useEffect } from 'react'
 import {
   IconPlus, IconShieldCheck, IconArchive, IconFileText,
-  IconChevronDown, IconChevronRight, IconRobot, IconSparkles, IconPencil, IconGitBranch, IconAiAgent,
+  IconChevronDown, IconChevronRight, IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace,
 } from '@tabler/icons-react'
 import type { Session } from '../types'
 import { listArchivedSessions, type ArchivedSessionInfo } from '../lib/ccApi'
@@ -264,7 +264,7 @@ export function RepoSection({
                   : s.source === 'webhook' || s.source === 'agent'
                   ? <IconRobot size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} />
                   : s.source === 'joe'
-                  ? <IconAiAgent size={12} className={`flex-shrink-0 self-center text-accent-5 ${dotColor.includes('animate-pulse') ? 'animate-pulse' : ''}`} />
+                  ? <IconRobotFace size={12} className={`flex-shrink-0 self-center text-accent-5 ${dotColor.includes('animate-pulse') ? 'animate-pulse' : ''}`} />
                   : <span className="inline-flex items-center justify-center w-[12px] flex-shrink-0 self-center"><span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} /></span>
                 }
                 {isEditing ? (

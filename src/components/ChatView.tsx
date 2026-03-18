@@ -14,7 +14,7 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import hljs from '../lib/hljs'
-import { IconArrowDown, IconAiAgent } from '@tabler/icons-react'
+import { IconArrowDown, IconRobotFace } from '@tabler/icons-react'
 import type { ChatMessage } from '../types'
 import { formatModelName, formatUserText } from '../lib/chatFormatters'
 
@@ -317,7 +317,7 @@ function JoeWelcome() {
     <div className="flex flex-1 items-center justify-center px-6">
       <div className="max-w-md text-center">
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-9/40">
-          <IconAiAgent size={28} className="text-accent-5" />
+          <IconRobotFace size={28} className="text-accent-5" />
         </div>
         <h2 className="mb-2 text-[18px] font-semibold text-neutral-2">Hey, I'm Joe</h2>
         <p className="mb-5 text-[15px] leading-relaxed text-neutral-4">
