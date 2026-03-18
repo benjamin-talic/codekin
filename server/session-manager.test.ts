@@ -2415,7 +2415,7 @@ describe('SessionManager', () => {
   })
 
   describe('restoreActiveSessions() continuation message', () => {
-    it('sends continuation message after system_init event', () => {
+    it('skips continuation message when claudeSessionId exists (--resume handles context)', () => {
       vi.useFakeTimers()
       const mockedExistsSync = vi.mocked(existsSync)
       const mockedReadFileSync = vi.mocked(readFileSync)
@@ -2435,11 +2435,9 @@ describe('SessionManager', () => {
 
       const sm2 = new SessionManager()
 
-      // Create a fake claude process that captures the `once` callback
-      const onceCallbacks: Record<string, (...args: unknown[]) => void> = {}
       const fakeCp = {
         ...fakeClaudeProcess(),
-        once: vi.fn((event: string, cb: (...args: unknown[]) => void) => { onceCallbacks[event] = cb }),
+        once: vi.fn(),
       }
 
       vi.spyOn(sm2, 'startClaude').mockImplementation((id) => {
@@ -2451,12 +2449,41 @@ describe('SessionManager', () => {
       sm2.restoreActiveSessions()
       vi.advanceTimersByTime(0)
 
-      // Verify once was registered for system_init
-      expect(fakeCp.once).toHaveBeenCalledWith('system_init', expect.any(Function))
+      // When claudeSessionId exists, --resume picks up full context from the
+      // JSONL automatically — no system_init listener or continuation message needed.
+      expect(fakeCp.once).not.toHaveBeenCalledWith('system_init', expect.any(Function))
 
-      // Fire the system_init callback
-      onceCallbacks['system_init']()
-      expect(fakeCp.sendMessage).toHaveBeenCalledWith(expect.stringContaining('Session restored'))
+      mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? false : true)
+      mockedReadFileSync.mockReturnValue('[]')
+      vi.useRealTimers()
+    })
+
+    it('skips sessions without claudeSessionId during restore', () => {
+      vi.useFakeTimers()
+      const mockedExistsSync = vi.mocked(existsSync)
+      const mockedReadFileSync = vi.mocked(readFileSync)
+
+      const sessionData = [{
+        id: 'no-claude-id-test',
+        name: 'No Claude ID',
+        workingDir: '/tmp',
+        created: '2025-01-01T00:00:00.000Z',
+        claudeSessionId: null,
+        wasActive: true,
+        outputHistory: [],
+      }]
+
+      mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? true : false)
+      mockedReadFileSync.mockReturnValue(JSON.stringify(sessionData))
+
+      const sm2 = new SessionManager()
+      const startSpy = vi.spyOn(sm2, 'startClaude')
+
+      sm2.restoreActiveSessions()
+      vi.advanceTimersByTime(0)
+
+      // Sessions without claudeSessionId are not restored (nothing to --resume)
+      expect(startSpy).not.toHaveBeenCalled()
 
       mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? false : true)
       mockedReadFileSync.mockReturnValue('[]')
@@ -2530,7 +2557,7 @@ describe('SessionManager', () => {
       vi.useRealTimers()
     })
 
-    it('clears stale claudeSessionId on code=1 first restart', () => {
+    it('preserves claudeSessionId on restart so --resume can continue the session', () => {
       vi.useFakeTimers()
       const s = sm.create('stale-id', '/tmp')
       const session = sm.get(s.id)!
@@ -2540,7 +2567,7 @@ describe('SessionManager', () => {
 
       ;(sm as any).handleClaudeExit(session, s.id, 1, null)
 
-      expect(session.claudeSessionId).toBeNull()
+      expect(session.claudeSessionId).toBe('stale-session')
       vi.useRealTimers()
     })
 
