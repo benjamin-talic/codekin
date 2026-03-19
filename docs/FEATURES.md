@@ -154,11 +154,8 @@ The initial screen (when no session is active) shows a browsable list of reposit
 Skills are slash commands that expand into templated prompts sent to Claude.
 
 - **Skill menu** — Click the terminal icon in the input bar to see a dropdown of available skills, grouped by Global and Repo-specific.
-- **Skill expansion** — Typing a slash command (e.g., `/validate-gemini fix the bug`) expands the command into the skill's full template content. The `$ARGUMENTS` placeholder is replaced with any text after the command.
+- **Skill expansion** — Typing a slash command (e.g., `/my-skill fix the bug`) expands the command into the skill's full template content. The `$ARGUMENTS` placeholder is replaced with any text after the command.
 - **Display text** — When a skill is expanded, the original short command is shown in the chat as the user message, while the full expansion is sent to Claude behind the scenes.
-- **Built-in skills**:
-  - `/validate-gemini` — Asks Gemini to critique/validate the current change or solution.
-  - `/validate-gpt` — Asks GPT to critique/validate the current change or solution.
 - **Repo-specific skills** — Repositories can define their own skills in `.claude/skills/` directories, which appear automatically when that repo's session is active.
 - **Discoverable** — Skills appear in the command palette, the skill menu, and the skill browser.
 
