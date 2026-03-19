@@ -267,6 +267,7 @@ export function ensureShepherdRunning(sessions: SessionManager): string {
     source: 'shepherd',
     id: stableId,
     permissionMode: 'acceptEdits',
+    allowedTools: ['Bash(curl:*)'],
   })
 
   // Start Claude

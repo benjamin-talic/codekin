@@ -52,6 +52,8 @@ export interface Session {
   model?: string
   /** Permission mode passed to the Claude CLI via --permission-mode flag. */
   permissionMode?: PermissionMode
+  /** Additional tools to pre-approve via --allowedTools (e.g. 'Bash(curl:*)', 'WebFetch'). */
+  allowedTools?: string[]
   /** Number of auto-restarts since last cooldown reset. */
   restartCount: number
   lastRestartAt: number | null
@@ -263,7 +265,7 @@ export type WsServerMessage =
 /** Messages sent from browser clients to the server over WebSocket. */
 export type WsClientMessage =
   | { type: 'auth'; token: string }
-  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode }
+  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[] }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }

@@ -68,6 +68,8 @@ export interface CreateSessionOptions {
   useWorktree?: boolean
   /** Permission mode for the Claude CLI process. */
   permissionMode?: import('./types.js').PermissionMode
+  /** Additional tools to pre-approve via --allowedTools (e.g. 'Bash(curl:*)', 'WebFetch'). */
+  allowedTools?: string[]
 }
 
 
@@ -160,6 +162,7 @@ export class SessionManager {
       source: options?.source ?? 'manual',
       model: options?.model,
       permissionMode: options?.permissionMode,
+      allowedTools: options?.allowedTools,
       claudeProcess: null,
       clients: new Set(),
       outputHistory: [],
@@ -591,7 +594,7 @@ export class SessionManager {
     // exists on disk.  Use --resume (not --session-id) to continue it — --session-id
     // creates a *new* session and fails with "already in use" if the JSONL exists.
     const resume = !!session.claudeSessionId
-    const cp = new ClaudeProcess(session.workingDir, session.claudeSessionId || undefined, extraEnv, session.model, session.permissionMode, resume)
+    const cp = new ClaudeProcess(session.workingDir, session.claudeSessionId || undefined, extraEnv, session.model, session.permissionMode, resume, session.allowedTools)
 
     this.wireClaudeEvents(cp, session, sessionId)
 

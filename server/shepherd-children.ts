@@ -114,6 +114,7 @@ export class ShepherdChildManager {
         groupDir: request.repo,
         model: request.model,
         permissionMode: 'acceptEdits',
+        allowedTools: ['Bash(curl:*)'],
       })
 
       // Create a git worktree for isolation if requested (default for Joe children).
