@@ -86,7 +86,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
    *                    fails with "already in use" if a JSONL already exists for that ID.
    *                    `--resume` is designed to continue an existing session.
    */
-  constructor(private workingDir: string, sessionId?: string, extraEnv?: Record<string, string>, private model?: string, private permissionMode?: PermissionMode, resume?: boolean) {
+  constructor(private workingDir: string, sessionId?: string, extraEnv?: Record<string, string>, private model?: string, private permissionMode?: PermissionMode, resume?: boolean, private allowedTools?: string[]) {
     super()
     this.sessionId = sessionId || randomUUID()
     this.resume = !!(resume && sessionId)
@@ -119,7 +119,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
       '--permission-mode', this.permissionMode || 'acceptEdits',
-      '--allowedTools', 'Bash(git:*)',
+      '--allowedTools', ['Bash(git:*)', ...(this.allowedTools || [])].join(','),
       '--add-dir', SCREENSHOTS_DIR,
       '--include-partial-messages',
       '--verbose',

@@ -24,7 +24,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
 
   switch (msg.type) {
     case 'create_session': {
-      const session = sessions.create(msg.name, msg.workingDir, { model: msg.model, permissionMode: msg.permissionMode })
+      const session = sessions.create(msg.name, msg.workingDir, { model: msg.model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
 
