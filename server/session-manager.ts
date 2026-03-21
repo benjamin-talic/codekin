@@ -612,7 +612,12 @@ export class SessionManager {
     // exists on disk.  Use --resume (not --session-id) to continue it — --session-id
     // creates a *new* session and fails with "already in use" if the JSONL exists.
     const resume = !!session.claudeSessionId
-    const cp = new ClaudeProcess(session.workingDir, session.claudeSessionId || undefined, extraEnv, session.model, session.permissionMode, resume, session.allowedTools)
+
+    // Build comprehensive allowedTools from session-level overrides + registry approvals
+    const repoDir = session.groupDir ?? session.workingDir
+    const registryPatterns = this._approvalManager.getAllowedToolsForRepo(repoDir)
+    const mergedAllowedTools = [...new Set([...(session.allowedTools || []), ...registryPatterns])]
+    const cp = new ClaudeProcess(session.workingDir, session.claudeSessionId || undefined, extraEnv, session.model, session.permissionMode, resume, mergedAllowedTools)
 
     this.wireClaudeEvents(cp, session, sessionId)
 

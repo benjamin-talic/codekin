@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { DATA_DIR } from './config.js'
+import { addNativePermission, toNativePermission, toAllowedToolsPatterns } from './native-permissions.js'
 
 const REPO_APPROVALS_FILE = join(DATA_DIR, 'repo-approvals.json')
 const PERSIST_DEBOUNCE_MS = 2000
@@ -280,15 +281,22 @@ export class ApprovalManager {
       if (pattern) {
         this.addRepoApproval(workingDir, { pattern })
         console.log(`[auto-approve] saved pattern for repo ${workingDir}: ${pattern}`)
-        return
+      } else {
+        // For commands with no safe pattern, store exact match
+        this.addRepoApproval(workingDir, { command: cmd })
+        console.log(`[auto-approve] saved exact command for repo ${workingDir}: ${cmd.slice(0, 80)}`)
       }
-
-      // For commands with no safe pattern, store exact match
-      this.addRepoApproval(workingDir, { command: cmd })
-      console.log(`[auto-approve] saved exact command for repo ${workingDir}: ${cmd.slice(0, 80)}`)
     } else {
       this.addRepoApproval(workingDir, { tool: toolName })
       console.log(`[auto-approve] saved tool for repo ${workingDir}: ${toolName}`)
+    }
+
+    // Dual-write: also persist to Claude Code's native settings.local.json
+    const nativePerm = toNativePermission(toolName, toolInput)
+    if (nativePerm) {
+      addNativePermission(workingDir, nativePerm).catch(err => {
+        console.error(`[auto-approve] failed to write native permission:`, err)
+      })
     }
   }
 
@@ -302,6 +310,12 @@ export class ApprovalManager {
       // No pattern derivable — skip saving rather than silently escalating to always-allow
       console.log(`[auto-approve] no pattern derivable for ${toolName}, skipping pattern save`)
     }
+  }
+
+  /** Return `--allowedTools` patterns for a repo, combining all registry approvals. */
+  getAllowedToolsForRepo(workingDir: string): string[] {
+    const approvals = this.getApprovals(workingDir)
+    return toAllowedToolsPatterns(approvals)
   }
 
   /** Return the auto-approved tools, commands, and patterns for a repo (workingDir). */
