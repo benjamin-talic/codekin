@@ -1261,7 +1261,7 @@ export class SessionManager {
         // For Bash, check command prefix
         if (toolName === 'Bash') {
           const cmd = String(toolInput.command || '').trimStart()
-          if (cmd.startsWith(prefix)) return true
+          if (cmd === prefix || cmd.startsWith(prefix + ' ')) return true
         }
       }
     }
