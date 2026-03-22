@@ -13,6 +13,7 @@ import {
   realpathSync as fsRealpathSync,
 } from 'fs'
 import { resolve as pathResolve, join as pathJoin } from 'path'
+import { toNativePermission } from './native-permissions.js'
 import { homedir as osHomedir } from 'os'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
@@ -314,27 +315,7 @@ export function createSessionRouter(
 
   // --- Hook endpoints (called by Claude CLI hooks) ---
 
-  // Tool approval endpoint (legacy PreToolUse hook path)
-  router.post('/api/tool-approval', async (req, res) => {
-    const token = extractToken(req)
-    const { sessionId, toolName, toolInput } = req.body
-    if (!verifyHookToken(token, sessionId)) return res.status(401).json({ error: 'Unauthorized' })
-    if (!sessionId || !toolName) {
-      return res.status(400).json({ error: 'Missing sessionId or toolName' })
-    }
-
-    try {
-      console.log(`[tool-approval-http] received: session=${sessionId} tool=${toolName}`)
-      const result = await sessions.requestToolApproval(sessionId, toolName, toolInput || {})
-      console.log(`[tool-approval-http] resolved: allow=${result.allow} always=${result.always}`)
-      res.json({ allow: result.allow, always: result.always })
-    } catch (err) {
-      console.error(`[tool-approval-http] error:`, err)
-      res.json({ allow: false, always: false })
-    }
-  })
-
-  // Hook decision endpoint (PermissionRequest hook via HttpTransport)
+  // Hook decision endpoint (PreToolUse hook via HttpTransport)
   router.post('/api/hook-decision', async (req, res) => {
     const token = extractToken(req)
     const { sessionId, toolName, toolInput } = req.body
@@ -352,7 +333,10 @@ export function createSessionRouter(
         allow: result.allow,
       }
       if (result.always && result.allow) {
-        response.updatedPermissions = [{ type: 'toolAlwaysAllow', tool: toolName }]
+        const nativePerm = toNativePermission(toolName, toolInput || {})
+        if (nativePerm) {
+          response.updatedPermissions = [{ type: 'toolAlwaysAllow', tool: nativePerm }]
+        }
       }
       res.json(response)
     } catch (err) {
