@@ -378,7 +378,6 @@ export class SessionManager {
 
   list(): SessionInfo[] {
     return Array.from(this.sessions.values())
-      .filter((s) => s.source !== 'shepherd')
       .map((s) => ({
         id: s.id,
         name: s.name,
