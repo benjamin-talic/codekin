@@ -592,6 +592,8 @@ export class SessionManager {
     const sessionToken = this._authToken
       ? deriveSessionToken(this._authToken, sessionId)
       : ''
+    // Both CODEKIN_TOKEN (legacy name, used by older hooks) and CODEKIN_AUTH_TOKEN
+    // (current canonical name) are set to the same derived value for backward compatibility.
     const extraEnv: Record<string, string> = {
       CODEKIN_SESSION_ID: sessionId,
       CODEKIN_PORT: String(this._serverPort || PORT),
@@ -1264,7 +1266,7 @@ export class SessionManager {
         // For Bash, check command prefix
         if (toolName === 'Bash') {
           const cmd = String(toolInput.command || '').trimStart()
-          if (cmd.startsWith(prefix)) return true
+          if (cmd === prefix || cmd.startsWith(prefix + ' ')) return true
         }
       }
     }
@@ -1512,15 +1514,17 @@ export class SessionManager {
     }
   }
 
-  // Find which session a WebSocket is connected to (O(1) via reverse map)
+  /** Find which session a WebSocket is connected to (O(1) via reverse map). */
   findSessionForClient(ws: WebSocket): Session | undefined {
     const sessionId = this.clientSessionMap.get(ws)
     if (sessionId) return this.sessions.get(sessionId)
     return undefined
   }
 
-  // Remove a client from all sessions (iterates for safety since a ws
-  // could theoretically appear in multiple session client sets)
+  /**
+   * Remove a client from all sessions (iterates for safety since a ws
+   * could theoretically appear in multiple session client sets).
+   */
   removeClient(ws: WebSocket): void {
     for (const session of this.sessions.values()) {
       session.clients.delete(ws)
