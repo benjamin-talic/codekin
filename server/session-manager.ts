@@ -373,8 +373,12 @@ export class SessionManager {
 
   /** Register a listener called when any session's Claude process exits.
    *  The `willRestart` flag indicates whether the session will be auto-restarted. */
-  onSessionExit(listener: (sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void): void {
+  onSessionExit(listener: (sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void): () => void {
     this._exitListeners.push(listener)
+    return () => {
+      const idx = this._exitListeners.indexOf(listener)
+      if (idx >= 0) this._exitListeners.splice(idx, 1)
+    }
   }
 
   /** Register a listener called when any session emits a prompt (permission request or question). */
@@ -383,8 +387,12 @@ export class SessionManager {
   }
 
   /** Register a listener called when any session completes a turn (result event). */
-  onSessionResult(listener: (sessionId: string, isError: boolean) => void): void {
+  onSessionResult(listener: (sessionId: string, isError: boolean) => void): () => void {
     this._resultListeners.push(listener)
+    return () => {
+      const idx = this._resultListeners.indexOf(listener)
+      if (idx >= 0) this._resultListeners.splice(idx, 1)
+    }
   }
 
   get(id: string): Session | undefined {

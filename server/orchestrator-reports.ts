@@ -121,7 +121,7 @@ export function readReport(filePath: string): ReportContent | null {
   if (!existsSync(resolved)) return null
 
   const content = readFileSync(resolved, 'utf-8')
-  const stat = statSync(filePath)
+  const stat = statSync(resolved)
 
   // Extract metadata from path
   const parts = filePath.split('/')

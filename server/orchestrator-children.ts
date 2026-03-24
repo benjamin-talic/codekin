@@ -238,6 +238,10 @@ export class OrchestratorChildManager {
    */
   private async monitorChild(child: ChildSession): Promise<void> {
     const timeoutMs = child.request.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    let unsubResult: (() => void) | undefined
+    let unsubExit: (() => void) | undefined
+    const nudgedIds = new Set<string>()
+    const supersededMsgs = new Set<WsServerMessage>()
 
     try {
       await new Promise<void>((resolve) => {
@@ -273,7 +277,7 @@ export class OrchestratorChildManager {
 
           const text = this.extractText(session.outputHistory)
           // Check if the final step was done; if not, nudge (keep listening)
-          if (this.ensureFinalStep(child, session, text)) return
+          if (this.ensureFinalStep(child, session, text, nudgedIds, supersededMsgs)) return
 
           // Don't mark as completed while the session still has pending
           // tool approvals or control requests — the Claude process may
@@ -304,10 +308,13 @@ export class OrchestratorChildManager {
           settle()
         }
 
-        this.sessions.onSessionResult(onResult)
-        this.sessions.onSessionExit(onExit)
+        unsubResult = this.sessions.onSessionResult(onResult)
+        unsubExit = this.sessions.onSessionExit(onExit)
       })
     } finally {
+      // Unsubscribe listeners to prevent accumulation across spawn() calls
+      unsubResult?.()
+      unsubExit?.()
       // Safety net: ensure isProcessing is cleared when monitoring ends.
       // handleClaudeResult should have already done this, but edge cases
       // (nudge race, missed result event) can leave the flag stuck.
@@ -320,9 +327,15 @@ export class OrchestratorChildManager {
    * If not, send a follow-up instruction and return true so monitoring continues.
    * Only nudges once per child to avoid infinite loops.
    */
-  private ensureFinalStep(child: ChildSession, session: Session, text: string): boolean {
-    // Only nudge once
-    if ((child as ChildSession & { _nudged?: boolean })._nudged) return false
+  private ensureFinalStep(
+    child: ChildSession,
+    session: Session,
+    text: string,
+    nudgedIds: Set<string>,
+    supersededMsgs: Set<WsServerMessage>,
+  ): boolean {
+    // Only nudge once per child
+    if (nudgedIds.has(child.id)) return false
 
     const policy = child.request.completionPolicy
     const lowerText = text.toLowerCase()
@@ -347,11 +360,10 @@ export class OrchestratorChildManager {
     }
 
     if (missing && instruction && session.claudeProcess?.isAlive()) {
-      (child as ChildSession & { _nudged?: boolean })._nudged = true
-      // Mark the result message as superseded so monitoring can ignore it
-      // without mutating the outputHistory array (which would break replay)
+      nudgedIds.add(child.id)
+      // Track the result message as superseded locally rather than mutating history entries
       const resultMsg = session.outputHistory.find(m => m.type === 'result')
-      if (resultMsg) (resultMsg as Record<string, unknown>)._superseded = true
+      if (resultMsg) supersededMsgs.add(resultMsg)
       this.sessions.sendInput(child.id, instruction)
       return true
     }
