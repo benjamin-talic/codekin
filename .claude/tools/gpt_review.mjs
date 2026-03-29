@@ -26,6 +26,10 @@ const SKIP_PATTERNS = [
   /\/node_modules\//,
   /\.map$/,
   /\.snap$/,
+  /\/(translations|locales|i18n|lang)\//,   // translation directories
+  /\.(po|pot|mo|xliff|xlf)$/,               // translation file formats
+  /\.(png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot)$/,  // binary assets
+  /\.generated\./,                           // generated files
 ];
 
 function shouldSkipFile(filePath) {
