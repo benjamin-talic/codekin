@@ -10,7 +10,7 @@ if (!API_KEY) {
   process.exit(1);
 }
 
-const MODEL = process.env.OPENAI_MODEL || "gpt-5.2-codex";
+const MODEL = process.env.OPENAI_MODEL || "gpt-5.3-codex";
 const USER_QUERY = process.argv.slice(2).join(" ").trim() || "Validate this change.";
 
 // --- Size management ---
