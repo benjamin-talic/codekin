@@ -17,6 +17,8 @@ Codekin is a web-based terminal UI for managing multiple Claude Code sessions. I
 - [Repository Browser](#repository-browser)
 - [Slash-Command Skills](#slash-command-skills)
 - [Automated Workflows](#automated-workflows)
+- [Agent Joe Orchestrator](#agent-joe-orchestrator)
+- [Git Worktrees](#git-worktrees)
 - [Modules](#modules)
 - [Plugin Presets](#plugin-presets)
 - [File Uploads & Attachments](#file-uploads--attachments)
@@ -123,6 +125,8 @@ Codekin provides an interactive UI for responding to Claude's permission request
 - **Approval countdown with auto-approve** — Permission prompts display a 15-second countdown timer. When the timer expires, the tool is automatically approved. This prevents sessions from stalling on routine approvals when the user is away.
 - **Prompt queue** — When multiple tool approvals arrive simultaneously, they are queued and presented one at a time (oldest first). A badge shows the number of pending prompts when more than one is queued.
 - **60-second timeout** — Pending tool approvals time out after 60 seconds to prevent indefinitely stuck processes.
+- **Permission mode selector** — A dropdown in the input bar lets users choose between Claude's permission modes (e.g., default, `acceptEdits`) on a per-session basis.
+- **Per-session allowed tools** — Specific CLI tools can be pre-approved for individual sessions, bypassing the normal approval flow.
 
 ---
 
@@ -174,12 +178,45 @@ Codekin can run scheduled Claude Code sessions against repositories to produce s
   - `comment-assessment.daily` — Daily audit of comment quality, documentation gaps, and outdated comments
   - `dependency-health.daily` — Daily check for outdated packages, CVEs, and abandoned dependencies
   - `docs-audit.weekly` — Weekly audit of documentation accuracy, staleness, and coverage
+  - `commit-review` — Event-driven review of the most recent commit for correctness, security, and performance
+  - `repo-health.weekly` — Weekly repository health assessment covering dead code, TODOs, config drift, license compliance, and git hygiene
 - **Per-repo overrides** — Any workflow's prompt can be customized for a specific repo by placing a `.codekin/workflows/{kind}.md` file in the repo. The override prompt replaces the global one at run time.
 - **MD-based definitions** — Workflow types are defined as Markdown files with YAML frontmatter in `server/workflows/`. New workflow types can be added by dropping a `.md` file there — no code changes needed.
 - **Staleness check** — Workflows accept a `sinceTimestamp` parameter; if no commits have been made since the last run, the workflow is skipped automatically.
 - **Auto-committed reports** — Output is saved to a configurable directory within the repo (e.g. `review logs/`, `security-reports/`) and committed with a configurable message.
 
 See [docs/WORKFLOWS.md](./WORKFLOWS.md) for the full workflow definition format, frontmatter field reference, and instructions for writing per-repo overrides.
+
+---
+
+## Agent Joe Orchestrator
+
+Agent Joe is an always-on AI orchestrator session that manages repositories, triages audit findings, and spawns child sessions to implement fixes.
+
+- **Always-on session** — Agent Joe runs as a dedicated session that starts automatically with the server and survives restarts. It appears as a pinned entry in the left sidebar below "AI Workflows".
+- **Dedicated chat UI** — A full chat interface (reusing the standard ChatView) where users interact with Agent Joe. Includes a welcome screen for first-time users.
+- **Audit report triage** — Reads reports from `.codekin/reports/` across all managed repositories, critically evaluates findings by severity and relevance, and surfaces actionable items in the chat.
+- **Child session management** — Spawns and manages up to 5 concurrent Claude sessions in target repositories to implement approved fixes. Each child session gets a focused task description, a dedicated branch, and is monitored to completion.
+- **Color-coded sidebar status** — Child sessions and the orchestrator itself show color-coded status indicators in the sidebar with hover tooltips showing session state.
+- **Configurable agent name** — The orchestrator's display name can be customized in settings.
+- **Self-improving memory** — Maintains a persistent memory system (`~/.codekin/orchestrator/`) with user profile, repo registry, decision history, and daily journals. Memory is used to restore context across restarts and improve triage over time.
+- **Learned trust escalation** — Starts by asking permission for every action. As the user repeatedly approves similar actions, Agent Joe earns autonomy — progressing from ASK (explicit approval) to NOTIFY+DO (acts with notification) to SILENT (acts and logs).
+- **Repo policies** — Per-repo configuration for branch strategy (PR vs. direct merge), deploy requirements, enabled audit types, and activity status (active/passive/frozen).
+- **Permission mode** — Runs with `acceptEdits` permission mode, allowing it to read reports, write memory, and spawn sessions.
+
+See [docs/ORCHESTRATOR-SPEC.md](./ORCHESTRATOR-SPEC.md) for the full architectural specification.
+
+---
+
+## Git Worktrees
+
+Sessions can be isolated in dedicated git worktree directories, preventing concurrent sessions from interfering with each other's working trees.
+
+- **Per-session worktrees** — Each session can run in its own worktree, keeping file changes isolated from other sessions and the main working directory.
+- **Mid-session creation** — Worktrees can be created during an active session. The session's full context is preserved across the migration.
+- **Worktree name indicator** — The input toolbar displays the current worktree name when a session is running in a worktree.
+- **Auto-enable setting** — A global setting to automatically create worktrees for new sessions.
+- **Cleanup on delete** — Worktrees are automatically cleaned up when their associated session is deleted.
 
 ---
 
@@ -305,7 +342,7 @@ Browse and read Markdown files from any connected repository, rendered as rich t
 - **Raw toggle** — Switch between rendered and raw source views via the `[Raw]` button in the nav bar.
 - **Inline editing** — The input bar remains visible while viewing a doc. With an active session, you can ask Claude to edit the currently viewed file. The view re-fetches automatically after edits.
 - **Nav bar** — Shows a `← Back` button, the file path (`repoName / path.md`), and the raw toggle. Clicking Back or pressing `Escape` returns to the previous view.
-- **REST API** — `GET /api/repos/:repoId/docs` lists markdown files; `GET /api/repos/:repoId/docs/:filePath` returns file content. Path traversal is guarded server-side.
+- **REST API** — `GET /api/docs?repo=<path>` lists markdown files; `GET /api/docs/file?repo=<path>&file=<relPath>` returns file content. Path traversal is guarded server-side.
 
 ---
 

@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-03-28
+
+### Features
+- Add actor allowlist filter for webhook events (#261)
+
+### Fixes
+- Fix archived sessions not showing worktree-based manual sessions (#264)
+- Add context size management to GPT and Gemini review tools (#262)
+- Enforce plan mode gating via hook + PlanManager state machine (#258)
+- Use deny-with-message pattern for ExitPlanMode hook approval (#255)
+- Improve orchestrator empty state layout (#254)
+- Resolve listener leak, type-unsafe mutations, and wrong path in orchestrator (#253)
+- Show stall warning only once until new user input (#252)
+- Suppress repetitive orchestrator noise in chat (#251)
+- Remove stall timer warning from orchestrator chat (#256)
+
+### Refactoring
+- Replace distributed plan mode flags with PlanManager state machine (#257)
+
+### Documentation
+- Improve code comments per comment assessment audit (#260)
+
 ## [0.5.0] - 2026-03-23
 
 ### Features

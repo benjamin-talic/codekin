@@ -28,7 +28,7 @@ GitHub (webhook events)
 
 ## Prerequisites
 
-- Node.js v18+ (codekin requires v24 for its own process)
+- Node.js v20+
 - nginx with SSL (Let's Encrypt)
 - Authelia for authentication
 - codekin installed globally (`npm i -g codekin`)
@@ -57,7 +57,8 @@ nano ~/.codekin/env
 Contents of `~/.codekin/env`:
 
 ```bash
-export GITHUB_WEBHOOK_SECRET="your-webhook-secret"
+# Add environment variables here as needed.
+# Webhook-specific vars are configured in Step 10.
 ```
 
 Source it from `~/.bashrc` so it's available to all shells and systemd user services:
@@ -131,30 +132,12 @@ mkdir -p ~/.codekin/screenshots
 
 ## 5. Configure Repositories
 
-### Option A: Auto-scan (default)
+Repositories are discovered automatically at runtime — no manual scanning step is needed.
 
-The repo scanner will scan the configured repos directory automatically:
+- **Local repos** — The server scans the directory specified by `REPOS_ROOT` (default: `~/repos`) for git repositories on startup and periodically thereafter.
+- **GitHub orgs** — If `GH_ORG` is set (comma-separated org names), the server also fetches repositories from those GitHub organizations via the `gh` CLI.
 
-```bash
-node scripts/scan-repos.mjs
-```
-
-This generates `public/data/repos.json` which lists all discovered repos with their skills and tags.
-
-### Option B: Manual config
-
-Create `~/.codekin/repos.yml`:
-
-```yaml
-- name: my-project
-- name: other-project: /custom/path/to/project
-```
-
-Then run the scanner:
-
-```bash
-node scripts/scan-repos.mjs
-```
+To add local repositories, simply clone them into your `REPOS_ROOT` directory. They will appear in the Codekin UI automatically.
 
 ## 6. Deploy Settings
 
@@ -170,7 +153,6 @@ Key fields in `settings.json`:
 | Field       | Description                                | Default              |
 |-------------|--------------------------------------------|----------------------|
 | `webRoot`   | Where the built frontend is deployed to    | `./dist-deploy`      |
-| `serverDir` | Runtime directory for the server           | `./server`           |
 | `port`      | codekin server port                         | `32352`              |
 | `authFile`  | Path to the auth token file                | `~/.codekin/auth-token` |
 | `log`       | Server log file path                       | `/tmp/codekin.log`    |
@@ -393,8 +375,8 @@ lsof -i :32352
 ### Server health
 
 ```bash
-curl http://127.0.0.1:32352/health
-# Should return: {"status":"ok"}
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:32352/api/health
+# Returns: {"status":"ok","claudeAvailable":true,"claudeVersion":"...","apiKeySet":true,...}
 ```
 
 ## Directory Structure
@@ -411,13 +393,10 @@ codekin/
 │   ├── upload-routes.ts        # Upload, repo listing, clone endpoints
 │   ├── ws-server.ts            # Main server entry point
 │   └── package.json
-├── scripts/
-│   └── scan-repos.mjs          # Repository scanner
 ├── nginx/
 │   └── codekin.example      # nginx site config template
 ├── docs/
 │   └── SETUP.md                # This file
-├── public/data/                # Generated repos.json
 ├── dist/                       # Production build output
 ├── vite.config.ts
 ├── package.json
@@ -431,7 +410,6 @@ codekin/
 | `~/.codekin/env` (or `CODEKIN_ENV_FILE`)      | Secrets and configuration      |
 | Web root (set via `FRONTEND_WEB_ROOT` or `settings.json`) | Deployed frontend |
 | `~/.codekin/auth-token` (or `AUTH_FILE`)      | codekin auth token              |
-| `~/.codekin/repos.yml`                        | Optional repo list             |
 | `~/.codekin/screenshots/`                     | Uploaded screenshots           |
 | `/etc/nginx/sites-available/codekin`          | nginx config (production)      |
 | `/etc/systemd/system/codekin.service` | codekin systemd unit            |
