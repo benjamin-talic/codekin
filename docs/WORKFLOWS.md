@@ -1,6 +1,6 @@
 # Automated Workflows
 
-Codekin includes an automated workflow system that runs Claude Code sessions on a schedule to produce structured reports — code reviews, security audits, coverage assessments, and more. Workflows are defined as Markdown files with YAML frontmatter. Codekin ships with seven built-in workflows, and you can define your own custom workflows per-repo.
+Codekin includes an automated workflow system that runs Claude Code sessions on a schedule to produce structured reports — code reviews, security audits, coverage assessments, and more. Workflows are defined as Markdown files with YAML frontmatter. Codekin ships with nine built-in workflows, and you can define your own custom workflows per-repo.
 
 ---
 
@@ -63,7 +63,7 @@ Everything after the closing `---` is the prompt sent to Claude. Write it as a p
 
 ## Built-in Workflows
 
-Codekin ships with seven built-in workflow definitions in `server/workflows/`:
+Codekin ships with nine built-in workflow definitions in `server/workflows/`:
 
 | File | Kind | Schedule | Output Directory |
 |---|---|---|---|
@@ -74,6 +74,10 @@ Codekin ships with seven built-in workflow definitions in `server/workflows/`:
 | `comment-assessment.daily.md` | `comment-assessment.daily` | Daily | `comment-reports/` |
 | `dependency-health.daily.md` | `dependency-health.daily` | Daily | `dependency-reports/` |
 | `docs-audit.weekly.md` | `docs-audit.weekly` | Weekly | `.codekin/reports/docs-audit/` |
+| `commit-review.md` | `commit-review` | Event-driven | `.codekin/reports/commit-review/` |
+| `repo-health.weekly.md` | `repo-health.weekly` | Weekly | `.codekin/reports/repo-health/` |
+
+> **Note**: `commit-review` is event-driven (triggered by commit events) rather than scheduled, so it does not follow the `<topic>.<frequency>` naming convention.
 
 All built-in workflows are loaded automatically at server start.
 

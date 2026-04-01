@@ -140,6 +140,9 @@ All configuration is via environment variables. Defaults suit a local install; o
 | `DATA_DIR` | `~/.codekin` | Codekin data directory (sessions, uploads, etc.) |
 | `CORS_ORIGIN` | `*` | Restrict CORS for remote access |
 | `GH_ORG` | — | Comma-separated GitHub orgs for repo listing |
+| `SCREENSHOTS_DIR` | `~/.codekin/screenshots` | Directory for uploaded file storage |
+
+For webhook-specific environment variables (`GITHUB_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_ENABLED`, etc.), see the [webhook setup section in SETUP.md](./SETUP.md#10-configure-github-webhooks-optional).
 
 ## Directory Layout (after install)
 
@@ -178,4 +181,4 @@ FRONTEND_DIST=./dist \
 node server/dist/ws-server.js
 ```
 
-The existing `deploy.sh` + nginx setup (documented in `CLAUDE.md`) continues to work for development on the host machine.
+For bare-metal deployments with nginx, see [docs/SETUP.md](./SETUP.md) for the full production setup guide.

@@ -2,7 +2,7 @@
 
 > *"Agent Joe"* — a calm, knowledgeable ops manager who keeps your repositories healthy, your workflows running, and your audit findings actioned. Guides non-expert users toward becoming better vibe coders through pragmatic, friendly advice.
 
-**Status**: Draft v0.1
+**Status**: v1.0 — Phase 1 shipped (v0.5.0). Phases 2–4 remain roadmap.
 **Location in UI**: Left sidebar, below "AI Workflows"
 
 ---
@@ -485,12 +485,12 @@ type OrchestratorChildUpdate = {
 
 ## 11. Implementation Phases
 
-### Phase 1 — Foundation (MVP)
-- [ ] Agent Joe session type in `SessionManager` (always-on, auto-restart)
-- [ ] Sidebar entry + route + basic `OrchestratorView` (chat-only, no dashboard header)
-- [ ] Agent Joe CLAUDE.md with personality and base capabilities
-- [ ] Markdown-based memory (PROFILE.md, REPOS.md, journal/)
-- [ ] Manual interaction only (user asks, Agent Joe answers)
+### Phase 1 — Foundation (MVP) ✓
+- [x] Agent Joe session type in `SessionManager` (always-on, auto-restart)
+- [x] Sidebar entry + route + basic `OrchestratorView` (chat-only, no dashboard header)
+- [x] Agent Joe CLAUDE.md with personality and base capabilities
+- [x] Markdown-based memory (PROFILE.md, REPOS.md, journal/)
+- [x] Manual interaction only (user asks, Agent Joe answers)
 
 ### Phase 2 — Report Triage & Child Sessions
 - [ ] Report reader — Agent Joe can scan `.codekin/reports/` across repos
