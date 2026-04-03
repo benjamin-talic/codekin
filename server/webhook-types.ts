@@ -7,6 +7,7 @@ export type WebhookEventStatus =
   | 'session_created'
   | 'completed'
   | 'error'
+  | 'superseded'
 
 export interface WebhookEvent {
   id: string                    // X-GitHub-Delivery ID
@@ -170,4 +171,6 @@ export interface PullRequestContext {
   diff: string                    // fetched via gh, potentially truncated
   fileList: string                // formatted list of changed files
   commitMessages: string          // formatted commit messages
+  reviewComments: string          // existing inline review comments
+  reviews: string                 // existing review summaries
 }

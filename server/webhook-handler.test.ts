@@ -10,12 +10,18 @@ const mockDedupShutdown = vi.hoisted(() => vi.fn())
 const mockFetchPrDiff = vi.hoisted(() => vi.fn(async () => ({ diff: 'mock diff', truncated: false })))
 const mockFetchPrFiles = vi.hoisted(() => vi.fn(async () => 'file1.ts (modified, +10/-2)'))
 const mockFetchPrCommits = vi.hoisted(() => vi.fn(async () => '- abc1234: fix bug'))
+const mockFetchPrReviewComments = vi.hoisted(() => vi.fn(async () => ''))
+const mockFetchPrReviews = vi.hoisted(() => vi.fn(async () => ''))
+const mockFetchExistingReviewComment = vi.hoisted(() => vi.fn(async () => undefined as number | undefined))
 const mockBuildPrReviewPrompt = vi.hoisted(() => vi.fn(() => 'mock pr review prompt'))
+const mockLoadPrCache = vi.hoisted(() => vi.fn(() => undefined))
+const mockGetCachePath = vi.hoisted(() => vi.fn(() => '/home/user/.codekin/pr-cache/owner/repo/pr-42.json'))
 
 // Mock all webhook sub-modules before importing the handler
 vi.mock('./webhook-dedup.js', () => {
   class MockWebhookDedup {
     isDuplicate = mockIsDuplicate
+    recordProcessed = vi.fn()
     shutdown = mockDedupShutdown
     flushToDisk = vi.fn()
   }
@@ -48,6 +54,15 @@ vi.mock('./webhook-pr-github.js', () => ({
   fetchPrDiff: mockFetchPrDiff,
   fetchPrFiles: mockFetchPrFiles,
   fetchPrCommits: mockFetchPrCommits,
+  fetchPrReviewComments: mockFetchPrReviewComments,
+  fetchPrReviews: mockFetchPrReviews,
+  fetchExistingReviewComment: mockFetchExistingReviewComment,
+  REVIEW_COMMENT_MARKER: '<!-- codekin-review -->',
+}))
+
+vi.mock('./webhook-pr-cache.js', () => ({
+  loadPrCache: mockLoadPrCache,
+  getCachePath: mockGetCachePath,
 }))
 
 vi.mock('./webhook-pr-prompt.js', () => ({
@@ -79,6 +94,7 @@ function fakeSessionManager() {
     list: vi.fn(() => []),
     create: vi.fn(() => ({ id: 'session-1' })),
     get: vi.fn(() => null),
+    delete: vi.fn(),
     broadcast: vi.fn(),
     sendInput: vi.fn(),
     onSessionExit: vi.fn((cb: ExitCallback) => { exitCallbacks.push(cb) }),
@@ -488,7 +504,12 @@ describe('WebhookHandler', () => {
       mockFetchPrDiff.mockImplementation(async () => ({ diff: 'mock diff', truncated: false }))
       mockFetchPrFiles.mockImplementation(async () => 'file1.ts (modified, +10/-2)')
       mockFetchPrCommits.mockImplementation(async () => '- abc1234: fix bug')
+      mockFetchPrReviewComments.mockImplementation(async () => '')
+      mockFetchPrReviews.mockImplementation(async () => '')
+      mockFetchExistingReviewComment.mockImplementation(async () => undefined)
       mockBuildPrReviewPrompt.mockImplementation(() => 'mock pr review prompt')
+      mockLoadPrCache.mockImplementation(() => undefined)
+      mockGetCachePath.mockImplementation(() => '/home/user/.codekin/pr-cache/owner/repo/pr-42.json')
       vi.mocked(createWorkspace).mockImplementation(async () => '/tmp/workspace')
     })
 
@@ -677,6 +698,229 @@ describe('WebhookHandler', () => {
         '/tmp/workspace',
         expect.objectContaining({ source: 'webhook' }),
       )
+    })
+
+    describe('session superseding', () => {
+      it('supersedes active session when new event arrives for the same PR', async () => {
+        await handler.checkHealth()
+
+        // First event — creates a session
+        const payload1 = makePrPayload({ action: 'opened' })
+        const body1 = Buffer.from(JSON.stringify(payload1))
+        const result1 = await handler.handleWebhook(body1, makePrHeaders(body1, { delivery: 'pr-d-1' }))
+        expect(result1.statusCode).toBe(202)
+
+        await vi.advanceTimersByTimeAsync(100)
+
+        const event1 = handler.getEvent(result1.body.eventId as string)
+        expect(event1?.status).toBe('session_created')
+
+        // Second event — same PR, new SHA (synchronize)
+        const payload2 = makePrPayload({ action: 'synchronize' })
+        // Override the head SHA to simulate a new push
+        payload2.pull_request.head.sha = 'newsha_1234567890abcdef1234567890abcdef12'
+        const body2 = Buffer.from(JSON.stringify(payload2))
+        const result2 = await handler.handleWebhook(body2, makePrHeaders(body2, { delivery: 'pr-d-2' }))
+        expect(result2.statusCode).toBe(202)
+
+        // Old event should be superseded
+        const event1After = handler.getEvent(result1.body.eventId as string)
+        expect(event1After?.status).toBe('superseded')
+        expect(event1After?.error).toContain('Superseded')
+
+        // Old session should have been deleted
+        expect(sessions.delete).toHaveBeenCalledWith(event1?.sessionId)
+      })
+
+      it('does not supersede sessions for different PRs', async () => {
+        await handler.checkHealth()
+
+        // Event for PR #42
+        const payload1 = makePrPayload({ action: 'opened' })
+        const body1 = Buffer.from(JSON.stringify(payload1))
+        const result1 = await handler.handleWebhook(body1, makePrHeaders(body1, { delivery: 'pr-d-1' }))
+        await vi.advanceTimersByTimeAsync(100)
+
+        // Event for PR #99 (different PR)
+        const payload2 = makePrPayload({ action: 'opened' })
+        payload2.number = 99
+        payload2.pull_request.number = 99
+        payload2.pull_request.title = 'Different PR'
+        payload2.pull_request.head.sha = 'othershaothershaothershaothershaothersha00'
+        const body2 = Buffer.from(JSON.stringify(payload2))
+        await handler.handleWebhook(body2, makePrHeaders(body2, { delivery: 'pr-d-2' }))
+
+        // First event should NOT be superseded
+        const event1After = handler.getEvent(result1.body.eventId as string)
+        expect(event1After?.status).toBe('session_created')
+        expect(sessions.delete).not.toHaveBeenCalled()
+      })
+
+      it('does not supersede already completed sessions', async () => {
+        await handler.checkHealth()
+
+        // First event — completes
+        const payload1 = makePrPayload({ action: 'opened' })
+        const body1 = Buffer.from(JSON.stringify(payload1))
+        const result1 = await handler.handleWebhook(body1, makePrHeaders(body1, { delivery: 'pr-d-1' }))
+        await vi.advanceTimersByTimeAsync(100)
+
+        // Simulate session completion
+        const sessionId = result1.body.sessionId as string
+        sessions._exitCallbacks[0](sessionId, 0, null, false)
+        expect(handler.getEvent(result1.body.eventId as string)?.status).toBe('completed')
+
+        // Second event — same PR, new SHA
+        const payload2 = makePrPayload({ action: 'synchronize' })
+        payload2.pull_request.head.sha = 'newsha_1234567890abcdef1234567890abcdef12'
+        const body2 = Buffer.from(JSON.stringify(payload2))
+        await handler.handleWebhook(body2, makePrHeaders(body2, { delivery: 'pr-d-2' }))
+
+        // Completed event should NOT be superseded
+        const event1After = handler.getEvent(result1.body.eventId as string)
+        expect(event1After?.status).toBe('completed')
+        expect(sessions.delete).not.toHaveBeenCalled()
+      })
+
+      it('does not overwrite superseded status when workspace creation fails', async () => {
+        await handler.checkHealth()
+        // Make workspace creation slow, then fail
+        let rejectWorkspace: (err: Error) => void
+        vi.mocked(createWorkspace).mockReturnValueOnce(
+          new Promise((_resolve, reject) => { rejectWorkspace = reject })
+        )
+
+        // First event — starts processing, workspace hangs
+        const payload1 = makePrPayload({ action: 'opened' })
+        const body1 = Buffer.from(JSON.stringify(payload1))
+        const result1 = await handler.handleWebhook(body1, makePrHeaders(body1, { delivery: 'pr-d-1' }))
+        expect(handler.getEvent(result1.body.eventId as string)?.status).toBe('processing')
+
+        // Second event — supersedes the first
+        const payload2 = makePrPayload({ action: 'synchronize' })
+        payload2.pull_request.head.sha = 'newsha_1234567890abcdef1234567890abcdef12'
+        const body2 = Buffer.from(JSON.stringify(payload2))
+        await handler.handleWebhook(body2, makePrHeaders(body2, { delivery: 'pr-d-2' }))
+        expect(handler.getEvent(result1.body.eventId as string)?.status).toBe('superseded')
+
+        // Now the old workspace creation fails
+        rejectWorkspace!(new Error('clone failed'))
+        await vi.advanceTimersByTimeAsync(100)
+
+        // Status should still be 'superseded', not overwritten to 'error'
+        expect(handler.getEvent(result1.body.eventId as string)?.status).toBe('superseded')
+      })
+
+      it('supersedes events still in processing state', async () => {
+        await handler.checkHealth()
+        // Make workspace hang so event stays in 'processing'
+        vi.mocked(createWorkspace).mockReturnValueOnce(new Promise(() => {}))
+
+        const payload1 = makePrPayload({ action: 'opened' })
+        const body1 = Buffer.from(JSON.stringify(payload1))
+        const result1 = await handler.handleWebhook(body1, makePrHeaders(body1, { delivery: 'pr-d-1' }))
+        expect(handler.getEvent(result1.body.eventId as string)?.status).toBe('processing')
+
+        // Second event arrives while first is still processing
+        const payload2 = makePrPayload({ action: 'synchronize' })
+        payload2.pull_request.head.sha = 'newsha_1234567890abcdef1234567890abcdef12'
+        const body2 = Buffer.from(JSON.stringify(payload2))
+        const result2 = await handler.handleWebhook(body2, makePrHeaders(body2, { delivery: 'pr-d-2' }))
+        expect(result2.statusCode).toBe(202)
+
+        // Old event should be superseded even though it was still processing
+        const event1After = handler.getEvent(result1.body.eventId as string)
+        expect(event1After?.status).toBe('superseded')
+      })
+    })
+
+    describe('cache and comment integration', () => {
+      it('calls loadPrCache with correct repo and PR number', async () => {
+        await handler.checkHealth()
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(mockLoadPrCache).toHaveBeenCalledWith('owner/repo', 42)
+      })
+
+      it('calls fetchExistingReviewComment with correct repo and PR number', async () => {
+        await handler.checkHealth()
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(mockFetchExistingReviewComment).toHaveBeenCalledWith('owner/repo', 42)
+      })
+
+      it('passes cache data and comment ID to buildPrReviewPrompt', async () => {
+        const mockCache = {
+          prNumber: 42,
+          repo: 'owner/repo',
+          lastReviewedSha: 'prev123',
+          timestamp: '2026-04-02T10:00:00.000Z',
+          priorReviewSummary: 'summary',
+          codebaseContext: 'context',
+          reviewFindings: 'findings',
+        }
+        mockLoadPrCache.mockReturnValueOnce(mockCache)
+        mockFetchExistingReviewComment.mockResolvedValueOnce(12345)
+
+        await handler.checkHealth()
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(mockBuildPrReviewPrompt).toHaveBeenCalledWith(
+          expect.any(Object),
+          '/tmp/workspace',
+          {
+            priorCache: mockCache,
+            cachePath: '/home/user/.codekin/pr-cache/owner/repo/pr-42.json',
+            existingCommentId: 12345,
+          },
+        )
+      })
+
+      it('includes Write in allowed tools', async () => {
+        await handler.checkHealth()
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(sessions.create).toHaveBeenCalledWith(
+          expect.any(String),
+          '/tmp/workspace',
+          expect.objectContaining({
+            allowedTools: expect.arrayContaining(['Write']),
+          }),
+        )
+      })
+
+      it('works when cache and comment return undefined (first review)', async () => {
+        mockLoadPrCache.mockReturnValueOnce(undefined)
+        mockFetchExistingReviewComment.mockResolvedValueOnce(undefined)
+
+        await handler.checkHealth()
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(result.statusCode).toBe(202)
+        expect(mockBuildPrReviewPrompt).toHaveBeenCalledWith(
+          expect.any(Object),
+          '/tmp/workspace',
+          expect.objectContaining({
+            priorCache: undefined,
+            existingCommentId: undefined,
+          }),
+        )
+      })
     })
   })
 })

@@ -11,8 +11,10 @@ vi.mock('fs', async (importOriginal) => {
 })
 
 import { buildPrReviewPrompt } from './webhook-pr-prompt.js'
+import { REVIEW_COMMENT_MARKER } from './webhook-pr-github.js'
 import { existsSync, readFileSync } from 'fs'
 import type { PullRequestContext } from './webhook-types.js'
+import type { PrCacheData } from './webhook-pr-cache.js'
 
 function makeContext(overrides: Partial<PullRequestContext> = {}): PullRequestContext {
   return {
@@ -33,6 +35,8 @@ function makeContext(overrides: Partial<PullRequestContext> = {}): PullRequestCo
     diff: 'diff --git a/src/auth.ts\n+fixed line\n-broken line',
     fileList: 'src/auth.ts (modified, +20/-8)\nsrc/auth.test.ts (modified, +5/-2)',
     commitMessages: '- abc1234: fix: resolve auth bug',
+    reviewComments: '',
+    reviews: '',
     ...overrides,
   }
 }
@@ -116,9 +120,21 @@ describe('buildPrReviewPrompt', () => {
     expect(prompt).not.toContain('## Commits')
   })
 
-  it('always includes the no-GitHub-posting constraint', () => {
-    const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
-    expect(prompt).toContain('DO NOT post comments, reviews, or any content to GitHub')
+  it('includes existing review comments when present', () => {
+    const prompt = buildPrReviewPrompt(makeContext({
+      reviewComments: '- reviewer1 on src/auth.ts:10: Fix the null check here',
+      reviews: '- reviewer1 (COMMENTED): Needs a few fixes',
+    }), '/tmp/workspace')
+    expect(prompt).toContain('## Existing Reviews')
+    expect(prompt).toContain('### Review Summaries')
+    expect(prompt).toContain('reviewer1 (COMMENTED)')
+    expect(prompt).toContain('### Inline Comments')
+    expect(prompt).toContain('Fix the null check here')
+  })
+
+  it('omits existing reviews section when no comments exist', () => {
+    const prompt = buildPrReviewPrompt(makeContext({ reviewComments: '', reviews: '' }), '/tmp/workspace')
+    expect(prompt).not.toContain('## Existing Reviews')
   })
 
   describe('custom prompt resolution', () => {
@@ -164,14 +180,6 @@ describe('buildPrReviewPrompt', () => {
       expect(prompt).not.toContain('Global prompt loses')
     })
 
-    it('no-GitHub constraint present even with custom prompt', () => {
-      vi.mocked(existsSync).mockReturnValue(true)
-      vi.mocked(readFileSync).mockReturnValue('Just my custom instructions')
-
-      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
-      expect(prompt).toContain('DO NOT post comments, reviews, or any content to GitHub')
-    })
-
     it('skips empty custom prompt file and falls back', () => {
       vi.mocked(existsSync).mockReturnValue(true)
       vi.mocked(readFileSync).mockReturnValue('   \n  ')
@@ -179,6 +187,93 @@ describe('buildPrReviewPrompt', () => {
       const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
       // Should fall back to default since file was whitespace-only
       expect(prompt).toContain('comprehensive code review')
+    })
+  })
+
+  describe('prior review context (cache)', () => {
+    const mockCache: PrCacheData = {
+      prNumber: 42,
+      repo: 'owner/repo',
+      lastReviewedSha: 'prev123',
+      timestamp: '2026-04-02T10:00:00.000Z',
+      priorReviewSummary: 'PR adds SSO authentication support',
+      codebaseContext: 'Auth module at src/auth/, uses JWT tokens',
+      reviewFindings: 'Found null check issue in auth.ts line 42',
+    }
+
+    it('includes prior context section when cache provided', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace', { priorCache: mockCache })
+      expect(prompt).toContain('## Prior Review Context')
+      expect(prompt).toContain('prev123')
+      expect(prompt).toContain('2026-04-02T10:00:00.000Z')
+    })
+
+    it('includes all cache fields in prior context', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace', { priorCache: mockCache })
+      expect(prompt).toContain('### Codebase Familiarity')
+      expect(prompt).toContain('Auth module at src/auth/, uses JWT tokens')
+      expect(prompt).toContain('### Previous Review Findings')
+      expect(prompt).toContain('Found null check issue in auth.ts line 42')
+      expect(prompt).toContain('### Previous Review Summary')
+      expect(prompt).toContain('PR adds SSO authentication support')
+    })
+
+    it('omits prior context section when no cache', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
+      expect(prompt).not.toContain('## Prior Review Context')
+    })
+
+    it('includes note about fresh diff', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace', { priorCache: mockCache })
+      expect(prompt).toContain('diff and comments below are fresh')
+    })
+  })
+
+  describe('cache-writing instructions', () => {
+    it('includes cache-writing instructions with correct path', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace', {
+        cachePath: '/home/user/.codekin/pr-cache/owner/repo/pr-42.json',
+      })
+      expect(prompt).toContain('## Post-Review: Save Context')
+      expect(prompt).toContain('/home/user/.codekin/pr-cache/owner/repo/pr-42.json')
+      expect(prompt).toContain('Write tool')
+    })
+
+    it('omits cache-writing instructions when no cachePath', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
+      expect(prompt).not.toContain('## Post-Review: Save Context')
+    })
+  })
+
+  describe('comment posting instructions', () => {
+    it('includes update instructions when existingCommentId provided', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace', {
+        existingCommentId: 12345,
+      })
+      expect(prompt).toContain('## Posting Your Review Summary')
+      expect(prompt).toContain('comment ID: 12345')
+      expect(prompt).toContain('Update it instead of creating a new comment')
+      expect(prompt).toContain('PATCH')
+      expect(prompt).toContain(`issues/comments/12345`)
+    })
+
+    it('includes create instructions when no existing comment', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
+      expect(prompt).toContain('## Posting Your Review Summary')
+      expect(prompt).toContain('new comment')
+      expect(prompt).toContain(`issues/${42}/comments`)
+    })
+
+    it('always includes marker requirement in update instructions', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace', {
+        existingCommentId: 12345,
+      })
+      expect(prompt).toContain(REVIEW_COMMENT_MARKER)
+    })
+
+    it('always includes marker requirement in create instructions', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
+      expect(prompt).toContain(REVIEW_COMMENT_MARKER)
     })
   })
 })

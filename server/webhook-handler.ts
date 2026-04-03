@@ -25,9 +25,10 @@ import type { WebhookConfig, WebhookEvent, WebhookEventStatus, WorkflowRunPayloa
 import type { FullWebhookConfig } from './webhook-config.js'
 import { WebhookDedup, computeIdempotencyKey, computePrIdempotencyKey } from './webhook-dedup.js'
 import { checkGhHealth, fetchFailedLogs, fetchJobs, fetchAnnotations, fetchCommitMessage, fetchPRTitle } from './webhook-github.js'
-import { fetchPrDiff, fetchPrFiles, fetchPrCommits } from './webhook-pr-github.js'
+import { fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews, fetchExistingReviewComment } from './webhook-pr-github.js'
 import { buildPrompt } from './webhook-prompt.js'
 import { buildPrReviewPrompt } from './webhook-pr-prompt.js'
+import { loadPrCache, getCachePath } from './webhook-pr-cache.js'
 import { createWorkspace, cleanupWorkspace } from './webhook-workspace.js'
 import { WebhookHandlerBase } from './webhook-handler-base.js'
 import { REPOS_ROOT } from './config.js'
@@ -269,6 +270,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       sessionId,
     }
     this.recordEvent(webhookEvent)
+    this.dedup.recordProcessed(eventId, idempotencyKey)
 
     // Process asynchronously — don't block the 202 response
     this.processWebhookAsync(payload, webhookEvent, sessionId).catch(err => {
@@ -368,6 +370,9 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     }
 
+    // --- Supersede any active session for this PR ---
+    this.supersedePrSessions(payload.repository.full_name, pr.number)
+
     // --- Session cap check ---
     if (this.isAtSessionCap(eventId)) {
       this.recordEvent({
@@ -417,11 +422,15 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       baseBranch: pr.base.ref,
     }
     this.recordEvent(webhookEvent)
+    this.dedup.recordProcessed(eventId, idempotencyKey)
 
     // Process asynchronously — don't block the 202 response
     this.processPullRequestAsync(payload, webhookEvent, sessionId).catch(err => {
       console.error('[webhook] PR async processing error:', err)
-      this.updateEventStatus(eventId, 'error', String(err))
+      // Don't overwrite 'superseded' status if a newer event already took over
+      if (this.getEvent(eventId)?.status !== 'superseded') {
+        this.updateEventStatus(eventId, 'error', String(err))
+      }
     })
 
     return {
@@ -446,11 +455,22 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     console.log(`[webhook] Processing PR: ${repo} #${pr.number} "${pr.title}" (${payload.action})`)
 
     // --- Fetch PR context (all calls degrade gracefully) ---
-    const [diffResult, fileList, commitMessages] = await Promise.all([
+    const [diffResult, fileList, commitMessages, reviewComments, reviews, priorCache, existingCommentId] = await Promise.all([
       fetchPrDiff(repo, pr.number),
       fetchPrFiles(repo, pr.number),
       fetchPrCommits(repo, pr.number),
+      fetchPrReviewComments(repo, pr.number),
+      fetchPrReviews(repo, pr.number),
+      Promise.resolve(loadPrCache(repo, pr.number)),
+      fetchExistingReviewComment(repo, pr.number),
     ])
+    const cachePath = getCachePath(repo, pr.number)
+
+    // Check if superseded while fetching PR context
+    if (this.getEvent(event.id)?.status === 'superseded') {
+      console.log(`[webhook] Event ${event.id} was superseded, aborting PR processing`)
+      return
+    }
 
     const context: PullRequestContext = {
       repo,
@@ -471,6 +491,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       diff: diffResult.diff,
       fileList,
       commitMessages,
+      reviewComments,
+      reviews,
     }
 
     // --- Create workspace ---
@@ -485,7 +507,17 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       )
     } catch (err) {
       console.error(`[webhook] Failed to create workspace for PR ${repo}#${pr.number}:`, err)
-      this.updateEventStatus(event.id, 'error', `Workspace creation failed: ${err}`)
+      // Don't overwrite 'superseded' status if a newer event already took over
+      if (this.getEvent(event.id)?.status !== 'superseded') {
+        this.updateEventStatus(event.id, 'error', `Workspace creation failed: ${err}`)
+      }
+      return
+    }
+
+    // Check if superseded while creating workspace
+    if (this.getEvent(event.id)?.status === 'superseded') {
+      console.log(`[webhook] Event ${event.id} was superseded during workspace creation, cleaning up`)
+      cleanupWorkspace(sessionId)
       return
     }
 
@@ -504,6 +536,15 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       source: 'webhook',
       id: sessionId,
       groupDir,
+      model: 'sonnet',
+      allowedTools: [
+        'Bash(gh:*)',
+        'Write',
+        'mcp__plugin_context7_context7__resolve-library-id',
+        'mcp__plugin_context7_context7__query-docs',
+        'WebFetch',
+        'WebSearch',
+      ],
     })
 
     console.log(`[webhook] PR session created: ${sessionName} (${sessionId})`)
@@ -514,7 +555,11 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     if (updatedEvent) this.broadcastWebhookEvent(updatedEvent)
 
     // --- Build and send prompt ---
-    const prompt = buildPrReviewPrompt(context, workspacePath)
+    const prompt = buildPrReviewPrompt(context, workspacePath, {
+      priorCache: priorCache ?? undefined,
+      cachePath,
+      existingCommentId,
+    })
     this.sessions.sendInput(sessionId, prompt)
 
     console.log(`[webhook] PR review prompt sent to session ${sessionId}, Claude is processing...`)
@@ -523,6 +568,29 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   // ---------------------------------------------------------------------------
   // Shared helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Find and terminate any active sessions for the same PR.
+   * Called before creating a new session so a new push supersedes the old review.
+   */
+  private supersedePrSessions(repo: string, prNumber: number): void {
+    const activeStatuses: WebhookEventStatus[] = ['processing', 'session_created']
+    const activeEvents = this.getEvents().filter(
+      e => e.repo === repo && e.prNumber === prNumber && activeStatuses.includes(e.status)
+    )
+
+    for (const oldEvent of activeEvents) {
+      console.log(`[webhook] Superseding PR session: event=${oldEvent.id} session=${oldEvent.sessionId} (PR ${repo}#${prNumber})`)
+
+      // Mark superseded FIRST so the exit listener won't overwrite the status
+      this.updateEventStatus(oldEvent.id, 'superseded', 'Superseded by new push')
+
+      // Delete the session (kills process, cleans up workspace)
+      if (oldEvent.sessionId) {
+        this.sessions.delete(oldEvent.sessionId)
+      }
+    }
+  }
 
   /**
    * Check if the webhook session concurrency cap has been reached.

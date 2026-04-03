@@ -108,6 +108,111 @@ export async function fetchPrFiles(repo: string, prNumber: number): Promise<stri
  * @param prNumber - Pull request number.
  * @returns Formatted commit list, or empty string on error.
  */
+/**
+ * Fetch existing review comments (inline code comments) for a pull request.
+ *
+ * @param repo     - GitHub repo in `owner/name` format.
+ * @param prNumber - Pull request number.
+ * @returns Formatted comment list, or empty string on error.
+ */
+export async function fetchPrReviewComments(repo: string, prNumber: number): Promise<string> {
+  try {
+    const raw = await ghRunner([
+      'api',
+      `/repos/${repo}/pulls/${prNumber}/comments`,
+      '--paginate',
+    ])
+    const comments = JSON.parse(raw) as Array<{
+      path: string
+      line: number | null
+      body: string
+      user: { login: string }
+    }>
+
+    if (!Array.isArray(comments) || comments.length === 0) return ''
+
+    return comments
+      .map(c => {
+        const location = c.line ? `${c.path}:${c.line}` : c.path
+        return `- ${c.user.login} on ${location}: ${c.body}`
+      })
+      .join('\n')
+  } catch (err) {
+    console.warn(`fetchPrReviewComments: failed for ${repo} PR #${prNumber}:`, err)
+    return ''
+  }
+}
+
+/**
+ * Fetch review summaries (approve/request changes/comment) for a pull request.
+ *
+ * @param repo     - GitHub repo in `owner/name` format.
+ * @param prNumber - Pull request number.
+ * @returns Formatted review list, or empty string on error.
+ */
+export async function fetchPrReviews(repo: string, prNumber: number): Promise<string> {
+  try {
+    const raw = await ghRunner([
+      'api',
+      `/repos/${repo}/pulls/${prNumber}/reviews`,
+      '--paginate',
+    ])
+    const reviews = JSON.parse(raw) as Array<{
+      state: string
+      body: string | null
+      user: { login: string }
+    }>
+
+    if (!Array.isArray(reviews) || reviews.length === 0) return ''
+
+    return reviews
+      .filter(r => r.state !== 'PENDING')
+      .map(r => `- ${r.user.login} (${r.state}): ${r.body || '(no summary)'}`)
+      .join('\n')
+  } catch (err) {
+    console.warn(`fetchPrReviews: failed for ${repo} PR #${prNumber}:`, err)
+    return ''
+  }
+}
+
+/** HTML marker embedded in Codekin review comments for identification. */
+export const REVIEW_COMMENT_MARKER = '<!-- codekin-review -->'
+
+/**
+ * Find an existing Codekin review summary comment on a PR.
+ * Searches issue comments (top-level conversation comments) for the marker.
+ *
+ * @param repo     - GitHub repo in `owner/name` format.
+ * @param prNumber - Pull request number.
+ * @returns The comment ID if found, or undefined.
+ */
+export async function fetchExistingReviewComment(repo: string, prNumber: number): Promise<number | undefined> {
+  try {
+    const raw = await ghRunner([
+      'api',
+      `/repos/${repo}/issues/${prNumber}/comments`,
+      '--paginate',
+    ])
+    const comments = JSON.parse(raw) as Array<{
+      id: number
+      body: string
+    }>
+
+    if (!Array.isArray(comments) || comments.length === 0) return undefined
+
+    // Search in reverse to find the most recent matching comment
+    for (let i = comments.length - 1; i >= 0; i--) {
+      if (comments[i].body.includes(REVIEW_COMMENT_MARKER)) {
+        return comments[i].id
+      }
+    }
+    return undefined
+  } catch (err) {
+    console.warn(`fetchExistingReviewComment: failed for ${repo} PR #${prNumber}:`, err)
+    return undefined
+  }
+}
+
 export async function fetchPrCommits(repo: string, prNumber: number): Promise<string> {
   try {
     const raw = await ghRunner([

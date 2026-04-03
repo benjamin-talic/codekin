@@ -39,8 +39,8 @@ export class WebhookDedup {
   }
 
   /**
-   * Check if an event is a duplicate. If not, record it.
-   * Returns true if it IS a duplicate.
+   * Check if an event is a duplicate. Does NOT record it — call recordProcessed() after
+   * the event is accepted past all gates (concurrency, etc.).
    */
   isDuplicate(deliveryId: string, idempotencyKey: string): boolean {
     this.evictExpired()
@@ -48,7 +48,11 @@ export class WebhookDedup {
     if (deliveryId && this.byDeliveryId.has(deliveryId)) return true
     if (this.byIdempotencyKey.has(idempotencyKey)) return true
 
-    // Not a duplicate — record it
+    return false
+  }
+
+  /** Mark an event as processed so future deliveries are deduped. */
+  recordProcessed(deliveryId: string, idempotencyKey: string): void {
     const entry: DedupEntry = {
       processedAt: new Date().toISOString(),
       eventId: deliveryId || idempotencyKey.slice(0, 12),
@@ -57,10 +61,7 @@ export class WebhookDedup {
     if (deliveryId) this.byDeliveryId.set(deliveryId, entry)
     this.byIdempotencyKey.set(idempotencyKey, entry)
 
-    // Enforce max entries
     this.enforceMaxEntries()
-
-    return false
   }
 
   private evictExpired(): void {

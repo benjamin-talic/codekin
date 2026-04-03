@@ -14,6 +14,15 @@ import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import type { PullRequestContext } from './webhook-types.js'
+import type { PrCacheData } from './webhook-pr-cache.js'
+import { REVIEW_COMMENT_MARKER } from './webhook-pr-github.js'
+
+/** Options for prompt assembly — cache context and comment management. */
+export interface PrPromptOptions {
+  priorCache?: PrCacheData
+  cachePath?: string
+  existingCommentId?: number
+}
 
 const CUSTOM_PROMPT_FILENAME = 'pr-review-prompt.md'
 
@@ -89,8 +98,9 @@ function buildDefaultInstructions(ctx: PullRequestContext): string {
  *
  * @param ctx           - Pull request context with metadata and diff.
  * @param workspacePath - Path to the cloned workspace (for repo-level prompt lookup).
+ * @param options       - Optional cache context and comment management settings.
  */
-export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: string): string {
+export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: string, options?: PrPromptOptions): string {
   const lines: string[] = []
 
   // --- PR metadata (always included) ---
@@ -131,6 +141,39 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push(ctx.commitMessages)
   }
 
+  // Existing review comments
+  if (ctx.reviews || ctx.reviewComments) {
+    lines.push('')
+    lines.push('## Existing Reviews')
+    if (ctx.reviews) {
+      lines.push('### Review Summaries')
+      lines.push(ctx.reviews)
+    }
+    if (ctx.reviewComments) {
+      lines.push('### Inline Comments')
+      lines.push(ctx.reviewComments)
+    }
+  }
+
+  // Prior review context (from cache)
+  if (options?.priorCache) {
+    const cache = options.priorCache
+    lines.push('')
+    lines.push('## Prior Review Context')
+    lines.push(`(from review at commit ${cache.lastReviewedSha} on ${cache.timestamp})`)
+    lines.push('')
+    lines.push('### Codebase Familiarity')
+    lines.push(cache.codebaseContext)
+    lines.push('')
+    lines.push('### Previous Review Findings')
+    lines.push(cache.reviewFindings)
+    lines.push('')
+    lines.push('### Previous Review Summary')
+    lines.push(cache.priorReviewSummary)
+    lines.push('')
+    lines.push('Note: The above is from a previous review. The diff and comments below are fresh. Review the full current diff but leverage your prior context for faster, more informed review.')
+  }
+
   // Diff
   lines.push('')
   lines.push('## Diff')
@@ -153,9 +196,52 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push(buildDefaultInstructions(ctx))
   }
 
-  // Always append the Phase 1 constraint
+  // --- Comment posting instructions ---
   lines.push('')
-  lines.push('**IMPORTANT: DO NOT post comments, reviews, or any content to GitHub. Produce the review report here only.**')
+  if (options?.existingCommentId) {
+    lines.push('## Posting Your Review Summary')
+    lines.push(`An existing Codekin review comment was found on this PR (comment ID: ${options.existingCommentId}).`)
+    lines.push('Update it instead of creating a new comment. Use a temporary file for the body to avoid shell escaping issues:')
+    lines.push('')
+    lines.push('1. Write your review summary to a temporary file (e.g., /tmp/review-body.md)')
+    lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
+    lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/comments/${options.existingCommentId} -X PATCH --input /tmp/review-body.md\``)
+    lines.push('')
+    lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body.`)
+  } else {
+    lines.push('## Posting Your Review Summary')
+    lines.push('Post your review summary as a new comment on the PR. Use a temporary file for the body to avoid shell escaping issues:')
+    lines.push('')
+    lines.push('1. Write your review summary to a temporary file (e.g., /tmp/review-body.md)')
+    lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
+    lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/${ctx.prNumber}/comments --input /tmp/review-body.md\``)
+    lines.push('')
+    lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body. This marker allows future reviews to update this comment instead of creating a new one.`)
+  }
+
+  // --- Cache-writing instructions ---
+  if (options?.cachePath) {
+    lines.push('')
+    lines.push('## Post-Review: Save Context')
+    lines.push('After completing your review, write a JSON file to preserve your context for future reviews of this PR.')
+    lines.push('')
+    lines.push(`Path: ${options.cachePath}`)
+    lines.push('')
+    lines.push('The file must be valid JSON with this exact structure:')
+    lines.push('```json')
+    lines.push('{')
+    lines.push(`  "prNumber": ${ctx.prNumber},`)
+    lines.push(`  "repo": "${ctx.repo}",`)
+    lines.push(`  "lastReviewedSha": "${ctx.headSha}",`)
+    lines.push('  "timestamp": "<current ISO timestamp>",')
+    lines.push('  "priorReviewSummary": "<1-3 sentence summary of your review findings>",')
+    lines.push('  "codebaseContext": "<key architectural observations, module structure, patterns you noticed>",')
+    lines.push('  "reviewFindings": "<specific issues found, their locations, and whether they were fixed>"')
+    lines.push('}')
+    lines.push('```')
+    lines.push('')
+    lines.push('Use the Write tool to save this file. This helps future reviews of this PR be more efficient.')
+  }
 
   return lines.join('\n')
 }

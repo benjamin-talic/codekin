@@ -58,36 +58,47 @@ describe('WebhookDedup', () => {
   })
 
   describe('isDuplicate', () => {
-    it('returns false for the first call and records it', () => {
+    it('returns false for the first call', () => {
       expect(dedup.isDuplicate('delivery-1', 'key-1')).toBe(false)
     })
 
     it('returns true for a second call with the same deliveryId', () => {
       dedup.isDuplicate('delivery-1', 'key-1')
+      dedup.recordProcessed('delivery-1', 'key-1')
       expect(dedup.isDuplicate('delivery-1', 'key-different')).toBe(true)
     })
 
     it('returns true for a second call with the same idempotencyKey', () => {
       dedup.isDuplicate('delivery-1', 'key-1')
+      dedup.recordProcessed('delivery-1', 'key-1')
       expect(dedup.isDuplicate('delivery-different', 'key-1')).toBe(true)
     })
 
     it('returns false for completely different keys', () => {
       dedup.isDuplicate('delivery-1', 'key-1')
+      dedup.recordProcessed('delivery-1', 'key-1')
       expect(dedup.isDuplicate('delivery-2', 'key-2')).toBe(false)
     })
 
     it('checks only idempotencyKey when deliveryId is empty', () => {
       dedup.isDuplicate('', 'key-1')
+      dedup.recordProcessed('', 'key-1')
       // Empty deliveryId is not stored in byDeliveryId
       expect(dedup.isDuplicate('', 'key-1')).toBe(true)
       expect(dedup.isDuplicate('some-delivery', 'key-1')).toBe(true)
+    })
+
+    it('does not record when only isDuplicate is called (no side effects)', () => {
+      dedup.isDuplicate('delivery-1', 'key-1')
+      // Without calling recordProcessed, the entry is NOT stored
+      expect(dedup.isDuplicate('delivery-1', 'key-1')).toBe(false)
     })
   })
 
   describe('TTL eviction', () => {
     it('evicts entries past the 1-hour TTL', () => {
       dedup.isDuplicate('delivery-1', 'key-1')
+      dedup.recordProcessed('delivery-1', 'key-1')
       expect(dedup.isDuplicate('delivery-1', 'key-1')).toBe(true)
 
       // Advance past 1 hour
@@ -99,6 +110,7 @@ describe('WebhookDedup', () => {
 
     it('preserves entries within the TTL window', () => {
       dedup.isDuplicate('delivery-1', 'key-1')
+      dedup.recordProcessed('delivery-1', 'key-1')
 
       // Advance 59 minutes (within 1-hour window)
       vi.advanceTimersByTime(59 * 60 * 1000)
@@ -108,10 +120,12 @@ describe('WebhookDedup', () => {
 
     it('evicts only stale entries in a mixed set', () => {
       dedup.isDuplicate('delivery-old', 'key-old')
+      dedup.recordProcessed('delivery-old', 'key-old')
 
       // Advance 30 minutes
       vi.advanceTimersByTime(30 * 60 * 1000)
       dedup.isDuplicate('delivery-new', 'key-new')
+      dedup.recordProcessed('delivery-new', 'key-new')
 
       // Advance another 31 minutes — old entry now past 1hr, new entry still fresh
       vi.advanceTimersByTime(31 * 60 * 1000)
@@ -125,11 +139,11 @@ describe('WebhookDedup', () => {
     it('evicts oldest entries when exceeding 1000', () => {
       // Add 1000 entries
       for (let i = 0; i < 1000; i++) {
-        dedup.isDuplicate(`d-${i}`, `k-${i}`)
+        dedup.recordProcessed(`d-${i}`, `k-${i}`)
       }
 
       // The 1001st should trigger eviction of the oldest
-      dedup.isDuplicate('d-1000', 'k-1000')
+      dedup.recordProcessed('d-1000', 'k-1000')
 
       // Newest should still be tracked
       expect(dedup.isDuplicate('d-1000', 'k-1000')).toBe(true)
@@ -141,10 +155,11 @@ describe('WebhookDedup', () => {
 
   describe('disk persistence', () => {
     it('flushToDisk writes both maps as JSON', () => {
-      dedup.isDuplicate('delivery-1', 'key-1')
+      dedup.recordProcessed('delivery-1', 'key-1')
+      vi.mocked(writeFileSync).mockClear()
       dedup.flushToDisk()
 
-      expect(writeFileSync).toHaveBeenCalled()
+      expect(writeFileSync).toHaveBeenCalledTimes(1)
       const call = vi.mocked(writeFileSync).mock.calls[0]
       // Written to .tmp file first
       expect(String(call[0])).toContain('webhook-dedup.json.tmp')
@@ -205,7 +220,7 @@ describe('WebhookDedup', () => {
 
   describe('shutdown', () => {
     it('flushes to disk on shutdown', () => {
-      dedup.isDuplicate('delivery-1', 'key-1')
+      dedup.recordProcessed('delivery-1', 'key-1')
       dedup.shutdown()
 
       expect(writeFileSync).toHaveBeenCalled()

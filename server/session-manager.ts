@@ -1944,7 +1944,7 @@ export class SessionManager {
   restoreActiveSessions(): void {
     const toRestore: Session[] = []
     for (const session of this.sessions.values()) {
-      if (session._wasActiveBeforeRestart && session.claudeSessionId) {
+      if (session._wasActiveBeforeRestart && session.claudeSessionId && session.source !== 'webhook') {
         toRestore.push(session)
       }
     }
