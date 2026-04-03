@@ -1,9 +1,9 @@
 /**
- * GitHub webhook handler for automated CI failure triage.
+ * GitHub webhook handler for automated CI failure triage and PR code review.
  *
- * Processes incoming `workflow_run` webhook events and, for completed+failed
- * runs, spawns a Claude session that receives a structured prompt with logs,
- * job info, annotations, and commit context.
+ * Processes incoming webhook events:
+ *   - `workflow_run` (completed+failed) → spawns Claude session for CI diagnosis
+ *   - `pull_request` (opened/synchronize/reopened) → spawns Claude session for code review
  *
  * Event lifecycle / state machine:
  *   received → (filtered/duplicate/capped)
@@ -21,17 +21,22 @@ import { randomUUID } from 'crypto'
 import type { SessionManager } from './session-manager.js'
 import { verifyHmacSignature } from './crypto-utils.js'
 import type { WsServerMessage } from './types.js'
-import type { WebhookConfig, WebhookEvent, WebhookEventStatus, WorkflowRunPayload, FailureContext } from './webhook-types.js'
+import type { WebhookConfig, WebhookEvent, WebhookEventStatus, WorkflowRunPayload, FailureContext, PullRequestPayload, PullRequestContext } from './webhook-types.js'
 import type { FullWebhookConfig } from './webhook-config.js'
-import { WebhookDedup, computeIdempotencyKey } from './webhook-dedup.js'
+import { WebhookDedup, computeIdempotencyKey, computePrIdempotencyKey } from './webhook-dedup.js'
 import { checkGhHealth, fetchFailedLogs, fetchJobs, fetchAnnotations, fetchCommitMessage, fetchPRTitle } from './webhook-github.js'
+import { fetchPrDiff, fetchPrFiles, fetchPrCommits } from './webhook-pr-github.js'
 import { buildPrompt } from './webhook-prompt.js'
+import { buildPrReviewPrompt } from './webhook-pr-prompt.js'
 import { createWorkspace, cleanupWorkspace } from './webhook-workspace.js'
 import { WebhookHandlerBase } from './webhook-handler-base.js'
 import { REPOS_ROOT } from './config.js'
 
 /** How long an event can stay in 'processing' before the watchdog marks it as error. */
 const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000
+
+/** Supported pull_request actions for code review. */
+const PR_REVIEW_ACTIONS = ['opened', 'synchronize', 'reopened'] as const
 
 export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEventStatus> {
   private config: FullWebhookConfig
@@ -131,23 +136,37 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       return { statusCode: 401, body: { error: 'Invalid signature' } }
     }
 
-    // --- Parse payload ---
-    let payload: WorkflowRunPayload
+    // --- Parse payload (generic parse, dispatch by event type) ---
+    let payload: unknown
     try {
-      payload = JSON.parse(rawBody.toString('utf-8')) as WorkflowRunPayload
+      payload = JSON.parse(rawBody.toString('utf-8'))
     } catch {
       return { statusCode: 400, body: { error: 'Malformed JSON payload' } }
     }
 
-    // --- Event type filter (Phase 1: workflow_run only) ---
-    if (headers.event !== 'workflow_run') {
-      return {
-        statusCode: 200,
-        body: { accepted: false, eventId, status: 'filtered', filterReason: `Event type '${headers.event}' not supported (Phase 1: workflow_run only)` },
-      }
+    // --- Event type dispatch ---
+    switch (headers.event) {
+      case 'workflow_run':
+        return this.handleWorkflowRunEvent(payload as WorkflowRunPayload, eventId, headers)
+      case 'pull_request':
+        return this.handlePullRequestEvent(payload as PullRequestPayload, eventId, headers)
+      default:
+        return {
+          statusCode: 200,
+          body: { accepted: false, eventId, status: 'filtered', filterReason: `Event type '${headers.event}' not supported` },
+        }
     }
+  }
 
-    // --- Action + conclusion filter ---
+  // ---------------------------------------------------------------------------
+  // workflow_run handling (existing logic, extracted into its own method)
+  // ---------------------------------------------------------------------------
+
+  private async handleWorkflowRunEvent(
+    payload: WorkflowRunPayload,
+    eventId: string,
+    headers: { event: string; delivery: string; signature: string },
+  ): Promise<{ statusCode: number; body: Record<string, unknown> }> {
     const wr = payload.workflow_run
     if (!wr) {
       return { statusCode: 400, body: { error: 'Missing workflow_run in payload' } }
@@ -210,13 +229,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     }
 
     // --- Session cap check ---
-    // Count both active webhook sessions AND events still in 'processing' state
-    // (session not yet created) to prevent concurrent webhooks from bypassing the
-    // cap during the async setup window (gh API calls, workspace cloning, etc.).
-    const activeWebhookSessions = this.sessions.list().filter(s => s.source === 'webhook' && s.active).length
-    const processingEvents = this.countByStatus('processing')
-    const effectiveConcurrency = activeWebhookSessions + processingEvents
-    if (effectiveConcurrency >= this.config.maxConcurrentSessions) {
+    if (this.isAtSessionCap(eventId)) {
       this.recordEvent({
         id: eventId,
         idempotencyKey,
@@ -269,8 +282,261 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // pull_request handling (new)
+  // ---------------------------------------------------------------------------
+
+  private async handlePullRequestEvent(
+    payload: PullRequestPayload,
+    eventId: string,
+    _headers: { event: string; delivery: string; signature: string },
+  ): Promise<{ statusCode: number; body: Record<string, unknown> }> {
+    const pr = payload.pull_request
+    if (!pr) {
+      return { statusCode: 400, body: { error: 'Missing pull_request in payload' } }
+    }
+
+    // --- Action filter ---
+    if (!(PR_REVIEW_ACTIONS as readonly string[]).includes(payload.action)) {
+      return {
+        statusCode: 200,
+        body: {
+          accepted: false,
+          eventId,
+          status: 'filtered',
+          filterReason: `PR action '${payload.action}' not supported (only ${PR_REVIEW_ACTIONS.join(', ')})`,
+        },
+      }
+    }
+
+    // --- Draft filter ---
+    if (pr.draft) {
+      return {
+        statusCode: 200,
+        body: {
+          accepted: false,
+          eventId,
+          status: 'filtered',
+          filterReason: 'Draft PRs are skipped',
+        },
+      }
+    }
+
+    // --- Actor allowlist filter ---
+    if (this.config.actorAllowlist.length > 0 && !this.config.actorAllowlist.includes(payload.sender.login)) {
+      return {
+        statusCode: 200,
+        body: {
+          accepted: false,
+          eventId,
+          status: 'filtered',
+          filterReason: `Actor '${payload.sender.login}' not in allowlist`,
+        },
+      }
+    }
+
+    // --- Deduplication ---
+    const idempotencyKey = computePrIdempotencyKey(
+      payload.repository.full_name,
+      pr.number,
+      payload.action,
+      pr.head.sha,
+    )
+
+    if (this.dedup.isDuplicate(eventId, idempotencyKey)) {
+      this.recordEvent({
+        id: eventId,
+        idempotencyKey,
+        receivedAt: new Date().toISOString(),
+        event: 'pull_request',
+        action: payload.action,
+        repo: payload.repository.full_name,
+        branch: pr.head.ref,
+        workflow: 'PR Review',
+        runId: pr.number,
+        runAttempt: 1,
+        conclusion: payload.action,
+        status: 'duplicate',
+        prNumber: pr.number,
+        prTitle: pr.title,
+        headSha: pr.head.sha,
+        baseBranch: pr.base.ref,
+      })
+      return {
+        statusCode: 200,
+        body: { accepted: false, eventId, status: 'duplicate' },
+      }
+    }
+
+    // --- Session cap check ---
+    if (this.isAtSessionCap(eventId)) {
+      this.recordEvent({
+        id: eventId,
+        idempotencyKey,
+        receivedAt: new Date().toISOString(),
+        event: 'pull_request',
+        action: payload.action,
+        repo: payload.repository.full_name,
+        branch: pr.head.ref,
+        workflow: 'PR Review',
+        runId: pr.number,
+        runAttempt: 1,
+        conclusion: payload.action,
+        status: 'error',
+        error: `Max concurrent webhook sessions reached (${this.config.maxConcurrentSessions})`,
+        prNumber: pr.number,
+        prTitle: pr.title,
+        headSha: pr.head.sha,
+        baseBranch: pr.base.ref,
+      })
+      return {
+        statusCode: 429,
+        body: { error: 'Max concurrent webhook sessions reached', max: this.config.maxConcurrentSessions },
+      }
+    }
+
+    // --- Pre-allocate session ID and respond 202 ---
+    const sessionId = randomUUID()
+    const webhookEvent: WebhookEvent = {
+      id: eventId,
+      idempotencyKey,
+      receivedAt: new Date().toISOString(),
+      event: 'pull_request',
+      action: payload.action,
+      repo: payload.repository.full_name,
+      branch: pr.head.ref,
+      workflow: 'PR Review',
+      runId: pr.number,
+      runAttempt: 1,
+      conclusion: payload.action,
+      status: 'processing',
+      sessionId,
+      prNumber: pr.number,
+      prTitle: pr.title,
+      headSha: pr.head.sha,
+      baseBranch: pr.base.ref,
+    }
+    this.recordEvent(webhookEvent)
+
+    // Process asynchronously — don't block the 202 response
+    this.processPullRequestAsync(payload, webhookEvent, sessionId).catch(err => {
+      console.error('[webhook] PR async processing error:', err)
+      this.updateEventStatus(eventId, 'error', String(err))
+    })
+
+    return {
+      statusCode: 202,
+      body: { accepted: true, eventId, status: 'processing', sessionId },
+    }
+  }
+
   /**
-   * Async background processing: fetch logs, create workspace, create session, send prompt.
+   * Async background processing for pull_request events:
+   * fetch PR context, create workspace, create session, send review prompt.
+   */
+  private async processPullRequestAsync(
+    payload: PullRequestPayload,
+    event: WebhookEvent,
+    sessionId: string,
+  ): Promise<void> {
+    const pr = payload.pull_request
+    const repo = payload.repository.full_name
+    const repoName = payload.repository.name
+
+    console.log(`[webhook] Processing PR: ${repo} #${pr.number} "${pr.title}" (${payload.action})`)
+
+    // --- Fetch PR context (all calls degrade gracefully) ---
+    const [diffResult, fileList, commitMessages] = await Promise.all([
+      fetchPrDiff(repo, pr.number),
+      fetchPrFiles(repo, pr.number),
+      fetchPrCommits(repo, pr.number),
+    ])
+
+    const context: PullRequestContext = {
+      repo,
+      prNumber: pr.number,
+      prTitle: pr.title,
+      prBody: pr.body ?? '',
+      prUrl: pr.html_url,
+      author: pr.user.login,
+      headBranch: pr.head.ref,
+      baseBranch: pr.base.ref,
+      headSha: pr.head.sha,
+      baseSha: pr.base.sha,
+      beforeSha: payload.before,
+      action: payload.action as PullRequestContext['action'],
+      changedFiles: pr.changed_files,
+      additions: pr.additions,
+      deletions: pr.deletions,
+      diff: diffResult.diff,
+      fileList,
+      commitMessages,
+    }
+
+    // --- Create workspace ---
+    let workspacePath: string
+    try {
+      workspacePath = await createWorkspace(
+        sessionId,
+        repo,
+        pr.head.repo.clone_url,
+        pr.head.ref,
+        pr.head.sha,
+      )
+    } catch (err) {
+      console.error(`[webhook] Failed to create workspace for PR ${repo}#${pr.number}:`, err)
+      this.updateEventStatus(event.id, 'error', `Workspace creation failed: ${err}`)
+      return
+    }
+
+    // --- Create session ---
+    const groupDir = `${REPOS_ROOT}/${repoName}`
+    let sessionName: string
+    if (payload.action === 'synchronize') {
+      sessionName = `PR #${pr.number}: ${pr.title} (update @${pr.head.sha.slice(0, 7)})`
+    } else if (payload.action === 'reopened') {
+      sessionName = `PR #${pr.number}: ${pr.title} (reopened)`
+    } else {
+      sessionName = `PR #${pr.number}: ${pr.title}`
+    }
+
+    this.sessions.create(sessionName, workspacePath, {
+      source: 'webhook',
+      id: sessionId,
+      groupDir,
+    })
+
+    console.log(`[webhook] PR session created: ${sessionName} (${sessionId})`)
+    this.updateEventStatus(event.id, 'session_created')
+
+    // --- Broadcast webhook event ---
+    const updatedEvent = this.getEvent(event.id)
+    if (updatedEvent) this.broadcastWebhookEvent(updatedEvent)
+
+    // --- Build and send prompt ---
+    const prompt = buildPrReviewPrompt(context, workspacePath)
+    this.sessions.sendInput(sessionId, prompt)
+
+    console.log(`[webhook] PR review prompt sent to session ${sessionId}, Claude is processing...`)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Check if the webhook session concurrency cap has been reached.
+   */
+  private isAtSessionCap(_eventId: string): boolean {
+    const activeWebhookSessions = this.sessions.list().filter(s => s.source === 'webhook' && s.active).length
+    const processingEvents = this.countByStatus('processing')
+    const effectiveConcurrency = activeWebhookSessions + processingEvents
+    return effectiveConcurrency >= this.config.maxConcurrentSessions
+  }
+
+  /**
+   * Async background processing for workflow_run events:
+   * fetch logs, create workspace, create session, send prompt.
    */
   private async processWebhookAsync(
     payload: WorkflowRunPayload,
@@ -336,8 +602,6 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     }
 
     // --- Create session ---
-    // Use the canonical repo path as groupDir so the frontend groups webhook
-    // sessions under the same tab as manual sessions for the same repo.
     const groupDir = `${REPOS_ROOT}/${repoName}`
     const sessionName = `webhook/${repoName}/${wr.head_branch}/${wr.name}`
     this.sessions.create(sessionName, workspacePath, {
@@ -350,7 +614,6 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     this.updateEventStatus(event.id, 'session_created')
 
     // --- Broadcast webhook event to all connected WS clients ---
-    // Re-fetch the event after status update to ensure broadcast uses current status
     const updatedEvent = this.getEvent(event.id)
     if (updatedEvent) this.broadcastWebhookEvent(updatedEvent)
 
@@ -367,7 +630,6 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
    * display the incoming webhook badge regardless of which session is active.
    */
   private broadcastWebhookEvent(event: WebhookEvent): void {
-    // Iterate all active sessions as proxies to their connected WS clients
     const allSessions = this.sessions.list()
     const msg: WsServerMessage = {
       type: 'webhook_event',
@@ -380,7 +642,6 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       sessionId: event.sessionId,
     }
 
-    // Broadcast to all active sessions
     for (const sessionInfo of allSessions) {
       const session = this.sessions.get(sessionInfo.id)
       if (session) {

@@ -143,3 +143,17 @@ export class WebhookDedup {
     this.flushToDisk()
   }
 }
+
+/**
+ * Computes the idempotency key for a pull_request webhook event.
+ * sha256(repo|pull_request|prNumber|action|headSha)
+ */
+export function computePrIdempotencyKey(
+  repo: string,
+  prNumber: number,
+  action: string,
+  headSha: string,
+): string {
+  const parts = [repo, 'pull_request', String(prNumber), action, headSha]
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex')
+}

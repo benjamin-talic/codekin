@@ -219,3 +219,39 @@ describe('WebhookDedup', () => {
     })
   })
 })
+
+// --- computePrIdempotencyKey tests ---
+import { computePrIdempotencyKey } from './webhook-dedup.js'
+
+describe('computePrIdempotencyKey', () => {
+  it('produces a deterministic sha256 hex string', () => {
+    const a = computePrIdempotencyKey('owner/repo', 42, 'opened', 'abc123')
+    const b = computePrIdempotencyKey('owner/repo', 42, 'opened', 'abc123')
+    expect(a).toBe(b)
+    expect(a).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('different PR numbers produce different hashes', () => {
+    const a = computePrIdempotencyKey('owner/repo', 42, 'opened', 'abc123')
+    const b = computePrIdempotencyKey('owner/repo', 43, 'opened', 'abc123')
+    expect(a).not.toBe(b)
+  })
+
+  it('different headSha values produce different hashes', () => {
+    const a = computePrIdempotencyKey('owner/repo', 42, 'synchronize', 'abc123')
+    const b = computePrIdempotencyKey('owner/repo', 42, 'synchronize', 'def456')
+    expect(a).not.toBe(b)
+  })
+
+  it('different actions produce different hashes', () => {
+    const a = computePrIdempotencyKey('owner/repo', 42, 'opened', 'abc123')
+    const b = computePrIdempotencyKey('owner/repo', 42, 'synchronize', 'abc123')
+    expect(a).not.toBe(b)
+  })
+
+  it('is different from workflow_run idempotency keys', () => {
+    const prKey = computePrIdempotencyKey('owner/repo', 42, 'opened', 'abc123')
+    const wrKey = computeIdempotencyKey('owner/repo', 'workflow_run', 42, 'opened', 'abc123', 1)
+    expect(prKey).not.toBe(wrKey)
+  })
+})

@@ -6,6 +6,12 @@ import crypto from 'crypto'
 const mockIsDuplicate = vi.hoisted(() => vi.fn(() => false))
 const mockDedupShutdown = vi.hoisted(() => vi.fn())
 
+// Hoisted PR mock fns so vi.mock factories can reference them
+const mockFetchPrDiff = vi.hoisted(() => vi.fn(async () => ({ diff: 'mock diff', truncated: false })))
+const mockFetchPrFiles = vi.hoisted(() => vi.fn(async () => 'file1.ts (modified, +10/-2)'))
+const mockFetchPrCommits = vi.hoisted(() => vi.fn(async () => '- abc1234: fix bug'))
+const mockBuildPrReviewPrompt = vi.hoisted(() => vi.fn(() => 'mock pr review prompt'))
+
 // Mock all webhook sub-modules before importing the handler
 vi.mock('./webhook-dedup.js', () => {
   class MockWebhookDedup {
@@ -16,6 +22,7 @@ vi.mock('./webhook-dedup.js', () => {
   return {
     WebhookDedup: MockWebhookDedup,
     computeIdempotencyKey: vi.fn(() => 'mock-idempotency-key'),
+    computePrIdempotencyKey: vi.fn(() => 'mock-pr-idempotency-key'),
   }
 })
 
@@ -35,6 +42,16 @@ vi.mock('./webhook-prompt.js', () => ({
 vi.mock('./webhook-workspace.js', () => ({
   createWorkspace: vi.fn(async () => '/tmp/workspace'),
   cleanupWorkspace: vi.fn(),
+}))
+
+vi.mock('./webhook-pr-github.js', () => ({
+  fetchPrDiff: mockFetchPrDiff,
+  fetchPrFiles: mockFetchPrFiles,
+  fetchPrCommits: mockFetchPrCommits,
+}))
+
+vi.mock('./webhook-pr-prompt.js', () => ({
+  buildPrReviewPrompt: mockBuildPrReviewPrompt,
 }))
 
 import { WebhookHandler } from './webhook-handler.js'
@@ -458,6 +475,208 @@ describe('WebhookHandler', () => {
     it('sets ghHealthy flag on success', async () => {
       const result = await handler.checkHealth()
       expect(result).toBe(true)
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // pull_request event handling
+  // -----------------------------------------------------------------------
+
+  describe('pull_request events', () => {
+    beforeEach(() => {
+      // Re-apply mock implementations that vi.restoreAllMocks() may have cleared
+      mockFetchPrDiff.mockImplementation(async () => ({ diff: 'mock diff', truncated: false }))
+      mockFetchPrFiles.mockImplementation(async () => 'file1.ts (modified, +10/-2)')
+      mockFetchPrCommits.mockImplementation(async () => '- abc1234: fix bug')
+      mockBuildPrReviewPrompt.mockImplementation(() => 'mock pr review prompt')
+      vi.mocked(createWorkspace).mockImplementation(async () => '/tmp/workspace')
+    })
+
+    function makePrPayload(overrides: Record<string, unknown> = {}) {
+      return {
+        action: 'opened',
+        number: 42,
+        pull_request: {
+          number: 42,
+          title: 'Fix auth bug',
+          body: 'Fixes the login issue',
+          state: 'open',
+          draft: false,
+          user: { login: 'user1' },
+          head: {
+            ref: 'fix/auth',
+            sha: 'deadbeef1234567890abcdef1234567890abcdef',
+            repo: { clone_url: 'https://github.com/owner/repo.git' },
+          },
+          base: {
+            ref: 'main',
+            sha: 'baseshabaseshabaseshabaseshabaseshabases00',
+          },
+          html_url: 'https://github.com/owner/repo/pull/42',
+          changed_files: 3,
+          additions: 50,
+          deletions: 10,
+          ...overrides.pull_request as Record<string, unknown> | undefined,
+        },
+        repository: {
+          full_name: 'owner/repo',
+          name: 'repo',
+          clone_url: 'https://github.com/owner/repo.git',
+          ...overrides.repository as Record<string, unknown> | undefined,
+        },
+        sender: { login: 'user1', ...overrides.sender as Record<string, unknown> | undefined },
+        ...overrides,
+      }
+    }
+
+    function makePrHeaders(body: Buffer, overrides: Record<string, string> = {}) {
+      return {
+        event: 'pull_request',
+        delivery: 'pr-delivery-1',
+        signature: signPayload(body),
+        ...overrides,
+      }
+    }
+
+    it('returns 400 when pull_request is missing from payload', async () => {
+      await handler.checkHealth()
+      const body = Buffer.from(JSON.stringify({ action: 'opened', repository: { full_name: 'o/r', name: 'r', clone_url: 'x' }, sender: { login: 'u' } }))
+      const result = await handler.handleWebhook(body, makePrHeaders(body))
+      expect(result.statusCode).toBe(400)
+      expect(result.body.error).toContain('pull_request')
+    })
+
+    it('returns filtered for unsupported PR action', async () => {
+      await handler.checkHealth()
+      const payload = makePrPayload({ action: 'closed' })
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makePrHeaders(body))
+      expect(result.statusCode).toBe(200)
+      expect(result.body.status).toBe('filtered')
+      expect(result.body.filterReason).toContain('closed')
+    })
+
+    it('returns filtered for draft PRs', async () => {
+      await handler.checkHealth()
+      const payload = makePrPayload({ pull_request: { draft: true } })
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makePrHeaders(body))
+      expect(result.statusCode).toBe(200)
+      expect(result.body.status).toBe('filtered')
+      expect(result.body.filterReason).toContain('Draft')
+    })
+
+    it('returns filtered when PR actor is not in allowlist', async () => {
+      handler.shutdown()
+      handler = new WebhookHandler(makeConfig({ actorAllowlist: ['allowed-user'] }), sessions)
+      await handler.checkHealth()
+      const payload = makePrPayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makePrHeaders(body))
+      expect(result.statusCode).toBe(200)
+      expect(result.body.status).toBe('filtered')
+      expect(result.body.filterReason).toContain('not in allowlist')
+    })
+
+    it('returns duplicate when dedup detects it', async () => {
+      await handler.checkHealth()
+      mockIsDuplicate.mockReturnValueOnce(true)
+      const payload = makePrPayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makePrHeaders(body))
+      expect(result.statusCode).toBe(200)
+      expect(result.body.status).toBe('duplicate')
+    })
+
+    it('returns 429 when max sessions reached', async () => {
+      await handler.checkHealth()
+      sessions.list.mockReturnValue([
+        { id: '1', source: 'webhook', active: true },
+        { id: '2', source: 'webhook', active: true },
+        { id: '3', source: 'webhook', active: true },
+      ])
+      const payload = makePrPayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makePrHeaders(body))
+      expect(result.statusCode).toBe(429)
+    })
+
+    it('returns 202 for valid PR event', async () => {
+      await handler.checkHealth()
+      const payload = makePrPayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makePrHeaders(body))
+      expect(result.statusCode).toBe(202)
+      expect(result.body.accepted).toBe(true)
+      expect(result.body.status).toBe('processing')
+      expect(result.body.sessionId).toBeDefined()
+    })
+
+    it('records PR-specific fields in event', async () => {
+      await handler.checkHealth()
+      const payload = makePrPayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makePrHeaders(body))
+      const event = handler.getEvent(result.body.eventId as string)
+      expect(event?.prNumber).toBe(42)
+      expect(event?.prTitle).toBe('Fix auth bug')
+      expect(event?.headSha).toBe('deadbeef1234567890abcdef1234567890abcdef')
+      expect(event?.baseBranch).toBe('main')
+      expect(event?.event).toBe('pull_request')
+    })
+
+    it('accepts opened, synchronize, and reopened actions', async () => {
+      await handler.checkHealth()
+      for (const action of ['opened', 'synchronize', 'reopened']) {
+        const payload = makePrPayload({ action })
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body, { delivery: `d-${action}` }))
+        expect(result.statusCode).toBe(202)
+      }
+    })
+
+    it('returns filtered for unknown event types', async () => {
+      await handler.checkHealth()
+      const payload = makePrPayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makePrHeaders(body, { event: 'issues' }))
+      expect(result.statusCode).toBe(200)
+      expect(result.body.status).toBe('filtered')
+    })
+
+    it('async processing creates session and sends PR review prompt', async () => {
+      await handler.checkHealth()
+      const payload = makePrPayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      await handler.handleWebhook(body, makePrHeaders(body))
+
+      // Let async processing complete
+      await vi.advanceTimersByTimeAsync(100)
+
+      expect(sessions.create).toHaveBeenCalledWith(
+        expect.stringContaining('PR #42'),
+        '/tmp/workspace',
+        expect.objectContaining({ source: 'webhook' }),
+      )
+      expect(sessions.sendInput).toHaveBeenCalledWith(
+        expect.any(String),
+        'mock pr review prompt',
+      )
+    })
+
+    it('names session with update suffix for synchronize action', async () => {
+      await handler.checkHealth()
+      const payload = makePrPayload({ action: 'synchronize' })
+      const body = Buffer.from(JSON.stringify(payload))
+      await handler.handleWebhook(body, makePrHeaders(body))
+
+      await vi.advanceTimersByTimeAsync(100)
+
+      expect(sessions.create).toHaveBeenCalledWith(
+        expect.stringContaining('update @deadbee'),
+        '/tmp/workspace',
+        expect.objectContaining({ source: 'webhook' }),
+      )
     })
   })
 })

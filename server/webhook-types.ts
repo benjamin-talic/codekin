@@ -24,6 +24,11 @@ export interface WebhookEvent {
   sessionId?: string            // if a session was created
   error?: string                // if processing failed
   filterReason?: string         // if filtered out, why
+  // PR-specific fields (populated when event is pull_request)
+  prNumber?: number              // PR number
+  prTitle?: string               // PR title
+  headSha?: string               // head commit SHA
+  baseBranch?: string            // target branch
 }
 
 // --- GitHub payload subset (workflow_run) ---
@@ -108,4 +113,61 @@ export interface WebhookConfig {
   maxConcurrentSessions: number
   logLinesToInclude: number
   actorAllowlist: string[]
+}
+
+// --- GitHub payload subset (pull_request) ---
+export interface PullRequestPayload {
+  action: string
+  number: number
+  before?: string                 // previous head SHA (on synchronize)
+  after?: string                  // new head SHA (on synchronize)
+  pull_request: {
+    number: number
+    title: string
+    body: string | null
+    state: string                 // "open" | "closed"
+    draft: boolean
+    user: { login: string }
+    head: {
+      ref: string
+      sha: string
+      repo: { clone_url: string }
+    }
+    base: {
+      ref: string
+      sha: string
+    }
+    html_url: string
+    changed_files: number
+    additions: number
+    deletions: number
+  }
+  repository: {
+    full_name: string
+    name: string
+    clone_url: string
+  }
+  sender: { login: string }
+}
+
+// --- PR review context collected from gh CLI ---
+export interface PullRequestContext {
+  repo: string                    // owner/repo
+  prNumber: number
+  prTitle: string
+  prBody: string
+  prUrl: string
+  author: string
+  headBranch: string
+  baseBranch: string
+  headSha: string
+  baseSha: string
+  beforeSha?: string              // previous head SHA (on synchronize)
+  action: 'opened' | 'synchronize' | 'reopened'
+  changedFiles: number
+  additions: number
+  deletions: number
+  diff: string                    // fetched via gh, potentially truncated
+  fileList: string                // formatted list of changed files
+  commitMessages: string          // formatted commit messages
 }
