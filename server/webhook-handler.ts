@@ -501,7 +501,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       workspacePath = await createWorkspace(
         sessionId,
         repo,
-        pr.head.repo.clone_url,
+        pr.head.repo?.clone_url ?? payload.repository.clone_url,
         pr.head.ref,
         pr.head.sha,
       )

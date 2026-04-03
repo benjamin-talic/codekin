@@ -132,7 +132,7 @@ export interface PullRequestPayload {
     head: {
       ref: string
       sha: string
-      repo: { clone_url: string }
+      repo: { clone_url: string } | null
     }
     base: {
       ref: string
