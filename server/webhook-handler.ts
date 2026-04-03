@@ -28,7 +28,7 @@ import { checkGhHealth, fetchFailedLogs, fetchJobs, fetchAnnotations, fetchCommi
 import { fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews, fetchExistingReviewComment } from './webhook-pr-github.js'
 import { buildPrompt } from './webhook-prompt.js'
 import { buildPrReviewPrompt } from './webhook-pr-prompt.js'
-import { loadPrCache, getCachePath } from './webhook-pr-cache.js'
+import { loadPrCache, ensureCacheDir } from './webhook-pr-cache.js'
 import { createWorkspace, cleanupWorkspace } from './webhook-workspace.js'
 import { WebhookHandlerBase } from './webhook-handler-base.js'
 import { REPOS_ROOT } from './config.js'
@@ -464,7 +464,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       Promise.resolve(loadPrCache(repo, pr.number)),
       fetchExistingReviewComment(repo, pr.number),
     ])
-    const cachePath = getCachePath(repo, pr.number)
+    const cachePath = ensureCacheDir(repo, pr.number)
 
     // Check if superseded while fetching PR context
     if (this.getEvent(event.id)?.status === 'superseded') {

@@ -125,6 +125,11 @@ export async function createWorkspace(
       throw new Error(`Invalid branch name: ${branch}`)
     }
 
+    // Validate headSha — must be a 40-char hex string (full SHA-1)
+    if (!/^[0-9a-f]{40}$/i.test(headSha)) {
+      throw new Error(`Invalid head SHA: ${headSha}`)
+    }
+
     // Set up remote to point to the real repo for pushes
     await execFileAsync('git', ['remote', 'set-url', 'origin', cloneUrl], {
       cwd: workspacePath,

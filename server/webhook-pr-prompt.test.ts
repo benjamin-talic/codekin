@@ -254,6 +254,7 @@ describe('buildPrReviewPrompt', () => {
       expect(prompt).toContain('comment ID: 12345')
       expect(prompt).toContain('Update it instead of creating a new comment')
       expect(prompt).toContain('PATCH')
+      expect(prompt).toContain('-F body=@/tmp/review-body.md')
       expect(prompt).toContain(`issues/comments/12345`)
     })
 
@@ -261,6 +262,7 @@ describe('buildPrReviewPrompt', () => {
       const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
       expect(prompt).toContain('## Posting Your Review Summary')
       expect(prompt).toContain('new comment')
+      expect(prompt).toContain('-F body=@/tmp/review-body.md')
       expect(prompt).toContain(`issues/${42}/comments`)
     })
 

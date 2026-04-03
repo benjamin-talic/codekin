@@ -15,7 +15,7 @@ const mockFetchPrReviews = vi.hoisted(() => vi.fn(async () => ''))
 const mockFetchExistingReviewComment = vi.hoisted(() => vi.fn(async () => undefined as number | undefined))
 const mockBuildPrReviewPrompt = vi.hoisted(() => vi.fn(() => 'mock pr review prompt'))
 const mockLoadPrCache = vi.hoisted(() => vi.fn(() => undefined))
-const mockGetCachePath = vi.hoisted(() => vi.fn(() => '/home/user/.codekin/pr-cache/owner/repo/pr-42.json'))
+const mockEnsureCacheDir = vi.hoisted(() => vi.fn(() => '/home/user/.codekin/pr-cache/owner/repo/pr-42.json'))
 
 // Mock all webhook sub-modules before importing the handler
 vi.mock('./webhook-dedup.js', () => {
@@ -62,7 +62,7 @@ vi.mock('./webhook-pr-github.js', () => ({
 
 vi.mock('./webhook-pr-cache.js', () => ({
   loadPrCache: mockLoadPrCache,
-  getCachePath: mockGetCachePath,
+  ensureCacheDir: mockEnsureCacheDir,
 }))
 
 vi.mock('./webhook-pr-prompt.js', () => ({
@@ -509,7 +509,7 @@ describe('WebhookHandler', () => {
       mockFetchExistingReviewComment.mockImplementation(async () => undefined)
       mockBuildPrReviewPrompt.mockImplementation(() => 'mock pr review prompt')
       mockLoadPrCache.mockImplementation(() => undefined)
-      mockGetCachePath.mockImplementation(() => '/home/user/.codekin/pr-cache/owner/repo/pr-42.json')
+      mockEnsureCacheDir.mockImplementation(() => '/home/user/.codekin/pr-cache/owner/repo/pr-42.json')
       vi.mocked(createWorkspace).mockImplementation(async () => '/tmp/workspace')
     })
 

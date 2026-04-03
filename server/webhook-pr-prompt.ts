@@ -205,7 +205,7 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('')
     lines.push('1. Write your review summary to a temporary file (e.g., /tmp/review-body.md)')
     lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
-    lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/comments/${options.existingCommentId} -X PATCH --input /tmp/review-body.md\``)
+    lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/comments/${options.existingCommentId} -X PATCH -F body=@/tmp/review-body.md\``)
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body.`)
   } else {
@@ -214,7 +214,7 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('')
     lines.push('1. Write your review summary to a temporary file (e.g., /tmp/review-body.md)')
     lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
-    lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/${ctx.prNumber}/comments --input /tmp/review-body.md\``)
+    lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/${ctx.prNumber}/comments -F body=@/tmp/review-body.md\``)
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body. This marker allows future reviews to update this comment instead of creating a new one.`)
   }

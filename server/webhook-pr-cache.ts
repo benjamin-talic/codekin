@@ -28,10 +28,18 @@ const REQUIRED_FIELDS: (keyof PrCacheData)[] = [
 ]
 
 /**
- * Return the absolute path for a PR's cache file.
- * Ensures the parent directory exists.
+ * Return the absolute path for a PR's cache file (pure, no side effects).
  */
 export function getCachePath(repo: string, prNumber: number): string {
+  const [owner, name] = repo.split('/')
+  return join(homedir(), '.codekin', 'pr-cache', owner, name, `pr-${prNumber}.json`)
+}
+
+/**
+ * Ensure the cache directory exists for a given repo, then return the cache file path.
+ * Use this when the caller intends to write (or instruct Claude to write) the cache file.
+ */
+export function ensureCacheDir(repo: string, prNumber: number): string {
   const [owner, name] = repo.split('/')
   const dir = join(homedir(), '.codekin', 'pr-cache', owner, name)
   mkdirSync(dir, { recursive: true })

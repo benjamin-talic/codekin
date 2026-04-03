@@ -13,7 +13,7 @@ vi.mock('fs', async (importOriginal) => {
   }
 })
 
-import { loadPrCache, getCachePath } from './webhook-pr-cache.js'
+import { loadPrCache, getCachePath, ensureCacheDir } from './webhook-pr-cache.js'
 import { existsSync, readFileSync, mkdirSync } from 'fs'
 
 function validCacheJson() {
@@ -38,17 +38,33 @@ describe('getCachePath', () => {
     expect(path).toBe(join(homedir(), '.codekin', 'pr-cache', 'owner', 'repo', 'pr-42.json'))
   })
 
-  it('creates parent directories', () => {
+  it('does not create directories (pure function)', () => {
     getCachePath('owner/repo', 42)
-    expect(mkdirSync).toHaveBeenCalledWith(
-      join(homedir(), '.codekin', 'pr-cache', 'owner', 'repo'),
-      { recursive: true },
-    )
+    expect(mkdirSync).not.toHaveBeenCalled()
   })
 
   it('handles org/name repos correctly', () => {
     const path = getCachePath('my-org/my-project', 7)
     expect(path).toBe(join(homedir(), '.codekin', 'pr-cache', 'my-org', 'my-project', 'pr-7.json'))
+  })
+})
+
+describe('ensureCacheDir', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('returns the same path as getCachePath', () => {
+    const path = ensureCacheDir('owner/repo', 42)
+    expect(path).toBe(getCachePath('owner/repo', 42))
+  })
+
+  it('creates parent directories', () => {
+    ensureCacheDir('owner/repo', 42)
+    expect(mkdirSync).toHaveBeenCalledWith(
+      join(homedir(), '.codekin', 'pr-cache', 'owner', 'repo'),
+      { recursive: true },
+    )
   })
 })
 
