@@ -739,6 +739,7 @@ export class SessionManager {
       CODEKIN_TOKEN: sessionToken,
       CODEKIN_AUTH_TOKEN: sessionToken,
       CODEKIN_SESSION_TYPE: session.source || 'manual',
+      ...(session.permissionMode === 'dangerouslySkipPermissions' ? { CODEKIN_SKIP_PERMISSIONS: '1' } : {}),
     }
     // Pass CLAUDE_PROJECT_DIR so hooks and CLAUDE.md resolve correctly
     // even when the session's working directory differs from the project root
@@ -777,6 +778,30 @@ export class SessionManager {
     this.addToHistory(session, startMsg)
     this.broadcast(session, startMsg)
     return true
+  }
+
+  /**
+   * Wait for a session's Claude process to emit its system_init event,
+   * indicating it is ready to accept input. Resolves immediately if the
+   * session already has a claudeSessionId (process previously initialized).
+   * Times out after `timeoutMs` (default 30s) to avoid hanging indefinitely.
+   */
+  waitForReady(sessionId: string, timeoutMs = 30_000): Promise<void> {
+    const session = this.sessions.get(sessionId)
+    if (!session?.claudeProcess) return Promise.resolve()
+    // If the process already completed init in a prior turn, resolve immediately
+    if (session.claudeSessionId) return Promise.resolve()
+
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        console.warn(`[waitForReady] Timed out waiting for system_init on ${sessionId} after ${timeoutMs}ms`)
+        resolve()
+      }, timeoutMs)
+      session.claudeProcess!.once('system_init', () => {
+        clearTimeout(timer)
+        resolve()
+      })
+    })
   }
 
   /**
