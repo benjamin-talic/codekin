@@ -5,7 +5,11 @@
  * input, prompt_response, etc.) via a typed context object instead of closure state.
  */
 
+import { realpathSync as fsRealpathSync } from 'fs'
+import { homedir as osHomedir } from 'os'
+import { resolve as pathResolve } from 'path'
 import type { WebSocket } from 'ws'
+import { REPOS_ROOT } from './config.js'
 import type { SessionManager } from './session-manager.js'
 import { VALID_MODELS, VALID_PERMISSION_MODES } from './types.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
@@ -25,6 +29,20 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
   switch (msg.type) {
     // Create a new session, optionally in a git worktree, then start Claude.
     case 'create_session': {
+      // Bounds-check: workingDir must be under home or REPOS_ROOT
+      const home = osHomedir()
+      const allowedRoots = [home, REPOS_ROOT]
+      let resolvedDir: string
+      try {
+        resolvedDir = fsRealpathSync(pathResolve(msg.workingDir))
+      } catch {
+        resolvedDir = pathResolve(msg.workingDir)
+      }
+      if (!allowedRoots.some(root => resolvedDir === root || resolvedDir.startsWith(root + '/'))) {
+        send({ type: 'error', message: 'workingDir is outside allowed directories' })
+        break
+      }
+
       const session = sessions.create(msg.name, msg.workingDir, { model: msg.model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
