@@ -69,6 +69,8 @@ export interface CreateSessionOptions {
   permissionMode?: import('./types.js').PermissionMode
   /** Additional tools to pre-approve via --allowedTools (e.g. 'Bash(curl:*)', 'WebFetch'). */
   allowedTools?: string[]
+  /** Extra directories to grant Claude access to via --add-dir. */
+  addDirs?: string[]
 }
 
 
@@ -170,6 +172,7 @@ export class SessionManager {
       model: options?.model,
       permissionMode: options?.permissionMode,
       allowedTools: options?.allowedTools,
+      addDirs: options?.addDirs,
       claudeProcess: null,
       clients: new Set(),
       outputHistory: [],
@@ -700,6 +703,7 @@ export class SessionManager {
       permissionMode: session.permissionMode,
       resume,
       allowedTools: mergedAllowedTools,
+      addDirs: session.addDirs,
     })
 
     this.wireClaudeEvents(cp, session, sessionId)

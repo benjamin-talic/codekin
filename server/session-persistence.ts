@@ -28,6 +28,8 @@ export interface PersistedSession {
   permissionMode?: string
   /** Additional tools to pre-approve via --allowedTools. */
   allowedTools?: string[]
+  /** Extra directories to grant Claude access to via --add-dir. */
+  addDirs?: string[]
   claudeSessionId: string | null
   wasActive?: boolean
   outputHistory: WsServerMessage[]
@@ -54,6 +56,7 @@ export class SessionPersistence {
       model: s.model,
       permissionMode: s.permissionMode,
       allowedTools: s.allowedTools,
+      addDirs: s.addDirs,
       claudeSessionId: s.claudeSessionId,
       wasActive: s.claudeProcess?.isAlive() ?? false,
       outputHistory: s.outputHistory,
@@ -97,6 +100,7 @@ export class SessionPersistence {
           model: s.model,
           permissionMode: s.permissionMode as Session['permissionMode'],
           allowedTools: s.allowedTools,
+          addDirs: s.addDirs,
           claudeProcess: null,
           clients: new Set(),
           outputHistory: s.outputHistory || [],

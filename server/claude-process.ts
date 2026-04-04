@@ -36,6 +36,8 @@ export interface ClaudeProcessOptions {
   resume?: boolean
   /** Additional tools to pre-approve via --allowedTools. */
   allowedTools?: string[]
+  /** Extra directories to grant Claude access to via --add-dir. */
+  addDirs?: string[]
 }
 
 /** Accumulated state for an in-progress extended thinking block. */
@@ -100,6 +102,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   private model?: string
   private permissionMode?: PermissionMode
   private allowedTools?: string[]
+  private addDirs?: string[]
 
   constructor(workingDir: string, opts?: Partial<ClaudeProcessOptions>)
   /** @deprecated Use the options-object form: `new ClaudeProcess(workingDir, { sessionId, ... })` */
@@ -116,6 +119,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       this.permissionMode = o.permissionMode
       this.resume = !!(o.resume && o.sessionId)
       this.allowedTools = o.allowedTools
+      this.addDirs = o.addDirs
     } else {
       this.sessionId = sessionIdOrOpts || randomUUID()
       this.extraEnv = extraEnv || {}
@@ -154,6 +158,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       '--permission-mode', this.permissionMode || 'acceptEdits',
       '--allowedTools', ['Bash(git:*)', ...(this.allowedTools || [])].join(','),
       '--add-dir', SCREENSHOTS_DIR,
+      ...(this.addDirs || []).flatMap(d => ['--add-dir', d]),
       '--include-partial-messages',
       '--verbose',
       ...(this.resume ? ['--resume', this.sessionId] : ['--session-id', this.sessionId]),
