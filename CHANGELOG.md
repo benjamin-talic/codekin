@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-04-03
+
+### Fixes
+- Overhaul approvals architecture for parity with native CLI (#280)
+- Route ExitPlanMode through server's `requestToolApproval()` for correct PlanManager state transitions
+- Make git push patternable so "Always Allow" creates a `git push *` pattern
+- Unify approval timeout to 300s (5 min) for all session types
+- Deny with clear error when `CODEKIN_SESSION_ID` is missing instead of silently hanging
+- Pass ExitPlanMode rejection reason through to hook response
+
+## [0.5.2] - 2026-04-03
+
+### Features
+- Add `--dangerously-skip-permissions` as a permission mode setting for sandboxed environments (#277)
+
+### Fixes
+- Resolve Agent Joe passivity issue (#273)
+- Improve long session stability and resource management (#272)
+- Pass `CODEKIN_SKIP_PERMISSIONS` env to hooks for dangerouslySkipPermissions mode
+- Address security and code review findings
+- Resolve 3 ESLint errors breaking CI
+
+### Security
+- Upgrade lodash to 4.18.1 to resolve high-severity audit vulnerabilities
+
+### Refactoring
+- Reduce code complexity across 6 high-priority areas (#267)
+
+### Documentation
+- Fix documentation issues from weekly audit
+
+### Chores
+- Upgrade TypeScript 6, Vite 8, ESLint 10, jsdom 29
+- Improve dependency health per 2026-03-31 audit
+- Improve code coverage across server and frontend modules (#265)
+- Add repo health, security audit, and code commenting reports
+
 ## [0.5.1] - 2026-03-28
 
 ### Features
@@ -259,7 +296,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 - Add JSDoc and inline comments per comment audit
-- Add docs/DOCS-BROWSER-SPEC.md
+- Add docs browser implementation spec
 
 ### Chores
 - Add 50 new tests from coverage audit

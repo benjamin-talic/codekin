@@ -42,7 +42,7 @@ import { createDocsRouter } from './docs-routes.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
-import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver } from './config.js'
+import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY } from './config.js'
 
 // ---------------------------------------------------------------------------
 // CLI args (legacy bare-metal compat) and auth setup
@@ -68,6 +68,10 @@ for (let i = 0; i < args.length; i++) {
 if (authToken) {
   console.log('Auth token configured')
 } else {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: No auth token configured in production. Set AUTH_TOKEN or AUTH_TOKEN_FILE.')
+    process.exit(1)
+  }
   console.warn('⚠️  WARNING: No auth token configured. All endpoints are unauthenticated!')
   console.warn('   Set AUTH_TOKEN or AUTH_TOKEN_FILE to secure the server.')
 }
@@ -112,7 +116,7 @@ function extractToken(req: express.Request): string | undefined {
 // ---------------------------------------------------------------------------
 let claudeAvailable = false
 let claudeVersion = ''
-const apiKeySet = !!(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_API_KEY)
+const apiKeyEnvSet = !!(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_API_KEY)
 
 try {
   claudeVersion = execFileSync('claude', ['--version'], { timeout: 5000 }).toString().trim()
@@ -122,8 +126,24 @@ try {
   console.warn('Claude CLI not found or not working')
 }
 
+// Detect whether the Claude CLI has valid auth (API key OR subscription/OAuth).
+// Subscription users won't have ANTHROPIC_API_KEY set but can still use the CLI.
+let apiKeySet = apiKeyEnvSet
+if (claudeAvailable && !apiKeyEnvSet) {
+  try {
+    const authJson = execFileSync('claude', ['auth', 'status'], { timeout: 5000 }).toString()
+    const auth = JSON.parse(authJson)
+    if (auth.loggedIn) {
+      apiKeySet = true
+      console.log(`Claude CLI authenticated via ${auth.authMethod || 'unknown method'}`)
+    }
+  } catch {
+    // auth status check failed — fall through to warning
+  }
+}
+
 if (!apiKeySet) {
-  console.warn('No API key configured (ANTHROPIC_API_KEY or CLAUDE_CODE_API_KEY)')
+  console.warn('No API key or subscription auth detected (ANTHROPIC_API_KEY, CLAUDE_CODE_API_KEY, or Claude subscription)')
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +392,7 @@ function checkWsRateLimit(ip: string): boolean {
 
 wss.on('connection', (ws: WebSocket, req) => {
   // Rate-limit by IP before any processing
-  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown'
+  const ip = (TRUST_PROXY && (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) || req.socket.remoteAddress || 'unknown'
   if (!checkWsRateLimit(ip)) {
     ws.close(4029, 'Too many connections')
     return
@@ -434,7 +454,8 @@ wss.on('connection', (ws: WebSocket, req) => {
       msgWindowStart = now
     }
     if (++msgCount > MSG_RATE_LIMIT) {
-      return // silently drop excess messages
+      send({ type: 'system_message', subtype: 'error', text: 'Rate limit exceeded (60 messages/second). Message dropped.' })
+      return
     }
 
     handleWsMessage(msg, handlerCtx)

@@ -46,6 +46,16 @@ const MAX_HISTORY = 2000
 const MAX_API_RETRIES = 3
 /** Base delay for API error retry (doubles each attempt: 3s, 6s, 12s). */
 const API_RETRY_BASE_DELAY_MS = 3000
+/** How long a session can be idle (no clients, no activity) before its process is stopped. */
+const IDLE_SESSION_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
+/** How often to check for idle sessions. */
+const IDLE_CHECK_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
+/** How old a dead session must be before automatic pruning (7 days). */
+const STALE_SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000
+/** Number of Claude turns before showing a context compression warning. */
+const CONTEXT_WARNING_TURN_THRESHOLD = 15
+/** Second warning at this threshold. */
+const CONTEXT_CRITICAL_TURN_THRESHOLD = 25
 /** Patterns in result text that indicate a transient API error worth retrying. */
 const API_RETRY_PATTERNS = [
   /api_error/i,
@@ -101,6 +111,8 @@ export class SessionManager {
   private sessionPersistence: SessionPersistence
   /** Delegated diff operations (git diff, discard changes). */
   private diffManager: DiffManager
+  /** Interval handle for the idle session reaper. */
+  private _idleReaperInterval: ReturnType<typeof setInterval> | null = null
 
   constructor() {
     this.archive = new SessionArchive()
@@ -116,6 +128,56 @@ export class SessionManager {
     // Wire PlanManager events for restored sessions
     for (const session of this.sessions.values()) {
       this.wirePlanManager(session)
+    }
+    // Start idle session reaper
+    this._idleReaperInterval = setInterval(() => this.reapIdleSessions(), IDLE_CHECK_INTERVAL_MS)
+  }
+
+  /**
+   * Stop Claude processes for sessions that have been idle too long.
+   * A session is idle when it has no connected clients and no activity
+   * for IDLE_SESSION_TIMEOUT_MS. Only stops the process — does not delete
+   * the session, so it can be resumed later via --resume.
+   * Headless sessions (webhook, workflow, stepflow) are exempt.
+   */
+  private reapIdleSessions(): void {
+    const now = Date.now()
+    for (const session of this.sessions.values()) {
+      // Skip headless sessions — they are managed by their own lifecycles
+      if (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow') continue
+      // Skip sessions with connected clients or no running process
+      if (session.clients.size > 0 || !session.claudeProcess?.isAlive()) continue
+      // Skip sessions that are actively processing
+      if (session.isProcessing) continue
+
+      const idleMs = now - session._lastActivityAt
+      if (idleMs > IDLE_SESSION_TIMEOUT_MS) {
+        console.log(`[idle-reaper] stopping idle session=${session.id} name="${session.name}" idle=${Math.round(idleMs / 60_000)}min`)
+        session._stoppedByUser = true // prevent auto-restart
+        session.claudeProcess.removeAllListeners()
+        session.claudeProcess.stop()
+        session.claudeProcess = null
+        session.isProcessing = false
+        const msg: WsServerMessage = { type: 'system_message', subtype: 'exit', text: 'Claude process stopped due to inactivity. It will resume when you send a new message.' }
+        this.addToHistory(session, msg)
+        this.persistToDiskDebounced()
+        this._globalBroadcast?.({ type: 'sessions_updated' })
+      }
+    }
+
+    // Prune stale sessions: no process, no clients, older than STALE_SESSION_AGE_MS
+    const staleIds: string[] = []
+    for (const session of this.sessions.values()) {
+      if (session.claudeProcess?.isAlive()) continue
+      if (session.clients.size > 0) continue
+      const ageMs = now - new Date(session.created).getTime()
+      if (ageMs > STALE_SESSION_AGE_MS) {
+        staleIds.push(session.id)
+      }
+    }
+    for (const id of staleIds) {
+      console.log(`[idle-reaper] pruning stale session=${id} (age > ${STALE_SESSION_AGE_MS / 86_400_000}d)`)
+      this.delete(id)
     }
   }
 
@@ -183,11 +245,13 @@ export class SessionManager {
       _wasActiveBeforeRestart: false,
       _apiRetryCount: 0,
       _turnCount: 0,
+      _claudeTurnCount: 0,
       _namingAttempts: 0,
       isProcessing: false,
       pendingControlRequests: new Map(),
       pendingToolApprovals: new Map(),
       _leaveGraceTimer: null,
+      _lastActivityAt: Date.now(),
       planManager: new PlanManager(),
     }
     this.wirePlanManager(session)
@@ -467,7 +531,7 @@ export class SessionManager {
         groupDir: s.groupDir,
         worktreePath: s.worktreePath,
         connectedClients: s.clients.size,
-        lastActivity: s.created,
+        lastActivity: new Date(s._lastActivityAt).toISOString(),
         source: s.source,
       }))
   }
@@ -485,7 +549,7 @@ export class SessionManager {
         groupDir: s.groupDir,
         worktreePath: s.worktreePath,
         connectedClients: s.clients.size,
-        lastActivity: s.created,
+        lastActivity: new Date(s._lastActivityAt).toISOString(),
         source: s.source,
       }))
   }
@@ -514,6 +578,7 @@ export class SessionManager {
 
     session.clients.add(ws)
     this.clientSessionMap.set(ws, sessionId)
+    session._lastActivityAt = Date.now()
 
     // Re-broadcast pending tool approval prompts (PreToolUse hook path)
     for (const pending of session.pendingToolApprovals.values()) {
@@ -677,6 +742,7 @@ export class SessionManager {
       CODEKIN_TOKEN: sessionToken,
       CODEKIN_AUTH_TOKEN: sessionToken,
       CODEKIN_SESSION_TYPE: session.source || 'manual',
+      ...(session.permissionMode === 'dangerouslySkipPermissions' ? { CODEKIN_SKIP_PERMISSIONS: '1' } : {}),
     }
     // Pass CLAUDE_PROJECT_DIR so hooks and CLAUDE.md resolve correctly
     // even when the session's working directory differs from the project root
@@ -716,6 +782,30 @@ export class SessionManager {
     this.addToHistory(session, startMsg)
     this.broadcast(session, startMsg)
     return true
+  }
+
+  /**
+   * Wait for a session's Claude process to emit its system_init event,
+   * indicating it is ready to accept input. Resolves immediately if the
+   * session already has a claudeSessionId (process previously initialized).
+   * Times out after `timeoutMs` (default 30s) to avoid hanging indefinitely.
+   */
+  waitForReady(sessionId: string, timeoutMs = 30_000): Promise<void> {
+    const session = this.sessions.get(sessionId)
+    if (!session?.claudeProcess) return Promise.resolve()
+    // If the process already completed init in a prior turn, resolve immediately
+    if (session.claudeSessionId) return Promise.resolve()
+
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        console.warn(`[waitForReady] Timed out waiting for system_init on ${sessionId} after ${timeoutMs}ms`)
+        resolve()
+      }, timeoutMs)
+      session.claudeProcess!.once('system_init', () => {
+        clearTimeout(timer)
+        resolve()
+      })
+    })
   }
 
   /**
@@ -917,6 +1007,7 @@ export class SessionManager {
    */
   private handleClaudeResult(session: Session, sessionId: string, result: string, isError: boolean): void {
     session.isProcessing = false
+    session._claudeTurnCount++
     this._globalBroadcast?.({ type: 'sessions_updated' })
 
     // Attempt API retry for transient errors — returns true if a retry was scheduled
@@ -924,7 +1015,36 @@ export class SessionManager {
       return
     }
 
+    // Warn about context window pressure at turn thresholds
+    this.checkContextWarning(session)
+
     this.finalizeResult(session, sessionId, result, isError)
+  }
+
+  /**
+   * Emit a notification when the session has had enough turns that Claude's
+   * context window may start compressing older messages. Uses simple turn-count
+   * heuristic — imprecise but zero-risk and protocol-independent.
+   */
+  private checkContextWarning(session: Session): void {
+    const turns = session._claudeTurnCount
+
+    if (turns === CONTEXT_WARNING_TURN_THRESHOLD) {
+      const msg: WsServerMessage = {
+        type: 'system_message',
+        subtype: 'notification',
+        text: `This session has ${turns} turns. Claude may begin compressing older messages from its context window. Earlier parts of the conversation may no longer be fully available to Claude.`,
+      }
+      this.broadcastAndHistory(session, msg)
+      session._contextWarningShown = true
+    } else if (turns === CONTEXT_CRITICAL_TURN_THRESHOLD) {
+      const msg: WsServerMessage = {
+        type: 'system_message',
+        subtype: 'notification',
+        text: `This session has ${turns} turns. Claude's context window is likely under pressure — older messages may have been compressed or dropped. Consider starting a new session for best results.`,
+      }
+      this.broadcastAndHistory(session, msg)
+    }
   }
 
   /**
@@ -933,6 +1053,13 @@ export class SessionManager {
    */
   private handleApiRetry(session: Session, sessionId: string, result: string): boolean {
     if (!session._lastUserInput || !this.isRetryableApiError(result)) {
+      session._apiRetryCount = 0
+      return false
+    }
+
+    // Skip retry if the original input is older than 60 seconds — context has likely moved on
+    if (session._lastUserInputAt && Date.now() - session._lastUserInputAt > 60_000) {
+      console.log(`[api-retry] skipping stale retry for session=${sessionId} (input age=${Math.round((Date.now() - session._lastUserInputAt) / 1000)}s)`)
       session._apiRetryCount = 0
       return false
     }
@@ -980,6 +1107,8 @@ export class SessionManager {
    */
   private finalizeResult(session: Session, sessionId: string, result: string, isError: boolean): void {
     session._apiRetryCount = 0
+    session._lastUserInput = undefined
+    session._lastUserInputAt = undefined
 
     if (isError) {
       const msg: WsServerMessage = { type: 'system_message', subtype: 'error', text: result }
@@ -1105,9 +1234,12 @@ export class SessionManager {
   sendInput(sessionId: string, data: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
+    session._lastActivityAt = Date.now()
+    // Reset stopped-by-user flag so idle-reaped sessions can auto-start
+    session._stoppedByUser = false
 
     if (!session.claudeProcess?.isAlive()) {
-      // Claude not running (e.g. after server restart) — auto-start first.
+      // Claude not running (e.g. after server restart or idle reap) — auto-start first.
       // Claude CLI in -p mode waits for first input before emitting init,
       // so we write directly to the stdin pipe buffer (no waiting for init).
       this.startClaude(sessionId)
@@ -1121,6 +1253,7 @@ export class SessionManager {
         if (context) {
           const combined = context + '\n\n' + data
           session._lastUserInput = combined
+          session._lastUserInputAt = Date.now()
           session._apiRetryCount = 0
           if (!session.isProcessing) {
             session.isProcessing = true
@@ -1141,6 +1274,7 @@ export class SessionManager {
     }
 
     session._lastUserInput = data
+    session._lastUserInputAt = Date.now()
     session._apiRetryCount = 0
     if (!session.isProcessing) {
       session.isProcessing = true
@@ -1157,6 +1291,7 @@ export class SessionManager {
   sendPromptResponse(sessionId: string, value: string | string[], requestId?: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
+    session._lastActivityAt = Date.now()
 
     // ExitPlanMode approvals are handled through the normal pendingToolApprovals
     // path (routed via the PreToolUse hook). No special plan_review_ prefix needed.
@@ -1257,7 +1392,7 @@ export class SessionManager {
         const feedback = Array.isArray(value) && value.length > 1 ? value[1] : undefined
         const reason = session.planManager.deny(approval.requestId, feedback)
         console.log(`[plan-approval] denied: ${reason}`)
-        approval.resolve({ allow: false, always: false })
+        approval.resolve({ allow: false, always: false, answer: reason || undefined })
       } else {
         session.planManager.approve(approval.requestId)
         console.log(`[plan-approval] approved`)
@@ -1411,7 +1546,7 @@ export class SessionManager {
           this.broadcast(session, { type: 'prompt_dismiss', requestId: approvalRequestId })
           resolve({ allow: false, always: false })
         }
-      }, isQuestion ? 300_000 : (session.source === 'agent' ? 300_000 : 60_000)) // 5 min for questions & agent children, 1 min for interactive
+      }, 300_000) // 5 min for all approval types — prevents premature auto-deny when user is reading or tabbed away
 
       let promptMsg: WsServerMessage
       if (isQuestion) {
@@ -1471,7 +1606,7 @@ export class SessionManager {
         // No clients connected — DON'T auto-deny. Instead, wait for a client
         // to join this session (the prompt will be re-broadcast in join()).
         // Send a global notification so the user sees a waiting indicator.
-        console.log(`[tool-approval] no clients connected, waiting for client to join (timeout 60s): ${toolName}`)
+        console.log(`[tool-approval] no clients connected, waiting for client to join (timeout 300s): ${toolName}`)
         this._globalBroadcast?.({
           ...promptMsg,
           sessionId,
@@ -1564,7 +1699,7 @@ export class SessionManager {
     if (session.allowedTools && this.matchesAllowedTools(session.allowedTools, toolName, toolInput)) {
       return 'session'
     }
-    if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow')) {
+    if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow' || session.source === 'orchestrator')) {
       return 'headless'
     }
     return 'prompt'
@@ -1801,22 +1936,37 @@ export class SessionManager {
     return `[This session was interrupted by a server restart. Here is the previous conversation for context:]\n${context}\n[End of previous context. The user's new message follows.]`
   }
 
+  /** Max size of a single output chunk in the history buffer. */
+  private static readonly MAX_OUTPUT_CHUNK = 50_000 // 50KB
+
   /**
    * Append a message to a session's output history for replay.
-   * Merges consecutive 'output' chunks into a single entry to save space.
+   * Merges consecutive 'output' chunks up to MAX_OUTPUT_CHUNK to save space,
+   * and splits oversized outputs into multiple entries to bound replay cost.
    */
   addToHistory(session: Session, msg: WsServerMessage): void {
     if (msg.type === 'output') {
       const last = session.outputHistory[session.outputHistory.length - 1]
-      if (last?.type === 'output' && (last as { type: 'output'; data: string }).data.length < 100_000) {
+      if (last?.type === 'output' && (last as { type: 'output'; data: string }).data.length < SessionManager.MAX_OUTPUT_CHUNK) {
         (last as { type: 'output'; data: string }).data += msg.data
+        this.persistToDiskDebounced()
+        return
+      }
+      // Split oversized output into bounded chunks
+      if (msg.data.length > SessionManager.MAX_OUTPUT_CHUNK) {
+        for (let i = 0; i < msg.data.length; i += SessionManager.MAX_OUTPUT_CHUNK) {
+          session.outputHistory.push({ type: 'output', data: msg.data.slice(i, i + SessionManager.MAX_OUTPUT_CHUNK) })
+        }
+        if (session.outputHistory.length > MAX_HISTORY) {
+          session.outputHistory.splice(0, session.outputHistory.length - MAX_HISTORY)
+        }
         this.persistToDiskDebounced()
         return
       }
     }
     session.outputHistory.push(msg)
     if (session.outputHistory.length > MAX_HISTORY) {
-      session.outputHistory = session.outputHistory.slice(-MAX_HISTORY)
+      session.outputHistory.splice(0, session.outputHistory.length - MAX_HISTORY)
     }
     this.persistToDiskDebounced()
   }
@@ -1879,6 +2029,10 @@ export class SessionManager {
   /** Graceful shutdown: complete in-progress tasks, persist state, kill all processes.
    *  Returns a promise that resolves once all Claude processes have exited. */
   shutdown(): Promise<void> {
+    if (this._idleReaperInterval) {
+      clearInterval(this._idleReaperInterval)
+      this._idleReaperInterval = null
+    }
     // Complete in-progress tasks for active sessions before persisting.
     // This handles self-deploy: the commit/push task was the last step, and
     // the server restart means it succeeded. Without this, restored sessions
