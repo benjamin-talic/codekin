@@ -904,6 +904,7 @@ describe('WebhookHandler', () => {
           '/tmp/workspace',
           expect.objectContaining({
             allowedTools: expect.arrayContaining(['Write']),
+            addDirs: ['/home/user/.codekin/pr-cache/owner/repo'],
           }),
         )
       })

@@ -18,6 +18,7 @@
  */
 
 import { randomUUID } from 'crypto'
+import { dirname } from 'path'
 import type { SessionManager } from './session-manager.js'
 import { verifyHmacSignature } from './crypto-utils.js'
 import type { WsServerMessage } from './types.js'
@@ -550,6 +551,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         'WebFetch',
         'WebSearch',
       ],
+      addDirs: [dirname(cachePath)],
     })
 
     console.log(`[webhook] PR session created: ${sessionName} (${sessionId})`)
@@ -587,8 +589,28 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
 
     console.log(`[webhook] PR ${repo}#${pr.number} ${merged ? 'merged' : 'closed'}, cleaning up`)
 
+    // Record the event for observability
+    this.recordEvent({
+      id: eventId,
+      idempotencyKey: computePrIdempotencyKey(repo, pr.number, 'closed', pr.head.sha),
+      receivedAt: new Date().toISOString(),
+      event: 'pull_request',
+      action: 'closed',
+      repo,
+      branch: pr.head.ref,
+      workflow: 'PR Review',
+      runId: pr.number,
+      runAttempt: 1,
+      conclusion: merged ? 'merged' : 'closed',
+      status: 'completed',
+      prNumber: pr.number,
+      prTitle: pr.title,
+      headSha: pr.head.sha,
+      baseBranch: pr.base.ref,
+    })
+
     // Kill any active review sessions for this PR
-    this.supersedePrSessions(repo, pr.number)
+    this.supersedePrSessions(repo, pr.number, merged ? 'PR merged' : 'PR closed')
 
     // Archive or delete the cache file
     if (merged) {
@@ -612,7 +634,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
    * Find and terminate any active sessions for the same PR.
    * Called before creating a new session so a new push supersedes the old review.
    */
-  private supersedePrSessions(repo: string, prNumber: number): void {
+  private supersedePrSessions(repo: string, prNumber: number, reason = 'Superseded by new push'): void {
     const activeStatuses: WebhookEventStatus[] = ['processing', 'session_created']
     const activeEvents = this.getEvents().filter(
       e => e.repo === repo && e.prNumber === prNumber && activeStatuses.includes(e.status)
@@ -622,7 +644,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       console.log(`[webhook] Superseding PR session: event=${oldEvent.id} session=${oldEvent.sessionId} (PR ${repo}#${prNumber})`)
 
       // Mark superseded FIRST so the exit listener won't overwrite the status
-      this.updateEventStatus(oldEvent.id, 'superseded', 'Superseded by new push')
+      this.updateEventStatus(oldEvent.id, 'superseded', reason)
 
       // Delete the session (kills process, cleans up workspace)
       if (oldEvent.sessionId) {

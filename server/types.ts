@@ -55,6 +55,8 @@ export interface Session {
   permissionMode?: PermissionMode
   /** Additional tools to pre-approve via --allowedTools (e.g. 'Bash(curl:*)', 'WebFetch'). */
   allowedTools?: string[]
+  /** Extra directories to grant Claude access to via --add-dir. */
+  addDirs?: string[]
   /** Number of auto-restarts since last cooldown reset. */
   restartCount: number
   lastRestartAt: number | null
