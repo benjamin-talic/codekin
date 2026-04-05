@@ -42,7 +42,7 @@ import { createDocsRouter } from './docs-routes.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
-import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY } from './config.js'
+import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, CLAUDE_BINARY } from './config.js'
 
 // ---------------------------------------------------------------------------
 // CLI args (legacy bare-metal compat) and auth setup
@@ -119,7 +119,7 @@ let claudeVersion = ''
 const apiKeyEnvSet = !!(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_API_KEY)
 
 try {
-  claudeVersion = execFileSync('claude', ['--version'], { timeout: 5000 }).toString().trim()
+  claudeVersion = execFileSync(CLAUDE_BINARY, ['--version'], { timeout: 5000 }).toString().trim()
   claudeAvailable = true
   console.log(`Claude CLI found: ${claudeVersion}`)
 } catch {
@@ -131,7 +131,7 @@ try {
 let apiKeySet = apiKeyEnvSet
 if (claudeAvailable && !apiKeyEnvSet) {
   try {
-    const authJson = execFileSync('claude', ['auth', 'status'], { timeout: 5000 }).toString()
+    const authJson = execFileSync(CLAUDE_BINARY, ['auth', 'status'], { timeout: 5000 }).toString()
     const auth = JSON.parse(authJson)
     if (auth.loggedIn) {
       apiKeySet = true
@@ -600,9 +600,15 @@ process.on('SIGTERM', () => { void gracefulShutdown('SIGTERM') })
 process.on('SIGINT', () => { void gracefulShutdown('SIGINT') })
 
 process.on('uncaughtException', (err) => {
-  console.error('[fatal] Uncaught exception:', err)
+  console.error(`[fatal] Uncaught exception at ${new Date().toISOString()}:`, err)
+  console.error('[fatal] Stack:', err.stack)
 })
 
 process.on('unhandledRejection', (reason) => {
-  console.error('[fatal] Unhandled rejection:', reason)
+  console.error(`[fatal] Unhandled rejection at ${new Date().toISOString()}:`, reason)
+  if (reason instanceof Error) console.error('[fatal] Stack:', reason.stack)
+})
+
+process.on('exit', (code) => {
+  console.log(`[server] Process exiting with code=${code} at ${new Date().toISOString()}`)
 })
