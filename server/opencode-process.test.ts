@@ -308,17 +308,35 @@ describe('OpenCodeProcess', () => {
     it('maps permission.asked to control_request event', () => {
       const controlHandler = vi.fn()
       ocp.on('control_request', controlHandler)
+      setSessionId(ocp, 'oc-session-1')
 
       callHandleSSE(ocp, {
         type: 'permission.asked',
         properties: {
+          sessionID: 'oc-session-1',
           id: 'perm-123',
           name: 'bash',
           input: { command: 'rm -rf /' },
-          description: 'Allow bash?',
         },
       })
       expect(controlHandler).toHaveBeenCalledWith('perm-123', 'bash', { command: 'rm -rf /' })
+    })
+
+    it('filters permission.asked from other sessions', () => {
+      const controlHandler = vi.fn()
+      ocp.on('control_request', controlHandler)
+      setSessionId(ocp, 'my-session')
+
+      callHandleSSE(ocp, {
+        type: 'permission.asked',
+        properties: {
+          sessionID: 'other-session',
+          id: 'perm-456',
+          name: 'bash',
+          input: { command: 'rm -rf /' },
+        },
+      })
+      expect(controlHandler).not.toHaveBeenCalled()
     })
 
     it('filters events from other sessions', () => {

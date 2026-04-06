@@ -427,6 +427,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       }
 
       case 'permission.asked': {
+        // Filter by session ID to prevent cross-session permission leakage
+        const sessionID = properties.sessionID as string | undefined
+        if (sessionID && this.opencodeSessionId && sessionID !== this.opencodeSessionId) break
+
         const requestId = properties.id as string || randomUUID()
         const toolName = properties.name as string || 'unknown'
         const input = properties.input as Record<string, unknown> || {}
