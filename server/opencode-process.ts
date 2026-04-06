@@ -30,13 +30,22 @@ import type { PermissionMode } from './types.js'
 /** A part within an OpenCode message (text, reasoning, tool, step markers). */
 interface OpenCodeMessagePart {
   type: 'text' | 'reasoning' | 'tool' | 'step-start' | 'step-finish'
-  content?: string
-  state?: 'pending' | 'running' | 'completed' | 'error'
+  /** Text/reasoning content (field name is 'text', not 'content'). */
+  text?: string
+  /** Tool name (only for type='tool'). */
   tool?: string
-  input?: Record<string, unknown>
-  output?: string
-  error?: string
+  /** Tool state — an object, not a string. Contains status, input, output, time, etc. */
+  state?: {
+    status: 'pending' | 'running' | 'completed' | 'error'
+    input?: Record<string, unknown>
+    output?: string
+    error?: string
+    time?: { start?: number; end?: number }
+    metadata?: Record<string, unknown>
+    title?: string
+  }
   time?: { start?: number; end?: number }
+  metadata?: Record<string, unknown>
 }
 
 /** Shape of an SSE event from OpenCode's GET /event endpoint. */
@@ -444,9 +453,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
           }
 
           case 'reasoning': {
-            const content = part.content || ''
+            // OpenCode uses 'text' field, not 'content'. Reasoning may be
+            // empty or encrypted (e.g. OpenAI models). Only emit if present.
+            const content = part.text || ''
             if (content.length > 20) {
-              // Extract first sentence as summary
               const match = content.match(/^(.+?[.!?\n])/)
               const summary = match && match[1].length <= 120
                 ? match[1].replace(/\n/g, ' ').trim()
@@ -457,26 +467,28 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
           }
 
           case 'tool': {
+            // Tool state is an object {status, input, output, time, ...}, not a string
             const toolName = part.tool || 'unknown'
-            if (part.state === 'running') {
-              const inputStr = part.input ? this.summarizeToolInput(toolName, part.input) : undefined
+            const status = part.state?.status
+            if (status === 'running') {
+              const inputStr = part.state?.input ? this.summarizeToolInput(toolName, part.state.input) : undefined
               this.emit('tool_active', toolName, inputStr)
-            } else if (part.state === 'completed') {
-              const summary = part.output ? part.output.slice(0, 200) : undefined
+            } else if (status === 'completed') {
+              const output = part.state?.output
+              const summary = output ? output.slice(0, 200) : undefined
               this.emit('tool_done', toolName, summary)
-              // Emit tool output if present
-              if (part.output) {
-                const truncated = part.output.length > 2000
-                  ? part.output.slice(0, 2000) + `\n… (truncated, ${part.output.length} chars total)`
-                  : part.output
+              if (output) {
+                const truncated = output.length > 2000
+                  ? output.slice(0, 2000) + `\n… (truncated, ${output.length} chars total)`
+                  : output
                 this.emit('tool_output', truncated, false)
               }
-            } else if (part.state === 'error') {
-              this.emit('tool_done', toolName, `Error: ${part.error || 'unknown'}`)
-              if (part.error) {
-                this.emit('tool_output', part.error, true)
-              }
+            } else if (status === 'error') {
+              const errMsg = part.state?.error || 'unknown'
+              this.emit('tool_done', toolName, `Error: ${errMsg}`)
+              this.emit('tool_output', errMsg, true)
             }
+            // 'pending' status — tool call parsed but not yet executing; no action needed
             break
           }
 
@@ -505,17 +517,26 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         if (!this.isOwnSession(properties)) break
 
         const requestId = properties.id as string || randomUUID()
-        const toolName = properties.name as string || 'unknown'
-        const input = properties.input as Record<string, unknown> || {}
+        // Real format: properties.permission is the type (e.g. "external_directory"),
+        // properties.metadata has details (filepath, parentDir), properties.patterns
+        // has the glob patterns being requested. No direct tool name — use permission type.
+        const permissionType = properties.permission as string || 'unknown'
+        const metadata = properties.metadata as Record<string, unknown> || {}
+        const patterns = properties.patterns as string[] || []
+        const input: Record<string, unknown> = {
+          permission: permissionType,
+          ...metadata,
+          patterns,
+        }
 
         // Auto-approve for headless sessions (webhook/workflow)
         if (this.permissionMode === 'bypassPermissions' || this.permissionMode === 'dangerouslySkipPermissions') {
-          void this.replyToPermission(requestId, 'once')
+          void this.replyToPermission(requestId, 'always')
           return
         }
 
         // Emit as control_request for SessionManager to handle
-        this.emit('control_request', requestId, toolName, input)
+        this.emit('control_request', requestId, permissionType, input)
         break
       }
 
@@ -532,6 +553,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         headers: {
           ...authHeaders(),
           'Content-Type': 'application/json',
+          'x-opencode-directory': this.workingDir,
         },
         body: JSON.stringify({ type }),
       })

@@ -200,11 +200,10 @@ describe('OpenCodeProcess', () => {
         type: 'message.part.updated',
         properties: {
           sessionID: 'oc-session-1',
-          part: { type: 'reasoning', content: 'Let me think about this carefully and consider all the options.' },
+          part: { type: 'reasoning', text: 'Let me think about this carefully and consider all the options.' },
         },
       })
       expect(thinkingHandler).toHaveBeenCalledTimes(1)
-      // Should extract a summary
       expect(thinkingHandler.mock.calls[0][0]).toBeTruthy()
     })
 
@@ -217,7 +216,7 @@ describe('OpenCodeProcess', () => {
         type: 'message.part.updated',
         properties: {
           sessionID: 'oc-session-1',
-          part: { type: 'reasoning', content: 'Short' },
+          part: { type: 'reasoning', text: 'Short' },
         },
       })
       expect(thinkingHandler).not.toHaveBeenCalled()
@@ -235,8 +234,7 @@ describe('OpenCodeProcess', () => {
           part: {
             type: 'tool',
             tool: 'bash',
-            state: 'running',
-            input: { command: 'ls -la' },
+            state: { status: 'running', input: { command: 'ls -la' } },
           },
         },
       })
@@ -257,8 +255,7 @@ describe('OpenCodeProcess', () => {
           part: {
             type: 'tool',
             tool: 'read',
-            state: 'completed',
-            output: 'file contents here',
+            state: { status: 'completed', output: 'file contents here' },
           },
         },
       })
@@ -280,8 +277,7 @@ describe('OpenCodeProcess', () => {
           part: {
             type: 'tool',
             tool: 'bash',
-            state: 'error',
-            error: 'command not found',
+            state: { status: 'error', error: 'command not found' },
           },
         },
       })
@@ -338,11 +334,18 @@ describe('OpenCodeProcess', () => {
         properties: {
           sessionID: 'oc-session-1',
           id: 'perm-123',
-          name: 'bash',
-          input: { command: 'rm -rf /' },
+          permission: 'external_directory',
+          patterns: ['/tmp/*'],
+          metadata: { filepath: '/tmp', parentDir: '/tmp' },
+          tool: { messageID: 'msg-1', callID: 'call-1' },
         },
       })
-      expect(controlHandler).toHaveBeenCalledWith('perm-123', 'bash', { command: 'rm -rf /' })
+      expect(controlHandler).toHaveBeenCalledWith('perm-123', 'external_directory', {
+        permission: 'external_directory',
+        filepath: '/tmp',
+        parentDir: '/tmp',
+        patterns: ['/tmp/*'],
+      })
     })
 
     it('filters permission.asked from other sessions', () => {
@@ -355,8 +358,8 @@ describe('OpenCodeProcess', () => {
         properties: {
           sessionID: 'other-session',
           id: 'perm-456',
-          name: 'bash',
-          input: { command: 'rm -rf /' },
+          permission: 'external_directory',
+          patterns: ['/tmp/*'],
         },
       })
       expect(controlHandler).not.toHaveBeenCalled()
@@ -390,8 +393,7 @@ describe('OpenCodeProcess', () => {
           part: {
             type: 'tool',
             tool: 'read',
-            state: 'completed',
-            output: longOutput,
+            state: { status: 'completed', output: longOutput },
           },
         },
       })
