@@ -80,8 +80,11 @@ async function ensureOpenCodeServer(workingDir: string): Promise<string> {
   }
 
   serverState.startPromise = startOpenCodeServer(workingDir)
-  await serverState.startPromise
-  serverState.startPromise = null
+  try {
+    await serverState.startPromise
+  } finally {
+    serverState.startPromise = null
+  }
   return `http://localhost:${serverState.port}`
 }
 
@@ -224,7 +227,9 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private async initialize(): Promise<void> {
     const baseUrl = await ensureOpenCodeServer(this.workingDir)
 
-    // Create or resume a session
+    // Create or resume a session — must happen BEFORE SSE subscription
+    // so that this.opencodeSessionId is set and the session ID filter
+    // guards in handleSSEEvent() are active (prevents cross-session leakage).
     if (this.opencodeSessionId) {
       // Resume existing session — just reconnect to SSE
     } else {
@@ -248,7 +253,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       this.opencodeSessionId = data.id
     }
 
-    // Subscribe to SSE events
+    // Subscribe to SSE events AFTER opencodeSessionId is set so session
+    // filtering is active from the first event received.
     this.subscribeToEvents(baseUrl)
 
     // Clear startup timer and emit init
@@ -335,6 +341,21 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     connectSSE()
   }
 
+  /**
+   * Check whether an SSE event belongs to this process's OpenCode session.
+   * Returns true if the event should be processed, false if it should be skipped.
+   * Rejects events when opencodeSessionId is not yet set (init window) to prevent
+   * cross-session leakage on the shared SSE stream.
+   */
+  private isOwnSession(properties: Record<string, unknown>): boolean {
+    const sessionID = properties.sessionID as string | undefined
+    // If we don't have our session ID yet, reject all session-scoped events
+    if (!this.opencodeSessionId) return !sessionID
+    // If event has no session ID, accept (server-level event)
+    if (!sessionID) return true
+    return sessionID === this.opencodeSessionId
+  }
+
   /** Map an OpenCode SSE event to CodingProcess events. */
   private handleSSEEvent(event: OpenCodeSSEEvent): void {
     const { type, properties } = event
@@ -345,12 +366,17 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         if (!part) break
 
         // Only process events for our session
-        const sessionID = properties.sessionID as string | undefined
-        if (sessionID && this.opencodeSessionId && sessionID !== this.opencodeSessionId) break
+        if (!this.isOwnSession(properties)) break
 
         switch (part.type) {
           case 'text': {
             const content = part.content || ''
+            // Reset accumulator when a new text block starts (time.start present
+            // without time.end) to handle multi-turn sessions where the previous
+            // turn's time.end may have been missed (e.g. SSE reconnect).
+            if (part.time?.start && !part.time?.end && content.length < this.lastTextContent.length) {
+              this.lastTextContent = ''
+            }
             // Emit only the new delta (OpenCode sends accumulated content)
             if (content.length > this.lastTextContent.length) {
               const delta = content.slice(this.lastTextContent.length)
@@ -407,29 +433,23 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       }
 
       case 'session.status': {
+        if (!this.isOwnSession(properties)) break
         const status = properties.status as { type: string } | undefined
         if (status?.type === 'idle') {
-          const sessionID = properties.sessionID as string | undefined
-          if (!sessionID || sessionID === this.opencodeSessionId) {
-            this.emit('result', '', false)
-          }
+          this.emit('result', '', false)
         }
         break
       }
 
       case 'session.error': {
-        // Filter by session ID to prevent cross-session error leakage on the shared SSE stream
-        const sessionID = properties.sessionID as string | undefined
-        if (sessionID && this.opencodeSessionId && sessionID !== this.opencodeSessionId) break
+        if (!this.isOwnSession(properties)) break
         const error = properties.error as { message?: string } | undefined
         this.emit('error', error?.message || 'Unknown OpenCode error')
         break
       }
 
       case 'permission.asked': {
-        // Filter by session ID to prevent cross-session permission leakage
-        const sessionID = properties.sessionID as string | undefined
-        if (sessionID && this.opencodeSessionId && sessionID !== this.opencodeSessionId) break
+        if (!this.isOwnSession(properties)) break
 
         const requestId = properties.id as string || randomUUID()
         const toolName = properties.name as string || 'unknown'

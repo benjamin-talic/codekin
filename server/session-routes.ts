@@ -18,6 +18,7 @@ import { homedir as osHomedir } from 'os'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
+import { VALID_PROVIDERS } from './types.js'
 
 /** Expand leading ~ to the user's home directory. */
 function expandTilde(p: string): string {
@@ -71,6 +72,9 @@ export function createSessionRouter(
     }
 
     const { provider, model, permissionMode } = req.body
+    if (provider && !VALID_PROVIDERS.has(provider)) {
+      return res.status(400).json({ error: `Invalid provider: ${provider}. Must be one of: ${[...VALID_PROVIDERS].join(', ')}` })
+    }
     const session = sessions.create(name, workingDir, { provider, model, permissionMode })
     res.json({
       sessionId: session.id,
