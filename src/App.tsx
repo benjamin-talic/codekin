@@ -139,7 +139,6 @@ export default function App() {
     restoreSession,
     currentModel,
     setModel,
-    setProvider: wsSetProvider,
     send: wsSend,
     currentPermissionMode,
     setPermissionMode,
@@ -192,38 +191,32 @@ export default function App() {
     setPermissionMode(mode)
   }, [setPermissionMode])
 
-  // Provider state, persisted to localStorage
-  const [currentProvider, setCurrentProviderRaw] = useState<CodingProvider>(
+  // Provider is per-session; default for new sessions is persisted to localStorage
+  const [currentProvider] = useState<CodingProvider>(
     (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
   )
-  // Dynamic model list for OpenCode (fetched from server)
+  // Dynamic model list for OpenCode (fetched from server on demand)
   const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
-  const availableModels = currentProvider === 'opencode' ? openCodeModels : CLAUDE_MODELS
+  // Derive the active session's provider (falls back to the default for new sessions)
+  const activeSessionProvider = sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
+  const availableModels = activeSessionProvider === 'opencode' ? openCodeModels : CLAUDE_MODELS
 
-  const handleProviderChange = useCallback(async (p: CodingProvider) => {
-    providerRef.current = p
-    setCurrentProviderRaw(p)
-    localStorage.setItem('codekin-provider', p)
-    // Tell the server to switch the running session to the new provider
-    wsSetProvider(p)
-    if (p === 'opencode' && settings.token) {
-      // Fetch models from OpenCode server, then switch to its default
-      const result = await fetchOpenCodeModels(settings.token)
+  // Fetch OpenCode models when the active session is an OpenCode session
+  useEffect(() => {
+    if (activeSessionProvider !== 'opencode' || !settings.token) return
+    if (openCodeModels.length > 0) return // already fetched
+    fetchOpenCodeModels(settings.token).then(result => {
       const models: ModelOption[] = result.models.map(m => ({
         id: m.id,
         label: `${m.name} (${m.providerName})`,
       }))
       setOpenCodeModels(models)
+      // Set model to the provider default if the current model isn't in the list
       const defaultModel = Object.values(result.defaults)[0]
       if (defaultModel) setModel(defaultModel)
       else if (models.length > 0) setModel(models[0].id)
-    } else {
-      // Switch back to Claude default if current model isn't a Claude model
-      if (currentModel && !CLAUDE_MODELS.some(m => m.id === currentModel)) {
-        setModel('claude-sonnet-4-6')
-      }
-    }
-  }, [currentModel, setModel, wsSetProvider, settings.token])
+    }).catch(() => { /* OpenCode server not available */ })
+  }, [activeSessionProvider, settings.token, openCodeModels.length, setModel])
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {
@@ -669,8 +662,6 @@ export default function App() {
             onWorktreeChange={setUseWorktree}
             currentPermissionMode={currentPermissionMode}
             onPermissionModeChange={handlePermissionModeChange}
-            currentProvider={currentProvider}
-            onProviderChange={handleProviderChange}
             moveToWorktree={moveToWorktree}
             worktreePath={activeSession?.worktreePath}
           />
