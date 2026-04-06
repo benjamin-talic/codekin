@@ -11,12 +11,12 @@
  * - Turn results and process exit
  */
 
-import { spawn, type ChildProcess } from 'child_process'
+import { spawn, execFileSync, type ChildProcess } from 'child_process'
 import { createInterface, type Interface } from 'readline'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultEvent, ClaudeStreamEvent, TaskItem, PromptQuestion, PermissionMode } from './types.js'
-import { SCREENSHOTS_DIR } from './config.js'
+import { SCREENSHOTS_DIR, CLAUDE_BINARY } from './config.js'
 import { redactSecrets } from './crypto-utils.js'
 import { CLAUDE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
 
@@ -90,6 +90,20 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
 
   private killTimer: ReturnType<typeof setTimeout> | null = null
   private startupTimer: ReturnType<typeof setTimeout> | null = null
+
+  /**
+   * Set when stderr reports "Session ID ... is already in use". Auto-restart
+   * will always fail for the same session ID, so the restart scheduler should
+   * skip retries when this flag is true.
+   */
+  private _sessionConflict = false
+
+  /**
+   * Set to true once the process emits at least one valid JSON event on stdout.
+   * When the process exits without ever producing output, --resume likely hung
+   * on a broken session — the caller should clear claudeSessionId and retry fresh.
+   */
+  private _receivedOutput = false
 
   // Grouped streaming state — reset per content block
   private thinking: ThinkingState = { active: false, text: '', summaryEmitted: false }
@@ -182,8 +196,21 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
         'If a tool call fails, read the error message carefully. Common causes: wrong file path, missing dependency, syntax error, or network issue.',
       ].join(' '),
     ]
+    // Kill any orphaned Claude process still holding this session ID's lock.
+    // This can happen when the server restarts and old children survive (SIGKILL'd
+    // or reparented to init). Without this, --resume fails with "already in use".
+    // Uses the full binary path + exact session UUID to avoid matching unrelated processes.
+    if (this.resume) {
+      try {
+        const pattern = `${CLAUDE_BINARY} .*--resume ${this.sessionId}\\b`
+        execFileSync('pkill', ['-f', pattern], { timeout: 2000, stdio: 'ignore' })
+      } catch {
+        // pkill exits 1 when no matching process is found — that's the happy path
+      }
+    }
+
     console.log(`[claude-spawn] cwd=${this.workingDir} args=${JSON.stringify(args)}`)
-    this.proc = spawn('claude', args, {
+    this.proc = spawn(CLAUDE_BINARY, args, {
       cwd: this.workingDir,
       stdio: ['pipe', 'pipe', 'pipe'],
       env,
@@ -191,11 +218,12 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
 
     this.alive = true
 
-    // Startup timeout: if system_init is not received within 30s, kill and report error
+    // Startup timeout: kill the process if no stdout output is received within 60s.
+    // Cleared as soon as any valid JSON line arrives (see handleLine).
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null
       if (this.alive) {
-        this.emit('error', 'Claude process failed to initialize within 60 seconds')
+        this.emit('error', 'Claude process produced no output within 60 seconds')
         this.stop()
       }
     }, 60_000)
@@ -206,7 +234,12 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     this.proc.stderr!.on('data', (data: Buffer) => {
       const text = data.toString().trim()
       console.error('[claude stderr]', text)
-      if (text) this.emit('error', `[stderr] ${text.slice(0, 500)}`)
+      if (text) {
+        if (/Session ID \S+ is already in use/.test(text)) {
+          this._sessionConflict = true
+        }
+        this.emit('error', `[stderr] ${text.slice(0, 500)}`)
+      }
     })
 
     this.proc.on('error', (err) => {
@@ -219,6 +252,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       if (this.startupTimer) {
         clearTimeout(this.startupTimer)
         this.startupTimer = null
+      }
+      if (this.killTimer) {
+        clearTimeout(this.killTimer)
+        this.killTimer = null
       }
       this.rl?.close()
       this.rl = null
@@ -238,6 +275,16 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       return
     }
 
+    // Any valid JSON from stdout proves the process is alive and communicating.
+    // Cancel the startup timer regardless of event type — system_init may arrive
+    // after other events (e.g. rate_limit_event) and the old timer would kill a
+    // perfectly healthy process that just hasn't sent init yet.
+    this._receivedOutput = true
+    if (this.startupTimer) {
+      clearTimeout(this.startupTimer)
+      this.startupTimer = null
+    }
+
     this.emit('event', event)
 
     // Log non-streaming event types for diagnostics
@@ -253,10 +300,6 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     switch (event.type) {
       case 'system':
         if (event.subtype === 'init') {
-          if (this.startupTimer) {
-            clearTimeout(this.startupTimer)
-            this.startupTimer = null
-          }
           this.sessionId = (event as ClaudeSystemInit).session_id || this.sessionId
           const model = ('model' in event ? (event as Record<string, unknown>).model : 'unknown') as string
           this.emit('system_init', model)
@@ -366,7 +409,9 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
         if (TOOL_DEBUG) console.log('[task-debug] emitting todo_update, tasks:', this.tasks.size)
         this.emit('todo_update', Array.from(this.tasks.values()))
       }
-    } catch { /* ignore parse errors */ }
+    } catch (err) {
+      console.warn(`[claude] Failed to parse tool input for ${this.tool.name}:`, err instanceof Error ? err.message : err)
+    }
     this.emit('tool_done', this.tool.name!, summary)
     this.tool = { name: null, input: '' }
   }
@@ -716,6 +761,16 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
 
   getSessionId(): string {
     return this.sessionId
+  }
+
+  /** True if the process exited because the session ID was locked by another process. */
+  hasSessionConflict(): boolean {
+    return this._sessionConflict
+  }
+
+  /** True if the process produced at least one valid JSON event before exiting. */
+  hadOutput(): boolean {
+    return this._receivedOutput
   }
 
 }

@@ -54,7 +54,7 @@ Codekin supports running multiple Claude Code sessions simultaneously, each boun
 The main content area is a chat view that renders messages from Claude, user input, system events, and tool activity.
 
 - **Markdown rendering** — Assistant messages are rendered as full GitHub Flavored Markdown using `react-markdown` with `remark-gfm`. This supports tables, task lists, strikethrough, autolinks, and more.
-- **Syntax highlighting** — Fenced code blocks are highlighted with language-specific coloring via `react-syntax-highlighter` using the VS Code Dark+ theme. The language is detected from the code fence (e.g., ` ```python `).
+- **Syntax highlighting** — Fenced code blocks are highlighted with language-specific coloring via `marked` + `marked-highlight` + `highlight.js`. The language is detected from the code fence (e.g., ` ```python `).
 - **Inline code** — Inline backtick code renders with a subtle background for visual distinction.
 - **User messages** — User input appears in a rounded bubble on the left, styled as a distinct message type.
 - **System messages** — Color-coded system events show session lifecycle (init, exit, restart, stall, error). Each includes a status dot and optional model name (e.g., "Opus 4.6").
@@ -126,6 +126,7 @@ Codekin provides an interactive UI for responding to Claude's permission request
 - **Prompt queue** — When multiple tool approvals arrive simultaneously, they are queued and presented one at a time (oldest first). A badge shows the number of pending prompts when more than one is queued.
 - **60-second timeout** — Pending tool approvals time out after 60 seconds to prevent indefinitely stuck processes.
 - **Permission mode selector** — A dropdown in the input bar lets users choose between Claude's permission modes (e.g., default, `acceptEdits`) on a per-session basis.
+- **`--dangerously-skip-permissions` mode** — A permission mode that bypasses all tool approval prompts, allowing Claude to execute any tool without user confirmation. When selected, the Claude process is spawned with `--dangerously-skip-permissions` instead of `--permission-mode`. **Security warning**: This mode grants Claude unrestricted access to Bash, file writes, and all other tools. It should only be used in isolated/sandboxed environments or for fully trusted, automated workflows (e.g., CI-triggered sessions). Never use on sessions with access to production systems or sensitive data.
 - **Per-session allowed tools** — Specific CLI tools can be pre-approved for individual sessions, bypassing the normal approval flow.
 
 ---

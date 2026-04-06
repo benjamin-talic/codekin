@@ -136,6 +136,8 @@ function fakeClaudeProcess(alive = true) {
     sendMessage: vi.fn(),
     sendControlResponse: vi.fn(),
     getSessionId: vi.fn(() => 'test-session-id'),
+    hasSessionConflict: vi.fn(() => false),
+    hadOutput: vi.fn(() => true),
     emit: vi.fn(),
   } as any
 }
@@ -2512,7 +2514,7 @@ describe('SessionManager', () => {
       sm.join(s.id, ws)
 
       // Trigger exit via the private method by calling it directly
-      ;(sm as any).handleClaudeExit(session, s.id, 1, null)
+      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, null)
 
       // Should broadcast exit, not restart
       const messages = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
@@ -2534,7 +2536,7 @@ describe('SessionManager', () => {
       ;(session as any).restartCount = 0
       ;(session as any).lastRestartAt = null
 
-      ;(sm as any).handleClaudeExit(session, s.id, 1, null)
+      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, null)
 
       expect(session.claudeSessionId).toBe('stale-session')
       vi.useRealTimers()
@@ -2547,7 +2549,7 @@ describe('SessionManager', () => {
       ;(session as any).restartCount = 2
       ;(session as any).lastRestartAt = Date.now() - 600_000 // 10 minutes ago (> 5 min cooldown)
 
-      ;(sm as any).handleClaudeExit(session, s.id, 0, null)
+      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 0, null)
 
       // restartCount should have been reset to 0 before incrementing to 1
       expect((session as any).restartCount).toBe(1)
@@ -2564,7 +2566,7 @@ describe('SessionManager', () => {
       const ws = fakeWs()
       sm.join(s.id, ws)
 
-      ;(sm as any).handleClaudeExit(session, s.id, 1, null)
+      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, null)
 
       const messages = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
       const errorMsg = messages.find((m: any) => m.subtype === 'error')
@@ -2582,7 +2584,7 @@ describe('SessionManager', () => {
       const session = sm.get(s.id)!
       ;(session as any).restartCount = 0
 
-      ;(sm as any).handleClaudeExit(session, s.id, 1, 'SIGTERM')
+      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, 'SIGTERM')
 
       expect(listener).toHaveBeenCalledWith(s.id, 1, 'SIGTERM', true)
       vi.useRealTimers()
@@ -2596,7 +2598,7 @@ describe('SessionManager', () => {
       const session = sm.get(s.id)!
       ;(session as any)._stoppedByUser = true
 
-      ;(sm as any).handleClaudeExit(session, s.id, 0, null)
+      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 0, null)
 
       expect(listener).toHaveBeenCalledWith(s.id, 0, null, false)
     })
