@@ -249,6 +249,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private startupTimer: ReturnType<typeof setTimeout> | null = null
   private permissionMode?: PermissionMode
   private tasks = new Map<string, TaskItem>()
+  private turnComplete = false
   private taskSeq = 0
 
   constructor(workingDir: string, opts?: Partial<OpenCodeProcessOptions>) {
@@ -525,6 +526,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         const status = properties.status
         const statusType = typeof status === 'string' ? status : (status as { type?: string } | undefined)?.type
         if (statusType === 'idle') {
+          if (this.turnComplete) break
+          this.turnComplete = true
           this.emit('result', '', false)
         }
         break
@@ -571,6 +574,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       // message.completed signals that the model has finished its response
       case 'message.completed': {
         if (!this.isOwnSession(properties)) break
+        if (this.turnComplete) break
+        this.turnComplete = true
         this.emit('result', '', false)
         break
       }
@@ -582,6 +587,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         const sessionStatus = session?.status
         const sType = typeof sessionStatus === 'string' ? sessionStatus : (sessionStatus as { type?: string } | undefined)?.type
         if (sType === 'idle') {
+          if (this.turnComplete) break
+          this.turnComplete = true
           this.emit('result', '', false)
         }
         break
@@ -695,6 +702,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       this.emit('error', 'OpenCode process is not connected')
       return
     }
+
+    this.turnComplete = false // reset completion latch for new turn
 
     const baseUrl = `http://localhost:${serverState.port}`
     // Build request body with optional model override

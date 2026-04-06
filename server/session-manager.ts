@@ -821,14 +821,14 @@ export class SessionManager {
     if (session.claudeProcess.isReady()) return Promise.resolve()
 
     return new Promise<void>((resolve) => {
+      const done = () => { clearTimeout(timer); resolve() }
       const timer = setTimeout(() => {
         console.warn(`[waitForReady] Timed out waiting for system_init on ${sessionId} after ${timeoutMs}ms`)
+        session.claudeProcess?.removeListener('exit', done)
         resolve()
       }, timeoutMs)
-      session.claudeProcess!.once('system_init', () => {
-        clearTimeout(timer)
-        resolve()
-      })
+      session.claudeProcess!.once('system_init', done)
+      session.claudeProcess!.once('exit', done) // fail-fast if process dies during init
     })
   }
 
