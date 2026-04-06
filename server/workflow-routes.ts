@@ -299,7 +299,7 @@ export function createWorkflowRouter(
   })
 
   router.post('/config/repos', (req, res) => {
-    const { id, name, repoPath, cronExpression, enabled, customPrompt, kind, model } = req.body as Partial<ReviewRepoConfig>
+    const { id, name, repoPath, cronExpression, enabled, customPrompt, kind, model, provider } = req.body as Partial<ReviewRepoConfig>
     if (!id || !name || !repoPath || !cronExpression) {
       return res.status(400).json({ error: 'Missing required fields: id, name, repoPath, cronExpression' })
     }
@@ -320,6 +320,7 @@ export function createWorkflowRouter(
       kind,
       customPrompt,
       model,
+      provider,
     })
 
     // Re-sync schedules and commit hooks with updated config

@@ -323,6 +323,18 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
             }
           }
         }
+
+        // Clean EOF — reconnect if still alive (server restart, proxy timeout, etc.)
+        if (this.alive) {
+          reconnectAttempts++
+          if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+            this.emit('error', `SSE reconnect failed after ${MAX_RECONNECT_ATTEMPTS} attempts`)
+            return
+          }
+          console.warn(`[opencode-sse] Stream closed cleanly, reconnecting in ${reconnectDelay / 1000}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`)
+          setTimeout(connectSSE, reconnectDelay)
+          reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
+        }
       }).catch((err) => {
         if (err instanceof Error && err.name === 'AbortError') return
         if (this.alive) {
