@@ -2514,7 +2514,8 @@ describe('SessionManager', () => {
       sm.join(s.id, ws)
 
       // Trigger exit via the private method by calling it directly
-      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, null)
+      // Signature: handleClaudeExit(session, sessionId, code, signal, sessionConflict, producedOutput)
+      ;(sm as any).handleClaudeExit(session, s.id, 1, null, false, true)
 
       // Should broadcast exit, not restart
       const messages = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
@@ -2536,7 +2537,8 @@ describe('SessionManager', () => {
       ;(session as any).restartCount = 0
       ;(session as any).lastRestartAt = null
 
-      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, null)
+      // producedOutput=true so claudeSessionId is preserved for --resume
+      ;(sm as any).handleClaudeExit(session, s.id, 1, null, false, true)
 
       expect(session.claudeSessionId).toBe('stale-session')
       vi.useRealTimers()
@@ -2549,7 +2551,7 @@ describe('SessionManager', () => {
       ;(session as any).restartCount = 2
       ;(session as any).lastRestartAt = Date.now() - 600_000 // 10 minutes ago (> 5 min cooldown)
 
-      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 0, null)
+      ;(sm as any).handleClaudeExit(session, s.id, 0, null, false, true)
 
       // restartCount should have been reset to 0 before incrementing to 1
       expect((session as any).restartCount).toBe(1)
@@ -2566,7 +2568,7 @@ describe('SessionManager', () => {
       const ws = fakeWs()
       sm.join(s.id, ws)
 
-      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, null)
+      ;(sm as any).handleClaudeExit(session, s.id, 1, null, false, true)
 
       const messages = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
       const errorMsg = messages.find((m: any) => m.subtype === 'error')
@@ -2584,7 +2586,7 @@ describe('SessionManager', () => {
       const session = sm.get(s.id)!
       ;(session as any).restartCount = 0
 
-      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, 'SIGTERM')
+      ;(sm as any).handleClaudeExit(session, s.id, 1, 'SIGTERM', false, true)
 
       expect(listener).toHaveBeenCalledWith(s.id, 1, 'SIGTERM', true)
       vi.useRealTimers()
@@ -2598,7 +2600,7 @@ describe('SessionManager', () => {
       const session = sm.get(s.id)!
       ;(session as any)._stoppedByUser = true
 
-      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 0, null)
+      ;(sm as any).handleClaudeExit(session, s.id, 0, null, false, true)
 
       expect(listener).toHaveBeenCalledWith(s.id, 0, null, false)
     })
@@ -3258,6 +3260,50 @@ describe('SessionManager', () => {
 
       s.pendingToolApprovals.values().next().value!.resolve({ allow: false, always: false })
       await promise
+    })
+  })
+
+  describe('agent session headless behavior', () => {
+    it('agent sessions use allowedTools as permission boundary, not blanket headless', async () => {
+      // Agent child session with specific allowed tools and NO browser client
+      const s = sm.create('agent-child', '/tmp', {
+        source: 'agent',
+        allowedTools: ['Read', 'Bash(git:*)'],
+      })
+      // No ws.join — simulates headless (no browser tab)
+
+      // Tool in allowedTools → auto-approved via 'session' path
+      const readResult = await sm.requestToolApproval(s.id, 'Read', { file_path: '/tmp/foo' })
+      expect(readResult).toEqual({ allow: true, always: false })
+
+      const gitResult = await sm.requestToolApproval(s.id, 'Bash', { command: 'git status' })
+      expect(gitResult).toEqual({ allow: true, always: false })
+    })
+
+    it('agent sessions fast-deny tools NOT in allowedTools when headless', async () => {
+      const s = sm.create('agent-blocked', '/tmp', {
+        source: 'agent',
+        allowedTools: ['Read'],
+      })
+      // No ws.join — headless
+
+      // Tool NOT in allowedTools → fast-deny (no 5-min hang)
+      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'rm -rf /' })
+
+      expect(result).toEqual({ allow: false, always: false })
+      // Should NOT create a pending approval — denied immediately
+      expect(s.pendingToolApprovals.size).toBe(0)
+    })
+
+    it('non-agent headless sources still get blanket auto-approval', async () => {
+      const s = sm.create('workflow-headless', '/tmp', {
+        source: 'workflow',
+      })
+      // No ws.join — headless
+
+      // Workflow sessions get blanket headless approval for any tool
+      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'rm -rf /' })
+      expect(result).toEqual({ allow: true, always: false })
     })
   })
 
