@@ -205,7 +205,8 @@ export default function App() {
   useEffect(() => {
     if (activeSessionProvider !== 'opencode' || !settings.token) return
     if (openCodeModels.length > 0) return // already fetched
-    fetchOpenCodeModels(settings.token).then(result => {
+    const activeWd = sessions.find(s => s.id === activeSessionId)?.workingDir
+    fetchOpenCodeModels(settings.token, activeWd).then(result => {
       const models: ModelOption[] = result.models.map(m => ({
         id: `${m.providerID}/${m.id}`,
         label: `${m.name} (${m.providerName})`,

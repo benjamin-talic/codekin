@@ -344,7 +344,16 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         signal: this.abortController!.signal,
       }).then(async (res) => {
         if (!res.ok || !res.body) {
-          this.emit('error', `SSE connection failed: ${res.status}`)
+          if (this.alive) {
+            reconnectAttempts++
+            if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+              this.emit('error', `SSE reconnect failed after ${MAX_RECONNECT_ATTEMPTS} attempts (last status: ${res.status})`)
+              return
+            }
+            console.warn(`[opencode-sse] Non-2xx ${res.status}, reconnecting in ${reconnectDelay / 1000}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`)
+            setTimeout(connectSSE, reconnectDelay)
+            reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
+          }
           return
         }
 
@@ -417,8 +426,9 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
    */
   private isOwnSession(properties: Record<string, unknown>): boolean {
     const sessionID = properties.sessionID as string | undefined
-    // If we don't have our session ID yet, reject all session-scoped events
-    if (!this.opencodeSessionId) return !sessionID
+    // If we don't have our session ID yet, reject everything to prevent
+    // cross-session leakage during the initialization window.
+    if (!this.opencodeSessionId) return false
     // If event has no session ID, accept (server-level event)
     if (!sessionID) return true
     return sessionID === this.opencodeSessionId
@@ -645,7 +655,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   }
 
   isReady(): boolean {
-    return this.alive && this.opencodeSessionId !== null
+    return this.alive && this.opencodeSessionId !== null && serverState.port > 0
   }
 
   getSessionId(): string {
