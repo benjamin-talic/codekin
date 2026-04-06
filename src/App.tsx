@@ -207,13 +207,13 @@ export default function App() {
     if (openCodeModels.length > 0) return // already fetched
     fetchOpenCodeModels(settings.token).then(result => {
       const models: ModelOption[] = result.models.map(m => ({
-        id: m.id,
+        id: `${m.providerID}/${m.id}`,
         label: `${m.name} (${m.providerName})`,
       }))
       setOpenCodeModels(models)
-      // Set model to the provider default if the current model isn't in the list
-      const defaultModel = Object.values(result.defaults)[0]
-      if (defaultModel) setModel(defaultModel)
+      // Set model to the provider default — defaults map providerID → modelID
+      const [defaultProvider, defaultModelId] = Object.entries(result.defaults)[0] ?? []
+      if (defaultProvider && defaultModelId) setModel(`${defaultProvider}/${defaultModelId}`)
       else if (models.length > 0) setModel(models[0].id)
     }).catch(() => { /* OpenCode server not available */ })
   }, [activeSessionProvider, settings.token, openCodeModels.length, setModel])

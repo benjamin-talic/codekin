@@ -318,7 +318,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       this.startupTimer = null
     }
 
-    const modelName = this.model || 'opencode (default)'
+    // Model is stored as "providerID/modelID" — show just the modelID part
+    const modelName = this.model?.includes('/') ? this.model.split('/')[1] : (this.model || 'opencode (default)')
     this.emit('system_init', modelName)
   }
 
@@ -586,6 +587,15 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     }
 
     const baseUrl = `http://localhost:${serverState.port}`
+    // Build request body with optional model override
+    const body: Record<string, unknown> = {
+      parts: [{ type: 'text', text: content }],
+    }
+    // Model is stored as "providerID/modelID" — pass as model override to prompt
+    if (this.model && this.model.includes('/')) {
+      const [providerID, modelID] = this.model.split('/', 2)
+      body.model = { providerID, modelID }
+    }
     // Use prompt_async for fire-and-forget (events come via SSE)
     void fetch(`${baseUrl}/session/${this.opencodeSessionId}/prompt_async`, {
       method: 'POST',
@@ -594,9 +604,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         'Content-Type': 'application/json',
         'x-opencode-directory': this.workingDir,
       },
-      body: JSON.stringify({
-        parts: [{ type: 'text', text: content }],
-      }),
+      body: JSON.stringify(body),
     }).catch((err) => {
       this.emit('error', `Failed to send message: ${err instanceof Error ? err.message : String(err)}`)
     })
