@@ -259,7 +259,7 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('      "status": "<new | open | fixed>"')
     lines.push('    }')
     lines.push('  ],')
-    lines.push(`  "author": "${ctx.author}",`)
+    lines.push(`  "author": ${JSON.stringify(ctx.author)},`)
     lines.push(`  "prTitle": ${JSON.stringify(ctx.prTitle)},`)
     lines.push(`  "changedFiles": ${ctx.changedFiles},`)
     lines.push(`  "additions": ${ctx.additions},`)
