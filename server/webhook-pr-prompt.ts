@@ -254,7 +254,7 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('    {')
     lines.push('      "severity": "<critical | must-fix | suggestion | minor | nitpick>",')
     lines.push('      "file": "<path/to/file.ts>",')
-    lines.push('      "line": "<line number or null>",')
+    lines.push('      "line": <line number or null>,')
     lines.push('      "description": "<short description of the finding>",')
     lines.push('      "status": "<new | open | fixed>"')
     lines.push('    }')
