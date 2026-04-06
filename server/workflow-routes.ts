@@ -79,7 +79,7 @@ export function syncSchedules(sessions?: SessionManager) {
       id: repo.id,
       kind: repo.kind ?? 'code-review.daily',
       cronExpression: repo.cronExpression,
-      input: { repoPath: repo.repoPath, repoName: repo.name, customPrompt: repo.customPrompt, model: repo.model },
+      input: { repoPath: repo.repoPath, repoName: repo.name, customPrompt: repo.customPrompt, model: repo.model, provider: repo.provider },
       enabled: repo.enabled,
     })
   }

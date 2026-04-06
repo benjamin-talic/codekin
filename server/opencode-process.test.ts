@@ -144,7 +144,7 @@ describe('OpenCodeProcess', () => {
       expect(textHandler).toHaveBeenCalledTimes(2)
     })
 
-    it('resets text accumulator when new turn starts with shorter content', () => {
+    it('resets text accumulator on time.start (new turn, shorter content)', () => {
       const textHandler = vi.fn()
       ocp.on('text', textHandler)
       setSessionId(ocp, 'oc-session-1')
@@ -168,6 +168,32 @@ describe('OpenCodeProcess', () => {
       })
       // Should have reset and emitted the new content
       expect(textHandler).toHaveBeenCalledWith('Short reply')
+    })
+
+    it('resets text accumulator on time.start (new turn, longer content)', () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      // First turn: short content without time.end
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          part: { type: 'text', content: 'Hello' },
+        },
+      })
+      expect(textHandler).toHaveBeenCalledWith('Hello')
+
+      // Second turn: longer content with time.start — must emit full content, not slice
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          part: { type: 'text', content: 'I will help you with that', time: { start: 999 } },
+        },
+      })
+      expect(textHandler).toHaveBeenCalledWith('I will help you with that')
     })
 
     it('resets text accumulator when time.end is set', () => {

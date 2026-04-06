@@ -371,10 +371,11 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         switch (part.type) {
           case 'text': {
             const content = part.content || ''
-            // Reset accumulator when a new text block starts (time.start present
-            // without time.end) to handle multi-turn sessions where the previous
-            // turn's time.end may have been missed (e.g. SSE reconnect).
-            if (part.time?.start && !part.time?.end && content.length < this.lastTextContent.length) {
+            // Reset accumulator when a new text block starts (time.start
+            // unambiguously marks a new block). This handles multi-turn
+            // sessions where the previous turn's time.end may have been
+            // missed (e.g. SSE reconnect).
+            if (part.time?.start) {
               this.lastTextContent = ''
             }
             // Emit only the new delta (OpenCode sends accumulated content)
