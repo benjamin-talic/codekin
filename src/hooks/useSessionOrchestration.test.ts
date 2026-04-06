@@ -59,6 +59,7 @@ function makeParams(overrides: Partial<UseSessionOrchestrationParams> = {}): Use
     pendingContextRef: { current: null },
     useWorktreeRef: { current: false },
     permissionModeRef: { current: 'default' as PermissionMode },
+    providerRef: { current: 'claude' as const },
     ...overrides,
   }
 }
@@ -147,7 +148,7 @@ describe('useSessionOrchestration', () => {
 
     expect(params.clearMessages).toHaveBeenCalled()
     expect(params.leaveSession).toHaveBeenCalled()
-    expect(params.wsCreateSession).toHaveBeenCalledWith('hub:myrepo', '/newrepo', true, 'plan')
+    expect(params.wsCreateSession).toHaveBeenCalledWith('hub:myrepo', '/newrepo', true, 'plan', 'claude')
     unmount()
   })
 
@@ -280,7 +281,7 @@ describe('useSessionOrchestration', () => {
 
     expect(params.clearMessages).toHaveBeenCalled()
     expect(params.leaveSession).toHaveBeenCalled()
-    expect(params.wsCreateSession).toHaveBeenCalledWith('hub:repo1', '/repo', true, 'acceptEdits')
+    expect(params.wsCreateSession).toHaveBeenCalledWith('hub:repo1', '/repo', true, 'acceptEdits', 'claude')
     unmount()
   })
 
@@ -298,7 +299,7 @@ describe('useSessionOrchestration', () => {
     expect(params.pendingContextRef.current).toBe('archived context')
     expect(params.clearMessages).toHaveBeenCalled()
     expect(params.leaveSession).toHaveBeenCalled()
-    expect(params.wsCreateSession).toHaveBeenCalledWith('hub:repo1', '/repo', false, 'default')
+    expect(params.wsCreateSession).toHaveBeenCalledWith('hub:repo1', '/repo', false, 'default', 'claude')
     unmount()
   })
 })

@@ -60,6 +60,7 @@ function createContext(): WsHandlerContext & { sent: WsServerMessage[] } {
       getDiff: vi.fn().mockResolvedValue({ type: 'diff_result', files: [], summary: {} }),
       discardChanges: vi.fn().mockResolvedValue({ type: 'diff_result', files: [], summary: {} }),
       createWorktree: vi.fn().mockResolvedValue(null),
+      getSessionProvider: vi.fn().mockReturnValue('claude'),
     } as unknown as WsHandlerContext['sessions'],
     clientSessions: new Map(),
     send: vi.fn((msg: WsServerMessage) => sent.push(msg)),
@@ -357,13 +358,13 @@ describe('handleWsMessage', () => {
     })
 
     it('rejects invalid model', () => {
-      handleWsMessage({ type: 'set_model', model: 'gpt-4o' } as WsClientMessage, ctx)
+      handleWsMessage({ type: 'set_model', model: 'invalid-model-xyz' } as WsClientMessage, ctx)
 
       expect(ctx.sessions.setModel).not.toHaveBeenCalled()
       expect(ctx.sent).toHaveLength(1)
       expect(ctx.sent[0].type).toBe('error')
       expect((ctx.sent[0] as any).message).toContain('Invalid model')
-      expect((ctx.sent[0] as any).message).toContain('gpt-4o')
+      expect((ctx.sent[0] as any).message).toContain('invalid-model-xyz')
     })
 
     it('does nothing without active session', () => {

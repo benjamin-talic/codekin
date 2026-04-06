@@ -2,7 +2,7 @@
  * Stepflow → Codekin webhook handler.
  *
  * Receives signed webhook deliveries from a Stepflow `WebhookEventTransport`,
- * creates an isolated git workspace, spawns a Claude session, and POSTs the
+ * creates an isolated git workspace, spawns a coding session, and POSTs the
  * result back to the workflow via a callback URL.
  *
  * ┌──────────────────────────────────────────────────────────────────────────┐
@@ -19,7 +19,7 @@
  * │                                                                          │
  * │  Async (processAsync):                                                   │
  * │    8. createWorkspace()       — bare mirror + session-specific clone    │
- * │    9. sessions.create()       — spawn Claude with source='stepflow'     │
+ * │    9. sessions.create()       — spawn a session with source='stepflow'  │
  * │   10. sessions.sendInput()    — deliver the built prompt                │
  * │                                                                          │
  * │  On session exit (onSessionExit callback):                              │
@@ -121,7 +121,7 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
     // Session exit: update event status, fire callback, clean up workspace
     // -----------------------------------------------------------------------
     sessions.onSessionExit((sessionId, code, _signal, willRestart) => {
-      // Don't report yet if Claude's auto-restart will retry the session
+      // Don't report yet if auto-restart will retry the session
       if (willRestart) return
 
       const event = this.getEvents().find(
@@ -131,7 +131,7 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
       if (!event) return
 
       const status: StepflowEventStatus = code === 0 ? 'completed' : 'error'
-      const error = code !== 0 ? `Claude exited with code ${code}` : undefined
+      const error = code !== 0 ? `Session exited with code ${code}` : undefined
       this.updateEventStatus(event.id, status, error)
       console.log(`[stepflow] Event ${event.id} → ${status} (session ${sessionId}, code=${code})`)
 
@@ -154,6 +154,40 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
       }
 
       cleanupWorkspace(sessionId)
+    })
+
+    // Auto-kill Stepflow sessions after the coding session completes its turn so they
+    // don't stay resident waiting for more input.
+    sessions.onSessionResult((sessionId, isError) => {
+      if (isError) return
+
+      const event = this.getEvents().find(
+        e => e.sessionId === sessionId && (e.status === 'session_created' || e.status === 'processing'),
+      )
+      if (!event) return
+
+      const status: StepflowEventStatus = 'completed'
+      this.updateEventStatus(event.id, status)
+      console.log(`[stepflow] Session ${sessionId} completed, scheduling cleanup`)
+
+      this.sessions.stopClaude(sessionId) // suppress auto-restart
+      const callbackSecret = this.sessionCallbackSecrets.get(sessionId)
+      this.sessionCallbackSecrets.delete(sessionId)
+      if (event.callbackUrl) {
+        const result: StepflowSessionResult = {
+          runId: event.runId,
+          sessionId,
+          status,
+          exitCode: 0,
+        }
+        this.postCallback(event.callbackUrl, result, callbackSecret).catch(err => {
+          console.warn(`[stepflow] Callback POST failed for event ${event.id}:`, err)
+        })
+      }
+
+      setTimeout(() => {
+        this.sessions.delete(sessionId)
+      }, 2000)
     })
   }
 
@@ -361,11 +395,11 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
     console.log(`[stepflow] Session created: ${sessionName} (${sessionId})`)
     this.updateEventStatus(event.id, 'session_created')
 
-    // Build and deliver the prompt to Claude
+    // Build and deliver the prompt to the session
     const prompt = buildStepflowPrompt(req, runId, kind)
     this.sessions.sendInput(sessionId, prompt)
 
-    console.log(`[stepflow] Prompt sent to session ${sessionId}, Claude is processing...`)
+    console.log(`[stepflow] Prompt sent to session ${sessionId}, session is processing...`)
   }
 
   // ---------------------------------------------------------------------------
@@ -494,7 +528,7 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
  * ```
  * STEPFLOW_WEBHOOK_ENABLED=true        # master switch (default: false)
  * STEPFLOW_WEBHOOK_SECRET=changeme     # HMAC-SHA256 secret (required when enabled)
- * STEPFLOW_WEBHOOK_MAX_SESSIONS=3      # max concurrent Claude sessions (default: 3)
+ * STEPFLOW_WEBHOOK_MAX_SESSIONS=3      # max concurrent sessions (default: 3)
  * ```
  */
 export function loadStepflowConfig(): StepflowConfig {

@@ -26,6 +26,8 @@ import path from 'path'
 import { promisify } from 'util'
 import type { WebSocket } from 'ws'
 import { ClaudeProcess } from './claude-process.js'
+import { OpenCodeProcess } from './opencode-process.js'
+import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
 import type { DiffFileStatus, DiffScope, PromptQuestion, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
@@ -81,6 +83,8 @@ export interface CreateSessionOptions {
   allowedTools?: string[]
   /** Extra directories to grant Claude access to via --add-dir. */
   addDirs?: string[]
+  /** AI provider to use for this session. Defaults to 'claude'. */
+  provider?: import('./coding-process.js').CodingProvider
 }
 
 
@@ -231,6 +235,7 @@ export class SessionManager {
       groupDir: options?.groupDir,
       created: new Date().toISOString(),
       source: options?.source ?? 'manual',
+      provider: options?.provider ?? 'claude',
       model: options?.model,
       permissionMode: options?.permissionMode,
       allowedTools: options?.allowedTools,
@@ -533,6 +538,7 @@ export class SessionManager {
         connectedClients: s.clients.size,
         lastActivity: new Date(s._lastActivityAt).toISOString(),
         source: s.source,
+        provider: s.provider,
       }))
   }
 
@@ -551,6 +557,7 @@ export class SessionManager {
         connectedClients: s.clients.size,
         lastActivity: new Date(s._lastActivityAt).toISOString(),
         source: s.source,
+        provider: s.provider,
       }))
   }
 
@@ -762,15 +769,30 @@ export class SessionManager {
     const repoDir = session.groupDir ?? session.workingDir
     const registryPatterns = this._approvalManager.getAllowedToolsForRepo(repoDir)
     const mergedAllowedTools = [...new Set([...(session.allowedTools || []), ...registryPatterns])]
-    const cp = new ClaudeProcess(session.workingDir, {
-      sessionId: session.claudeSessionId || undefined,
-      extraEnv,
-      model: session.model,
-      permissionMode: session.permissionMode,
-      resume,
-      allowedTools: mergedAllowedTools,
-      addDirs: session.addDirs,
-    })
+
+    let cp: CodingProcess
+    if (session.provider === 'opencode') {
+      // Note: addDirs and allowedTools are not passed to OpenCode — it uses
+      // its own permission config in .opencode/config.jsonc. The x-opencode-directory
+      // header handles per-session working directory routing on the shared server.
+      cp = new OpenCodeProcess(session.workingDir, {
+        sessionId: sessionId,
+        opencodeSessionId: session.claudeSessionId || undefined,
+        model: session.model,
+        extraEnv,
+        permissionMode: session.permissionMode,
+      })
+    } else {
+      cp = new ClaudeProcess(session.workingDir, {
+        sessionId: session.claudeSessionId || undefined,
+        extraEnv,
+        model: session.model,
+        permissionMode: session.permissionMode,
+        resume,
+        allowedTools: mergedAllowedTools,
+        addDirs: session.addDirs,
+      })
+    }
 
     this.wireClaudeEvents(cp, session, sessionId)
 
@@ -793,18 +815,20 @@ export class SessionManager {
   waitForReady(sessionId: string, timeoutMs = 30_000): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session?.claudeProcess) return Promise.resolve()
-    // If the process already completed init in a prior turn, resolve immediately
-    if (session.claudeSessionId) return Promise.resolve()
+    // If the process is already fully initialized, resolve immediately.
+    // Uses isReady() which accounts for provider differences: Claude is ready
+    // as soon as alive (stdin buffered), OpenCode needs alive + opencodeSessionId.
+    if (session.claudeProcess.isReady()) return Promise.resolve()
 
     return new Promise<void>((resolve) => {
+      const done = () => { clearTimeout(timer); resolve() }
       const timer = setTimeout(() => {
         console.warn(`[waitForReady] Timed out waiting for system_init on ${sessionId} after ${timeoutMs}ms`)
+        session.claudeProcess?.removeListener('exit', done)
         resolve()
       }, timeoutMs)
-      session.claudeProcess!.once('system_init', () => {
-        clearTimeout(timer)
-        resolve()
-      })
+      session.claudeProcess!.once('system_init', done)
+      session.claudeProcess!.once('exit', done) // fail-fast if process dies during init
     })
   }
 
@@ -812,7 +836,7 @@ export class SessionManager {
    * Attach all ClaudeProcess event listeners for a session.
    * Extracted from startClaude() to keep that method focused on process setup.
    */
-  private wireClaudeEvents(cp: ClaudeProcess, session: Session, sessionId: string): void {
+  private wireClaudeEvents(cp: CodingProcess, session: Session, sessionId: string): void {
     cp.on('system_init', (model) => this.onSystemInit(cp, session, model))
     cp.on('text', (text) => this.onTextEvent(session, sessionId, text))
     cp.on('thinking', (summary) => this.onThinkingEvent(session, summary))
@@ -863,7 +887,7 @@ export class SessionManager {
     })
   }
 
-  private onSystemInit(cp: ClaudeProcess, session: Session, model: string): void {
+  private onSystemInit(cp: CodingProcess, session: Session, model: string): void {
     session.claudeSessionId = cp.getSessionId()
     // Only show model message on first init or when model actually changes
     if (!session._lastReportedModel || session._lastReportedModel !== model) {
@@ -933,7 +957,7 @@ export class SessionManager {
   }
 
   private onControlRequestEvent(
-    cp: ClaudeProcess,
+    cp: CodingProcess,
     session: Session,
     sessionId: string,
     requestId: string,
@@ -1242,6 +1266,8 @@ export class SessionManager {
       // Claude not running (e.g. after server restart or idle reap) — auto-start first.
       // Claude CLI in -p mode waits for first input before emitting init,
       // so we write directly to the stdin pipe buffer (no waiting for init).
+      // OpenCode requires waiting for system_init before sending because it uses
+      // HTTP (no pipe buffer), so we await waitForReady() for OpenCode sessions.
       this.startClaude(sessionId)
 
       // If we have a saved claudeSessionId, Claude CLI resumes with full
@@ -1259,9 +1285,27 @@ export class SessionManager {
             session.isProcessing = true
             this._globalBroadcast?.({ type: 'sessions_updated' })
           }
-          session.claudeProcess?.sendMessage(combined)
+          if (session.claudeProcess && !session.claudeProcess.isReady()) {
+            void this.waitForReady(sessionId).then(() => session.claudeProcess?.sendMessage(combined))
+          } else {
+            session.claudeProcess?.sendMessage(combined)
+          }
           return
         }
+      }
+
+      // Process just started — if not ready yet (OpenCode needs server init),
+      // queue the message via waitForReady.
+      if (session.claudeProcess && !session.claudeProcess.isReady()) {
+        session._lastUserInput = data
+        session._lastUserInputAt = Date.now()
+        session._apiRetryCount = 0
+        if (!session.isProcessing) {
+          session.isProcessing = true
+          this._globalBroadcast?.({ type: 'sessions_updated' })
+        }
+        void this.waitForReady(sessionId).then(() => session.claudeProcess?.sendMessage(data))
+        return
       }
     }
 
@@ -1280,7 +1324,13 @@ export class SessionManager {
       session.isProcessing = true
       this._globalBroadcast?.({ type: 'sessions_updated' })
     }
-    session.claudeProcess?.sendMessage(data)
+    // If the process is alive but still initializing (OpenCode after restart),
+    // route through waitForReady to avoid sending before the server is up.
+    if (session.claudeProcess && !session.claudeProcess.isReady()) {
+      void this.waitForReady(sessionId).then(() => session.claudeProcess?.sendMessage(data))
+    } else {
+      session.claudeProcess?.sendMessage(data)
+    }
   }
 
   /**
@@ -1751,6 +1801,32 @@ export class SessionManager {
   }
 
   /** Update the model for a session and restart Claude with the new model. */
+  getSessionProvider(sessionId: string): string {
+    return this.sessions.get(sessionId)?.provider ?? 'claude'
+  }
+
+  /** Update the provider for a session and restart with the new provider process. */
+  setProvider(sessionId: string, provider: CodingProvider): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    if (session.provider === provider) return true
+    session.provider = provider
+    // Clear the provider-specific session ID since it won't be valid across providers
+    session.claudeSessionId = null
+    this.persistToDiskDebounced()
+    // Restart with new provider if running
+    if (session.claudeProcess?.isAlive()) {
+      this.stopClaude(sessionId)
+      session._stoppedByUser = false
+      setTimeout(() => {
+        if (this.sessions.has(sessionId) && !session._stoppedByUser) {
+          this.startClaude(sessionId)
+        }
+      }, 500)
+    }
+    return true
+  }
+
   setModel(sessionId: string, model: string): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false

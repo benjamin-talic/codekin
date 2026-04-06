@@ -12,7 +12,7 @@
  */
 
 import { useRef, useCallback, useEffect, useState } from 'react'
-import type { WsClientMessage, WsServerMessage, ChatMessage, TaskItem, PermissionMode } from '../types'
+import type { WsClientMessage, WsServerMessage, ChatMessage, TaskItem, PermissionMode, CodingProvider } from '../types'
 import { usePromptState } from './usePromptState'
 import { useWsConnection } from './useWsConnection'
 
@@ -430,8 +430,8 @@ export function useChatSocket({
     send({ type: 'join_session', sessionId })
   }, [send])
 
-  const createSession = useCallback((name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode) => {
-    send({ type: 'create_session', name, workingDir, useWorktree, permissionMode })
+  const createSession = useCallback((name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode, provider?: CodingProvider) => {
+    send({ type: 'create_session', name, workingDir, useWorktree, permissionMode, provider })
   }, [send])
 
   const sendInput = useCallback((data: string, displayText?: string) => {
@@ -476,6 +476,10 @@ export function useChatSocket({
     send({ type: 'move_to_worktree' })
   }, [send])
 
+  const setProvider = useCallback((provider: CodingProvider) => {
+    send({ type: 'set_provider', provider })
+  }, [send])
+
   const setPermissionMode = useCallback((mode: PermissionMode) => {
     send({ type: 'set_permission_mode', permissionMode: mode })
     setCurrentPermissionMode(mode)
@@ -505,6 +509,7 @@ export function useChatSocket({
     reconnect,
     restoreSession,
     setModel,
+    setProvider,
     currentPermissionMode,
     setPermissionMode,
     moveToWorktree,
