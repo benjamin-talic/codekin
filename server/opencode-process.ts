@@ -165,15 +165,14 @@ export async function fetchOpenCodeModels(workingDir: string): Promise<{
   models: OpenCodeModelInfo[]
   defaults: Record<string, string>
 }> {
-  if (!serverState.ready) return { models: [], defaults: {} }
-  const baseUrl = `http://127.0.0.1:${serverState.port}`
   try {
+    const baseUrl = await ensureOpenCodeServer(workingDir)
     const res = await fetch(`${baseUrl}/config/providers`, {
       headers: {
         ...authHeaders(),
         'x-opencode-directory': workingDir,
       },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(15000),
     })
     if (!res.ok) return { models: [], defaults: {} }
     const data = await res.json() as {
