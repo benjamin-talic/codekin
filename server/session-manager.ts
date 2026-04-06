@@ -27,7 +27,7 @@ import { promisify } from 'util'
 import type { WebSocket } from 'ws'
 import { ClaudeProcess } from './claude-process.js'
 import { OpenCodeProcess } from './opencode-process.js'
-import type { CodingProcess } from './coding-process.js'
+import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
 import type { DiffFileStatus, DiffScope, PromptQuestion, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
@@ -1803,6 +1803,28 @@ export class SessionManager {
   /** Update the model for a session and restart Claude with the new model. */
   getSessionProvider(sessionId: string): string {
     return this.sessions.get(sessionId)?.provider ?? 'claude'
+  }
+
+  /** Update the provider for a session and restart with the new provider process. */
+  setProvider(sessionId: string, provider: CodingProvider): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    if (session.provider === provider) return true
+    session.provider = provider
+    // Clear the provider-specific session ID since it won't be valid across providers
+    session.claudeSessionId = null
+    this.persistToDiskDebounced()
+    // Restart with new provider if running
+    if (session.claudeProcess?.isAlive()) {
+      this.stopClaude(sessionId)
+      session._stoppedByUser = false
+      setTimeout(() => {
+        if (this.sessions.has(sessionId) && !session._stoppedByUser) {
+          this.startClaude(sessionId)
+        }
+      }, 500)
+    }
+    return true
   }
 
   setModel(sessionId: string, model: string): boolean {

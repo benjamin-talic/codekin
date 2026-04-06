@@ -139,6 +139,7 @@ export default function App() {
     restoreSession,
     currentModel,
     setModel,
+    setProvider: wsSetProvider,
     send: wsSend,
     currentPermissionMode,
     setPermissionMode,
@@ -203,6 +204,8 @@ export default function App() {
     providerRef.current = p
     setCurrentProviderRaw(p)
     localStorage.setItem('codekin-provider', p)
+    // Tell the server to switch the running session to the new provider
+    wsSetProvider(p)
     if (p === 'opencode' && settings.token) {
       // Fetch models from OpenCode server, then switch to its default
       const result = await fetchOpenCodeModels(settings.token)
@@ -220,7 +223,7 @@ export default function App() {
         setModel('claude-sonnet-4-6')
       }
     }
-  }, [currentModel, setModel, settings.token])
+  }, [currentModel, setModel, wsSetProvider, settings.token])
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {

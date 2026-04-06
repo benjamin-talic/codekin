@@ -476,6 +476,10 @@ export function useChatSocket({
     send({ type: 'move_to_worktree' })
   }, [send])
 
+  const setProvider = useCallback((provider: CodingProvider) => {
+    send({ type: 'set_provider', provider })
+  }, [send])
+
   const setPermissionMode = useCallback((mode: PermissionMode) => {
     send({ type: 'set_permission_mode', permissionMode: mode })
     setCurrentPermissionMode(mode)
@@ -505,6 +509,7 @@ export function useChatSocket({
     reconnect,
     restoreSession,
     setModel,
+    setProvider,
     currentPermissionMode,
     setPermissionMode,
     moveToWorktree,

@@ -187,6 +187,19 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // Change the AI provider for the session. Stops old process and restarts with new provider.
+    case 'set_provider': {
+      const sessionId = clientSessions.get(ws)
+      if (sessionId) {
+        if (!VALID_PROVIDERS.has(msg.provider)) {
+          send({ type: 'error', message: `Invalid provider: ${msg.provider}` })
+          break
+        }
+        sessions.setProvider(sessionId, msg.provider)
+      }
+      break
+    }
+
     // Change the permission mode for the session. Validated against the server-side allowlist.
     case 'set_permission_mode': {
       const sessionId = clientSessions.get(ws)
