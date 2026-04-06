@@ -139,7 +139,7 @@ describe('buildPrReviewPrompt', () => {
 
   describe('custom prompt resolution', () => {
     it('uses repo-level custom prompt when available', () => {
-      vi.mocked(existsSync).mockImplementation((p) =>
+      vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
         String(p).includes('/tmp/workspace/.codekin/pr-review-prompt.md'),
       )
       vi.mocked(readFileSync).mockReturnValue('Custom repo review instructions here')
@@ -151,7 +151,7 @@ describe('buildPrReviewPrompt', () => {
     })
 
     it('uses global custom prompt when repo-level not found', () => {
-      vi.mocked(existsSync).mockImplementation((p) =>
+      vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
         String(p).includes('.codekin/pr-review-prompt.md') && !String(p).includes('/tmp/workspace'),
       )
       vi.mocked(readFileSync).mockReturnValue('Global custom instructions')
@@ -170,7 +170,7 @@ describe('buildPrReviewPrompt', () => {
 
     it('repo-level takes precedence over global', () => {
       vi.mocked(existsSync).mockReturnValue(true)
-      vi.mocked(readFileSync).mockImplementation((p) => {
+      vi.mocked(readFileSync).mockImplementation((p: Parameters<typeof readFileSync>[0]) => {
         if (String(p).includes('/tmp/workspace')) return 'Repo prompt wins'
         return 'Global prompt loses'
       })
@@ -245,6 +245,25 @@ describe('buildPrReviewPrompt', () => {
     })
   })
 
+  describe('intermediate file path overrides', () => {
+    it('includes PR-specific draft and codex review paths', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
+      expect(prompt).toContain('pr-42-draft-review.md')
+      expect(prompt).toContain('pr-42-codex-review.md')
+      expect(prompt).toContain('/tmp/workspace/pr-42-draft-review.md')
+    })
+
+    it('warns against writing to git-tracked directories', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
+      expect(prompt).toContain('Do NOT write review files to the `docs/` directory')
+    })
+
+    it('includes overridden codex command with correct paths', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
+      expect(prompt).toContain('codex exec - --skip-git-repo-check -o /tmp/workspace/pr-42-codex-review.md < /tmp/workspace/pr-42-draft-review.md')
+    })
+  })
+
   describe('comment posting instructions', () => {
     it('includes update instructions when existingCommentId provided', () => {
       const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace', {
@@ -254,7 +273,7 @@ describe('buildPrReviewPrompt', () => {
       expect(prompt).toContain('comment ID: 12345')
       expect(prompt).toContain('Update it instead of creating a new comment')
       expect(prompt).toContain('PATCH')
-      expect(prompt).toContain('-F body=@/tmp/workspace/review-body.md')
+      expect(prompt).toContain('-F body=@/tmp/workspace/pr-42-review-body.md')
       expect(prompt).toContain(`issues/comments/12345`)
     })
 
@@ -262,8 +281,14 @@ describe('buildPrReviewPrompt', () => {
       const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
       expect(prompt).toContain('## Posting Your Review Summary')
       expect(prompt).toContain('new comment')
-      expect(prompt).toContain('-F body=@/tmp/workspace/review-body.md')
+      expect(prompt).toContain('-F body=@/tmp/workspace/pr-42-review-body.md')
       expect(prompt).toContain(`issues/${42}/comments`)
+    })
+
+    it('uses a PR-specific review body path to avoid collisions', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
+      expect(prompt).toContain('/tmp/workspace/pr-42-review-body.md')
+      expect(prompt).not.toContain('/tmp/workspace/review-body.md')
     })
 
     it('always includes marker requirement in update instructions', () => {

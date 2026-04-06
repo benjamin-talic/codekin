@@ -71,6 +71,24 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         cleanupWorkspace(sessionId)
       }
     })
+
+    // Auto-kill webhook sessions after Claude completes its turn so they don't
+    // sit idle waiting for more input and consume memory indefinitely.
+    sessions.onSessionResult((sessionId, isError) => {
+      if (isError) return
+
+      const event = this.getEvents().find(
+        e => e.sessionId === sessionId && (e.status === 'session_created' || e.status === 'processing'),
+      )
+      if (!event) return
+
+      this.updateEventStatus(event.id, 'completed')
+      console.log(`[webhook] Session ${sessionId} completed review, scheduling cleanup`)
+
+      setTimeout(() => {
+        this.sessions.delete(sessionId)
+      }, 2000)
+    })
   }
 
   /**
@@ -570,7 +588,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     })
     this.sessions.sendInput(sessionId, prompt)
 
-    console.log(`[webhook] PR review prompt sent to session ${sessionId}, Claude is processing...`)
+    console.log(`[webhook] PR review prompt sent to session ${sessionId}, session is processing...`)
   }
 
   // ---------------------------------------------------------------------------
@@ -751,7 +769,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     const prompt = buildPrompt(context, logLines)
     this.sessions.sendInput(sessionId, prompt)
 
-    console.log(`[webhook] Prompt sent to session ${sessionId}, Claude is processing...`)
+    console.log(`[webhook] Prompt sent to session ${sessionId}, session is processing...`)
   }
 
   /**

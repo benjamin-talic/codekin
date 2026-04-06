@@ -39,16 +39,23 @@ function makeConfig(overrides: Partial<import('./stepflow-types.js').StepflowCon
 
 function makeSessions() {
   const exitListeners: Array<(id: string, code: number | null, signal: string | null, willRestart: boolean) => void> = []
+  const resultListeners: Array<(id: string, isError: boolean) => void> = []
   return {
     create: vi.fn(),
     list: vi.fn(() => []),
     get: vi.fn(),
+    delete: vi.fn(),
     startClaude: vi.fn(),
     sendInput: vi.fn(),
     onSessionExit: vi.fn((listener: any) => { exitListeners.push(listener) }),
+    onSessionResult: vi.fn((listener: any) => { resultListeners.push(listener); return () => {} }),
     _exitListeners: exitListeners,
+    _resultListeners: resultListeners,
     fireExit(sessionId: string, code: number | null, signal: string | null, willRestart: boolean) {
       for (const l of exitListeners) l(sessionId, code, signal, willRestart)
+    },
+    fireResult(sessionId: string, isError: boolean) {
+      for (const l of resultListeners) l(sessionId, isError)
     },
   } as any
 }
@@ -347,6 +354,97 @@ describe('StepflowHandler', () => {
     })
   })
 
+  describe('auto-cleanup on result', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('marks the event completed, posts callback, and deletes the session', async () => {
+      handler = new StepflowHandler(
+        makeConfig({ allowedCallbackHosts: ['api.stepflow.io'] }),
+        sessions,
+      )
+      const postCallbackSpy = vi.spyOn(handler as any, 'postCallback').mockResolvedValue(undefined)
+
+      const payload = makePayload({
+        payload: {
+          callbackUrl: 'https://api.stepflow.io/callback',
+          callbackSecret: 'secret-123',
+        },
+      })
+      const body = toRawBody(payload)
+      const result = await handler.handleWebhook(body, 'sha256=x')
+      const sessionId = result.body.sessionId as string
+
+      await vi.advanceTimersByTimeAsync(100)
+
+      expect(handler.getEvent('wh-001')?.status).toBe('session_created')
+
+      sessions.fireResult(sessionId, false)
+
+      expect(handler.getEvent('wh-001')?.status).toBe('completed')
+      expect(postCallbackSpy).toHaveBeenCalledWith(
+        'https://api.stepflow.io/callback',
+        {
+          runId: 'run-1',
+          sessionId,
+          status: 'completed',
+          exitCode: 0,
+        },
+        'secret-123',
+      )
+      expect(sessions.delete).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(sessions.delete).toHaveBeenCalledWith(sessionId)
+    })
+
+    it('does not delete the session or post callback on error result', async () => {
+      handler = new StepflowHandler(
+        makeConfig({ allowedCallbackHosts: ['api.stepflow.io'] }),
+        sessions,
+      )
+      const postCallbackSpy = vi.spyOn(handler as any, 'postCallback').mockResolvedValue(undefined)
+
+      const payload = makePayload({
+        payload: {
+          callbackUrl: 'https://api.stepflow.io/callback',
+          callbackSecret: 'secret-123',
+        },
+      })
+      const body = toRawBody(payload)
+      const result = await handler.handleWebhook(body, 'sha256=x')
+      const sessionId = result.body.sessionId as string
+
+      await vi.advanceTimersByTimeAsync(100)
+
+      sessions.fireResult(sessionId, true)
+
+      expect(handler.getEvent('wh-001')?.status).toBe('session_created')
+      expect(postCallbackSpy).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(sessions.delete).not.toHaveBeenCalled()
+    })
+
+    it('ignores result for unknown sessions', async () => {
+      handler = new StepflowHandler(
+        makeConfig({ allowedCallbackHosts: ['api.stepflow.io'] }),
+        sessions,
+      )
+      const postCallbackSpy = vi.spyOn(handler as any, 'postCallback').mockResolvedValue(undefined)
+
+      sessions.fireResult('unknown-session-id', false)
+
+      expect(postCallbackSpy).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(sessions.delete).not.toHaveBeenCalled()
+    })
+  })
+
   // -------------------------------------------------------------------------
   // Workspace creation failure
   // -------------------------------------------------------------------------
@@ -377,7 +475,7 @@ describe('StepflowHandler', () => {
 
     beforeEach(() => {
       mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 })
-      global.fetch = mockFetch
+      global.fetch = mockFetch as typeof fetch
     })
 
     afterEach(() => {

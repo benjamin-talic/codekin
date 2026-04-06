@@ -91,9 +91,11 @@ function makeConfig(overrides: Partial<FullWebhookConfig> = {}): FullWebhookConf
 }
 
 type ExitCallback = (sessionId: string, code: number, signal: string | null, willRestart: boolean) => void
+type ResultCallback = (sessionId: string, isError: boolean) => void
 
-function fakeSessionManager() {
+function fakeSessionManager(): any {
   const exitCallbacks: ExitCallback[] = []
+  const resultCallbacks: ResultCallback[] = []
   return {
     list: vi.fn(() => []),
     create: vi.fn(() => ({ id: 'session-1' })),
@@ -102,11 +104,13 @@ function fakeSessionManager() {
     broadcast: vi.fn(),
     sendInput: vi.fn(),
     onSessionExit: vi.fn((cb: ExitCallback) => { exitCallbacks.push(cb) }),
+    onSessionResult: vi.fn((cb: ResultCallback) => { resultCallbacks.push(cb); return () => {} }),
     _exitCallbacks: exitCallbacks,
+    _resultCallbacks: resultCallbacks,
   } as unknown as ReturnType<typeof fakeSessionManager>
 }
 
-function makePayload(overrides: Record<string, unknown> = {}) {
+function makePayload(overrides: Record<string, any> = {}) {
   return {
     action: 'completed',
     workflow_run: {
@@ -872,7 +876,7 @@ describe('WebhookHandler', () => {
           codebaseContext: 'context',
           reviewFindings: 'findings',
         }
-        mockLoadPrCache.mockReturnValueOnce(mockCache)
+        mockLoadPrCache.mockReturnValueOnce(mockCache as any)
         mockFetchExistingReviewComment.mockResolvedValueOnce(12345)
 
         await handler.checkHealth()
@@ -928,6 +932,59 @@ describe('WebhookHandler', () => {
             existingCommentId: undefined,
           }),
         )
+      })
+    })
+
+    describe('auto-cleanup on result', () => {
+      it('deletes webhook session after successful result', async () => {
+        await handler.checkHealth()
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        const eventId = result.body.eventId as string
+        const event = handler.getEvent(eventId)
+        expect(event?.status).toBe('session_created')
+
+        for (const cb of sessions._resultCallbacks) {
+          cb(event!.sessionId!, false)
+        }
+
+        expect(handler.getEvent(eventId)?.status).toBe('completed')
+        expect(sessions.delete).not.toHaveBeenCalled()
+
+        await vi.advanceTimersByTimeAsync(2000)
+        expect(sessions.delete).toHaveBeenCalledWith(event!.sessionId)
+      })
+
+      it('does not delete session on error result', async () => {
+        await handler.checkHealth()
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        const event = handler.getEvent(result.body.eventId as string)
+
+        for (const cb of sessions._resultCallbacks) {
+          cb(event!.sessionId!, true)
+        }
+
+        expect(handler.getEvent(result.body.eventId as string)?.status).toBe('session_created')
+        await vi.advanceTimersByTimeAsync(5000)
+        expect(sessions.delete).not.toHaveBeenCalled()
+      })
+
+      it('ignores result for non-webhook sessions', async () => {
+        await handler.checkHealth()
+
+        for (const cb of sessions._resultCallbacks) {
+          cb('unknown-session-id', false)
+        }
+
+        await vi.advanceTimersByTimeAsync(5000)
+        expect(sessions.delete).not.toHaveBeenCalled()
       })
     })
 

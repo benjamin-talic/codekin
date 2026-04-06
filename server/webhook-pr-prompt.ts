@@ -102,6 +102,7 @@ function buildDefaultInstructions(ctx: PullRequestContext): string {
  */
 export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: string, options?: PrPromptOptions): string {
   const lines: string[] = []
+  const reviewBodyPath = `${workspacePath}/pr-${ctx.prNumber}-review-body.md`
 
   // --- PR metadata (always included) ---
   lines.push('A pull request needs code review.')
@@ -196,6 +197,17 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push(buildDefaultInstructions(ctx))
   }
 
+  // Override any hardcoded intermediate review file paths from custom prompts
+  // so concurrent reviews don't collide or write into tracked repo files.
+  lines.push('')
+  lines.push('## File Paths for This Review')
+  lines.push('When writing intermediate files during the review process, use these paths:')
+  lines.push(`- Draft review: \`${workspacePath}/pr-${ctx.prNumber}-draft-review.md\``)
+  lines.push(`- Codex cross-review output: \`${workspacePath}/pr-${ctx.prNumber}-codex-review.md\``)
+  lines.push(`- Codex command: \`codex exec - --skip-git-repo-check -o ${workspacePath}/pr-${ctx.prNumber}-codex-review.md < ${workspacePath}/pr-${ctx.prNumber}-draft-review.md\``)
+  lines.push('These paths override any file paths mentioned in the review instructions above.')
+  lines.push('Do NOT write review files to the `docs/` directory or any other git-tracked location.')
+
   // --- Comment posting instructions ---
   lines.push('')
   if (options?.existingCommentId) {
@@ -203,18 +215,18 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push(`An existing Codekin review comment was found on this PR (comment ID: ${options.existingCommentId}).`)
     lines.push('Update it instead of creating a new comment. Use a temporary file for the body to avoid shell escaping issues:')
     lines.push('')
-    lines.push(`1. Write your review summary to \`${workspacePath}/review-body.md\``)
+    lines.push(`1. Write your review summary to \`${reviewBodyPath}\``)
     lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
-    lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/comments/${options.existingCommentId} -X PATCH -F body=@${workspacePath}/review-body.md\``)
+    lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/comments/${options.existingCommentId} -X PATCH -F body=@${reviewBodyPath}\``)
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body.`)
   } else {
     lines.push('## Posting Your Review Summary')
     lines.push('Post your review summary as a new comment on the PR. Use a temporary file for the body to avoid shell escaping issues:')
     lines.push('')
-    lines.push(`1. Write your review summary to \`${workspacePath}/review-body.md\``)
+    lines.push(`1. Write your review summary to \`${reviewBodyPath}\``)
     lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
-    lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/${ctx.prNumber}/comments -F body=@${workspacePath}/review-body.md\``)
+    lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/${ctx.prNumber}/comments -F body=@${reviewBodyPath}\``)
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body. This marker allows future reviews to update this comment instead of creating a new one.`)
   }
