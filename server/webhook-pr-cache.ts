@@ -11,6 +11,15 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
+/** Structured finding from a PR review. */
+export interface PrFinding {
+  severity: 'critical' | 'must-fix' | 'suggestion' | 'minor' | 'nitpick'
+  file: string
+  line: number | null
+  description: string
+  status: 'new' | 'open' | 'fixed'
+}
+
 /** Shape of the cached PR review context. */
 export interface PrCacheData {
   prNumber: number
@@ -20,6 +29,15 @@ export interface PrCacheData {
   priorReviewSummary: string
   codebaseContext: string
   reviewFindings: string
+  // Structured review data (added 2026-04-07)
+  verdict?: 'approve' | 'request_changes' | 'comment'
+  structuredFindings?: PrFinding[]
+  // PR metadata snapshot
+  author?: string
+  prTitle?: string
+  changedFiles?: number
+  additions?: number
+  deletions?: number
 }
 
 const REQUIRED_FIELDS: (keyof PrCacheData)[] = [
