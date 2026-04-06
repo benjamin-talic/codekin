@@ -1777,7 +1777,13 @@ export class SessionManager {
     if (session.allowedTools && this.matchesAllowedTools(session.allowedTools, toolName, toolInput)) {
       return 'session'
     }
-    if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow' || session.source === 'orchestrator' || session.source === 'agent')) {
+    // Agent child sessions: only auto-approve tools in their allowedTools list,
+    // never blanket headless. This ensures AGENT_CHILD_ALLOWED_TOOLS is the
+    // actual permission boundary, not just a hint for when a browser is open.
+    if (session.clients.size === 0 && session.source === 'agent') {
+      return 'prompt'
+    }
+    if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow' || session.source === 'orchestrator')) {
       return 'headless'
     }
     return 'prompt'

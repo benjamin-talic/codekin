@@ -3263,6 +3263,52 @@ describe('SessionManager', () => {
     })
   })
 
+  describe('agent session headless behavior', () => {
+    it('agent sessions use allowedTools as permission boundary, not blanket headless', async () => {
+      // Agent child session with specific allowed tools and NO browser client
+      const s = sm.create('agent-child', '/tmp', {
+        source: 'agent',
+        allowedTools: ['Read', 'Bash(git:*)'],
+      })
+      // No ws.join — simulates headless (no browser tab)
+
+      // Tool in allowedTools → auto-approved via 'session' path
+      const readResult = await sm.requestToolApproval(s.id, 'Read', { file_path: '/tmp/foo' })
+      expect(readResult).toEqual({ allow: true, always: false })
+
+      const gitResult = await sm.requestToolApproval(s.id, 'Bash', { command: 'git status' })
+      expect(gitResult).toEqual({ allow: true, always: false })
+    })
+
+    it('agent sessions block on tools NOT in allowedTools even when headless', async () => {
+      const s = sm.create('agent-blocked', '/tmp', {
+        source: 'agent',
+        allowedTools: ['Read'],
+      })
+      // No ws.join — headless
+
+      // Tool NOT in allowedTools → should prompt (not auto-approve via headless)
+      const promise = sm.requestToolApproval(s.id, 'Bash', { command: 'rm -rf /' })
+
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // Resolve to avoid leaked promise
+      s.pendingToolApprovals.values().next().value!.resolve({ allow: false, always: false })
+      await promise
+    })
+
+    it('non-agent headless sources still get blanket auto-approval', async () => {
+      const s = sm.create('workflow-headless', '/tmp', {
+        source: 'workflow',
+      })
+      // No ws.join — headless
+
+      // Workflow sessions get blanket headless approval for any tool
+      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'rm -rf /' })
+      expect(result).toEqual({ allow: true, always: false })
+    })
+  })
+
   describe('discardChanges', () => {
     it('returns diff_error when session not found', async () => {
       const sm = new SessionManager()

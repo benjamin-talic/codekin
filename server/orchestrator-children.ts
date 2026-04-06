@@ -63,7 +63,7 @@ const MAX_RETAINED_CHILDREN = 100    // hard cap on total entries
  * (rm, sudo, docker, git reset/clean, git push --force) are intentionally
  * excluded — they fall through to manual approval.
  */
-const AGENT_CHILD_ALLOWED_TOOLS = [
+export const AGENT_CHILD_ALLOWED_TOOLS = [
   // File operations (scoped to working dir by acceptEdits mode)
   'Read', 'Glob', 'Grep', 'Write', 'Edit',
   // Git operations (branch, commit, push, PR workflow)
@@ -77,12 +77,12 @@ const AGENT_CHILD_ALLOWED_TOOLS = [
   // Build / lint / test tools
   'Bash(node:*)', 'Bash(tsc:*)', 'Bash(eslint:*)', 'Bash(prettier:*)',
   'Bash(cargo:*)', 'Bash(go:*)', 'Bash(make:*)', 'Bash(pip:*)',
-  // Safe filesystem inspection
-  'Bash(ls:*)', 'Bash(cat:*)', 'Bash(find:*)', 'Bash(wc:*)',
+  // Safe filesystem inspection (read-only)
+  'Bash(ls:*)', 'Bash(cat:*)', 'Bash(wc:*)',
   'Bash(head:*)', 'Bash(tail:*)', 'Bash(sort:*)', 'Bash(diff:*)',
-  'Bash(mkdir:*)', 'Bash(touch:*)', 'Bash(basename:*)', 'Bash(dirname:*)',
-  'Bash(realpath:*)', 'Bash(tree:*)', 'Bash(pwd:*)', 'Bash(echo:*)',
-  'Bash(which:*)', 'Bash(file:*)', 'Bash(du:*)', 'Bash(stat:*)',
+  'Bash(basename:*)', 'Bash(dirname:*)',
+  'Bash(realpath:*)', 'Bash(tree:*)', 'Bash(pwd:*)',
+  'Bash(which:*)', 'Bash(file:*)',
 ]
 
 // ---------------------------------------------------------------------------
