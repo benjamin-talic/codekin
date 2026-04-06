@@ -709,6 +709,11 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     return this.alive
   }
 
+  isReady(): boolean {
+    // Claude CLI stdin is always buffered — ready as soon as alive
+    return this.alive
+  }
+
   getSessionId(): string {
     return this.sessionId
   }

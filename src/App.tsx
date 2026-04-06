@@ -38,7 +38,7 @@ import { DiffPanel } from './components/DiffPanel'
 import { OrchestratorContent } from './components/OrchestratorContent'
 import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
-import type { PermissionMode } from './types'
+import type { PermissionMode, CodingProvider } from './types'
 
 export default function App() {
   const { settings, updateSettings } = useSettings()
@@ -108,6 +108,11 @@ export default function App() {
   /** Permission mode ref for session orchestration (read at session creation time). */
   const permissionModeRef = useRef<PermissionMode>(
     (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
+  )
+
+  /** Provider ref for session orchestration (read at session creation time). */
+  const providerRef = useRef<CodingProvider>(
+    (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
   )
 
   const inputBarRef = useRef<InputBarHandle>(null)
@@ -184,6 +189,16 @@ export default function App() {
     setPermissionMode(mode)
   }, [setPermissionMode])
 
+  // Provider state, persisted to localStorage
+  const [currentProvider, setCurrentProviderRaw] = useState<CodingProvider>(
+    (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
+  )
+  const handleProviderChange = useCallback((p: CodingProvider) => {
+    providerRef.current = p
+    setCurrentProviderRaw(p)
+    localStorage.setItem('codekin-provider', p)
+  }, [])
+
   // Reset file-change tracking when switching sessions
   useEffect(() => {
     setHasFileChanges(false) // eslint-disable-line react-hooks/set-state-in-effect -- sync with session change
@@ -212,6 +227,7 @@ export default function App() {
     pendingContextRef,
     useWorktreeRef,
     permissionModeRef,
+    providerRef,
   })
 
   // Derive active repo from the active session
@@ -626,6 +642,8 @@ export default function App() {
             onWorktreeChange={setUseWorktree}
             currentPermissionMode={currentPermissionMode}
             onPermissionModeChange={handlePermissionModeChange}
+            currentProvider={currentProvider}
+            onProviderChange={handleProviderChange}
             moveToWorktree={moveToWorktree}
             worktreePath={activeSession?.worktreePath}
           />

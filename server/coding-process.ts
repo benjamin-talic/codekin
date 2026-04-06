@@ -76,6 +76,9 @@ export interface CodingProcess extends EventEmitter<ClaudeProcessEvents> {
   /** Whether the process is currently running and accepting input. */
   isAlive(): boolean
 
+  /** Whether the process is fully initialized and ready to accept messages immediately. */
+  isReady(): boolean
+
   /** The provider's internal session ID (used for resume). */
   getSessionId(): string
 

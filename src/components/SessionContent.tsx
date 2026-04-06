@@ -15,7 +15,7 @@ import { InputBar, type InputBarHandle } from './InputBar'
 import { IconEye } from '@tabler/icons-react'
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
-import type { ChatMessage, PermissionMode, TaskItem } from '../types'
+import type { ChatMessage, PermissionMode, CodingProvider, TaskItem } from '../types'
 import type { PromptEntry } from '../hooks/usePromptState'
 
 export interface SessionContentProps {
@@ -53,6 +53,8 @@ export interface SessionContentProps {
   onWorktreeChange: (v: boolean) => void
   currentPermissionMode: PermissionMode
   onPermissionModeChange: (mode: PermissionMode) => void
+  currentProvider: CodingProvider
+  onProviderChange: (provider: CodingProvider) => void
   moveToWorktree: (() => void) | undefined
   worktreePath: string | undefined
 }
@@ -92,6 +94,8 @@ export function SessionContent({
   onWorktreeChange,
   currentPermissionMode,
   onPermissionModeChange,
+  currentProvider,
+  onProviderChange,
   moveToWorktree,
   worktreePath,
 }: SessionContentProps) {
@@ -174,6 +178,8 @@ export function SessionContent({
         onWorktreeChange={onWorktreeChange}
         currentPermissionMode={currentPermissionMode}
         onPermissionModeChange={onPermissionModeChange}
+        currentProvider={currentProvider}
+        onProviderChange={onProviderChange}
         onMoveToWorktree={moveToWorktree}
         worktreePath={worktreePath}
       />

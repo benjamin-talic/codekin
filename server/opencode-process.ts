@@ -577,6 +577,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     return this.alive
   }
 
+  isReady(): boolean {
+    return this.alive && this.opencodeSessionId !== null
+  }
+
   getSessionId(): string {
     return this.opencodeSessionId ?? this.sessionId
   }

@@ -813,10 +813,10 @@ export class SessionManager {
   waitForReady(sessionId: string, timeoutMs = 30_000): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session?.claudeProcess) return Promise.resolve()
-    // If the process already completed init in a prior turn, resolve immediately.
-    // For OpenCode, system_init is only emitted after ensureOpenCodeServer() completes,
-    // so skip early-return for OpenCode even on resume — the server may need to (re)start.
-    if (session.claudeSessionId && session.provider !== 'opencode') return Promise.resolve()
+    // If the process is already fully initialized, resolve immediately.
+    // Uses isReady() which accounts for provider differences: Claude is ready
+    // as soon as alive (stdin buffered), OpenCode needs alive + opencodeSessionId.
+    if (session.claudeProcess.isReady()) return Promise.resolve()
 
     return new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
@@ -1283,7 +1283,7 @@ export class SessionManager {
             session.isProcessing = true
             this._globalBroadcast?.({ type: 'sessions_updated' })
           }
-          if (session.provider === 'opencode') {
+          if (session.claudeProcess && !session.claudeProcess.isReady()) {
             void this.waitForReady(sessionId).then(() => session.claudeProcess?.sendMessage(combined))
           } else {
             session.claudeProcess?.sendMessage(combined)
@@ -1292,8 +1292,9 @@ export class SessionManager {
         }
       }
 
-      // For OpenCode: wait for init before sending the message
-      if (session.provider === 'opencode') {
+      // Process just started — if not ready yet (OpenCode needs server init),
+      // queue the message via waitForReady.
+      if (session.claudeProcess && !session.claudeProcess.isReady()) {
         session._lastUserInput = data
         session._lastUserInputAt = Date.now()
         session._apiRetryCount = 0
@@ -1321,9 +1322,9 @@ export class SessionManager {
       session.isProcessing = true
       this._globalBroadcast?.({ type: 'sessions_updated' })
     }
-    // For OpenCode: if the process is alive but still initializing (e.g. rapid
-    // back-to-back sends), route through waitForReady to avoid ECONNREFUSED.
-    if (session.provider === 'opencode') {
+    // If the process is alive but still initializing (OpenCode after restart),
+    // route through waitForReady to avoid sending before the server is up.
+    if (session.claudeProcess && !session.claudeProcess.isReady()) {
       void this.waitForReady(sessionId).then(() => session.claudeProcess?.sendMessage(data))
     } else {
       session.claudeProcess?.sendMessage(data)

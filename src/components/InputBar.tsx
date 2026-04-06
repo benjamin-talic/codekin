@@ -14,7 +14,7 @@ import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
-import { PERMISSION_MODES, type PermissionMode } from '../types'
+import { PERMISSION_MODES, PROVIDERS, type PermissionMode, type CodingProvider } from '../types'
 
 const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
   shield: IconShieldCheck,
@@ -170,6 +170,40 @@ function ModelDropdown({ currentModel, isOpen, menuRef, onToggle, onChange }: {
   )
 }
 
+/** Provider selector dropdown. */
+function ProviderDropdown({ current, isOpen, menuRef, onToggle, onChange }: {
+  current: CodingProvider; isOpen: boolean
+  menuRef: React.RefObject<HTMLDivElement | null>
+  onToggle: () => void; onChange: (provider: CodingProvider) => void
+}) {
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
+        title="Change provider"
+      >
+        {PROVIDERS.find(p => p.id === current)?.label ?? current}
+        <IconChevronDown size={12} stroke={2} />
+      </button>
+      {isOpen && (
+        <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[160px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+          {PROVIDERS.map(p => (
+            <button
+              key={p.id}
+              onClick={() => onChange(p.id)}
+              className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-neutral-7 transition-colors ${p.id === current ? 'text-primary-4' : 'text-neutral-2'}`}
+            >
+              <div>{p.label}</div>
+              <div className="text-[11px] text-neutral-5">{p.description}</div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const INPUT_HEIGHT_KEY = 'inputBarHeight'
 const DEFAULT_HEIGHT = 120
 const MIN_HEIGHT = 60
@@ -223,6 +257,10 @@ interface InputBarProps {
   currentPermissionMode?: PermissionMode
   /** Callback when the permission mode is changed. */
   onPermissionModeChange?: (mode: PermissionMode) => void
+  /** Currently selected AI provider. */
+  currentProvider?: CodingProvider
+  /** Callback when the user selects a different provider. */
+  onProviderChange?: (provider: CodingProvider) => void
   /** Callback to move the current session into a worktree mid-session. */
   onMoveToWorktree?: () => void
   /** Worktree path if the session is in a worktree (falsy = not in worktree). */
@@ -231,25 +269,28 @@ interface InputBarProps {
   variant?: InputBarVariant
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, currentProvider, onProviderChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
   const isOrchestrator = variant === 'orchestrator'
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [permMenuOpen, setPermMenuOpen] = useState(false)
+  const [providerMenuOpen, setProviderMenuOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
 
   /** Close all toolbar popups, optionally keeping one open. */
-  const closeAllPopups = useCallback((except?: 'skill' | 'model' | 'perm') => {
+  const closeAllPopups = useCallback((except?: 'skill' | 'model' | 'perm' | 'provider') => {
     if (except !== 'skill') setSkillMenuOpen(false)
     if (except !== 'model') setModelMenuOpen(false)
     if (except !== 'perm') setPermMenuOpen(false)
+    if (except !== 'provider') setProviderMenuOpen(false)
   }, [])
   const [slashFilter, setSlashFilter] = useState('')
   const mobileMenuRef = useRef<HTMLDivElement>(null)
   const permMenuRef = useRef<HTMLDivElement>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
+  const providerMenuRef = useRef<HTMLDivElement>(null)
   const MOBILE_HEIGHT = 100
   const ORCH_HEIGHT_KEY = 'orchestratorInputBarHeight'
   const ORCHESTRATOR_DEFAULT_HEIGHT = 90
@@ -284,6 +325,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   useOutsideClick(mobileMenuRef, mobileMenuOpen, useCallback(() => setMobileMenuOpen(false), []))
   useOutsideClick(permMenuRef, permMenuOpen, useCallback(() => setPermMenuOpen(false), []))
   useOutsideClick(modelMenuRef, modelMenuOpen, useCallback(() => setModelMenuOpen(false), []))
+  useOutsideClick(providerMenuRef, providerMenuOpen, useCallback(() => setProviderMenuOpen(false), []))
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -522,6 +564,15 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               ) : null}
             </div>
             <div className="flex items-center gap-1">
+              {currentProvider && onProviderChange && (
+                <ProviderDropdown
+                  current={currentProvider}
+                  isOpen={providerMenuOpen}
+                  menuRef={providerMenuRef}
+                  onToggle={() => { closeAllPopups('provider'); setProviderMenuOpen(!providerMenuOpen) }}
+                  onChange={(id) => { onProviderChange(id); setProviderMenuOpen(false) }}
+                />
+              )}
               {currentModel && onModelChange && (
                 <ModelDropdown
                   currentModel={currentModel}

@@ -57,6 +57,12 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermiss
  */
 export type CodingProvider = 'claude' | 'opencode'
 
+/** Provider metadata for the UI selector. */
+export const PROVIDERS: { id: CodingProvider; label: string; description: string }[] = [
+  { id: 'claude', label: 'Claude Code', description: 'Anthropic Claude Code CLI' },
+  { id: 'opencode', label: 'OpenCode', description: 'OpenCode server (multi-provider)' },
+]
+
 /** Permission mode metadata for the UI selector. */
 export const PERMISSION_MODES: { id: PermissionMode; label: string; description: string; icon: string; dangerous?: boolean }[] = [
   { id: 'default', label: 'Ask permissions', description: 'Always ask before making changes', icon: 'shield' },
