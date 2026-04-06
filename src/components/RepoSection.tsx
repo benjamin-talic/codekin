@@ -95,7 +95,7 @@ export interface RepoSectionProps {
   onSelectSession: (id: string) => void
   onDeleteSession: (id: string) => void
   onRenameSession: (id: string, name: string) => void
-  onNewSession?: () => void
+  onNewSession?: (provider?: import('../types').CodingProvider) => void
   onSelectRepo: (workingDir: string) => void
   onDeleteRepo: (workingDir: string) => void
   onViewArchivedSession: (id: string) => void
@@ -307,13 +307,20 @@ export function RepoSection({
 
           {/* New session for this repo (visible on hover) */}
           {onNewSession && (
-            <div className="pl-10 opacity-0 group-hover/repo:opacity-100">
+            <div className="pl-10 flex gap-1 opacity-0 group-hover/repo:opacity-100">
               <button
-                onClick={onNewSession}
+                onClick={() => onNewSession('claude')}
                 className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[13px] text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50 transition-colors"
               >
                 <IconPlus size={12} stroke={2} className="flex-shrink-0" />
-                <span>New session</span>
+                <span>Claude</span>
+              </button>
+              <button
+                onClick={() => onNewSession('opencode')}
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[13px] text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50 transition-colors"
+              >
+                <IconPlus size={12} stroke={2} className="flex-shrink-0" />
+                <span>OpenCode</span>
               </button>
             </div>
           )}
