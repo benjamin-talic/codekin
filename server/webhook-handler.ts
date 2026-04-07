@@ -72,8 +72,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     })
 
-    // Auto-kill webhook sessions after Claude completes its turn so they don't
+    // Auto-kill PR review sessions after Claude completes its turn so they don't
     // sit idle waiting for more input and consume memory indefinitely.
+    // Only applies to pull_request events — workflow_run CI triage sessions may
+    // be multi-turn (using tools) and must complete naturally via onSessionExit.
     sessions.onSessionResult((sessionId, isError) => {
       if (isError) return
 
@@ -81,6 +83,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         e => e.sessionId === sessionId && (e.status === 'session_created' || e.status === 'processing'),
       )
       if (!event) return
+      if (event.event !== 'pull_request') return
 
       this.updateEventStatus(event.id, 'completed')
       console.log(`[webhook] Session ${sessionId} completed review, scheduling cleanup`)

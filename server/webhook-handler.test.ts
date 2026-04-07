@@ -987,6 +987,28 @@ describe('WebhookHandler', () => {
         await vi.advanceTimersByTimeAsync(5000)
         expect(sessions.delete).not.toHaveBeenCalled()
       })
+
+      it('does not auto-kill workflow_run sessions on result', async () => {
+        await handler.checkHealth()
+        const payload = makePayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makeHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        const event = handler.getEvent(result.body.eventId as string)
+        expect(event?.event).toBe('workflow_run')
+        expect(event?.status).toBe('session_created')
+
+        for (const cb of sessions._resultCallbacks) {
+          cb(event!.sessionId!, false)
+        }
+
+        // Status should NOT be updated to 'completed' by auto-kill
+        expect(handler.getEvent(result.body.eventId as string)?.status).toBe('session_created')
+        await vi.advanceTimersByTimeAsync(5000)
+        expect(sessions.stopClaude).not.toHaveBeenCalled()
+        expect(sessions.delete).not.toHaveBeenCalled()
+      })
     })
 
     describe('PR closed/merged cleanup', () => {

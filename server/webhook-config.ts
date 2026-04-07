@@ -16,7 +16,8 @@ export interface FullWebhookConfig extends WebhookConfig {
 export function loadWebhookConfig(): FullWebhookConfig {
   // Defaults
   let enabled = false
-  let maxConcurrentSessions = 15
+  // Conservative default for resource-constrained hosts; override via GITHUB_WEBHOOK_MAX_SESSIONS
+  let maxConcurrentSessions = 5
   let logLinesToInclude = 200
   let actorAllowlist: string[] = []
 
