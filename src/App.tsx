@@ -192,9 +192,8 @@ export default function App() {
   }, [setPermissionMode])
 
   // Provider is per-session; default for new sessions is persisted to localStorage
-  const [currentProvider] = useState<CodingProvider>(
+  const currentProvider: CodingProvider =
     (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
-  )
   // Dynamic model list for OpenCode (fetched from server on demand, keyed by workingDir)
   const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
   const openCodeModelsDirRef = useRef<string | undefined>(undefined)
@@ -220,14 +219,13 @@ export default function App() {
   useEffect(() => {
     if (activeSessionProvider !== 'opencode' || !settings.token) return
     if (openCodeModels.length > 0) return // already fetched for this repo
-    const activeWd = sessions.find(s => s.id === activeSessionId)?.workingDir
-    fetchOpenCodeModels(settings.token, activeWd).then(result => {
+    fetchOpenCodeModels(settings.token, activeOpenCodeWd).then(result => {
       const models: ModelOption[] = result.models.map(m => ({
         id: `${m.providerID}/${m.id}`,
         label: `${m.name} (${m.providerName})`,
       }))
       setOpenCodeModels(models)
-      openCodeModelsDirRef.current = activeWd
+      openCodeModelsDirRef.current = activeOpenCodeWd
       // Only set the model if the user doesn't already have an OpenCode model selected.
       const currentIsOpenCode = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
       if (!currentIsOpenCode) {
@@ -236,7 +234,7 @@ export default function App() {
         else if (models.length > 0) setModel(models[0].id)
       }
     }).catch(() => { /* OpenCode server not available */ })
-  }, [activeSessionProvider, settings.token, openCodeModels.length, setModel]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSessionProvider, settings.token, openCodeModels.length, setModel, activeOpenCodeWd])
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {
