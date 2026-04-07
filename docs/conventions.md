@@ -71,10 +71,10 @@ Patterns observed in the Codekin codebase. These describe what the code *does*, 
 
 Server modules grouped by concern:
 - **Process**: `claude-process.ts`, `opencode-process.ts`, `coding-process.ts`
-- **Session**: `session-manager.ts`, `session-persistence.ts`, `session-naming.ts`, `session-archive.ts`
+- **Session**: `session-manager.ts`, `session-persistence.ts`, `session-naming.ts`, `session-archive.ts`, `session-restart-scheduler.ts`
 - **Permissions**: `approval-manager.ts`, `plan-manager.ts`, `native-permissions.ts`
 - **Git**: `diff-manager.ts`, `diff-parser.ts`
-- **Webhooks**: `webhook-handler.ts`, `webhook-github.ts`, `webhook-pr-github.ts`, `webhook-rate-limiter.ts`, `webhook-dedup.ts`
+- **Webhooks**: `webhook-handler-base.ts`, `webhook-handler.ts`, `webhook-github.ts`, `webhook-pr-github.ts`, `webhook-rate-limiter.ts`, `webhook-dedup.ts`, `commit-event-handler.ts`, `commit-event-hooks.ts`
 - **Workflows**: `workflow-engine.ts`, `workflow-loader.ts`, `workflow-config.ts`
-- **Orchestration**: `orchestrator-manager.ts`, `orchestrator-children.ts`, `orchestrator-learning.ts`, `orchestrator-monitor.ts`, `orchestrator-memory.ts`
-- **Routes**: `session-routes.ts`, `upload-routes.ts`, `webhook-routes.ts`, `workflow-routes.ts`, `orchestrator-routes.ts`, `docs-routes.ts`
+- **Orchestration**: `orchestrator-manager.ts`, `orchestrator-children.ts`, `orchestrator-learning.ts`, `orchestrator-monitor.ts`, `orchestrator-memory.ts`, `orchestrator-reports.ts`
+- **Routes**: `session-routes.ts`, `upload-routes.ts`, `webhook-routes.ts`, `workflow-routes.ts`, `orchestrator-routes.ts`, `docs-routes.ts`, `auth-routes.ts`
