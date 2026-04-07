@@ -868,14 +868,8 @@ export class SessionManager {
     })
     cp.on('error', (message) => this.broadcast(session, { type: 'error', message }))
     cp.on('exit', (code, signal) => {
-      // Capture process diagnostics before removing listeners — these are
-      // ClaudeProcess-specific; OpenCodeProcess always returns false/true.
-      const sessionConflict = 'hasSessionConflict' in cp && typeof (cp as any).hasSessionConflict === 'function'
-        ? (cp as any).hasSessionConflict() as boolean
-        : false
-      const producedOutput = 'hadOutput' in cp && typeof (cp as any).hadOutput === 'function'
-        ? (cp as any).hadOutput() as boolean
-        : true
+      const sessionConflict = cp.hasSessionConflict()
+      const producedOutput = cp.hadOutput()
       cp.removeAllListeners()
       this.handleClaudeExit(session, sessionId, code, signal, sessionConflict, producedOutput)
     })

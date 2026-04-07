@@ -406,6 +406,83 @@ describe('OpenCodeProcess', () => {
   })
 
   // ---------------------------------------------------------------------------
+  // SSE buffer parsing (exercises the split logic, not just handleSSEEvent)
+  // ---------------------------------------------------------------------------
+
+  describe('SSE buffer parsing', () => {
+    // Simulate the SSE buffer parsing logic from subscribeToEvents
+    function parseSSEBuffer(raw: string): unknown[] {
+      const events: unknown[] = []
+      const lines = raw.split(/\r?\n/)
+      let currentData = ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          currentData += line.slice(6)
+        } else if (line === '' && currentData) {
+          try {
+            events.push(JSON.parse(currentData))
+          } catch { /* ignore */ }
+          currentData = ''
+        }
+      }
+      return events
+    }
+
+    it('parses SSE data with \\n line endings', () => {
+      const raw = 'data: {"type":"message.part.delta","properties":{"field":"text","delta":"hi"}}\n\n'
+      const events = parseSSEBuffer(raw)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toEqual({ type: 'message.part.delta', properties: { field: 'text', delta: 'hi' } })
+    })
+
+    it('parses SSE data with \\r\\n line endings', () => {
+      const raw = 'data: {"type":"message.part.delta","properties":{"field":"text","delta":"hi"}}\r\n\r\n'
+      const events = parseSSEBuffer(raw)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toEqual({ type: 'message.part.delta', properties: { field: 'text', delta: 'hi' } })
+    })
+
+    it('parses multiple SSE events with mixed line endings', () => {
+      const raw =
+        'data: {"type":"a","properties":{}}\r\n\r\n' +
+        'data: {"type":"b","properties":{}}\n\n'
+      const events = parseSSEBuffer(raw)
+      expect(events).toHaveLength(2)
+      expect((events[0] as { type: string }).type).toBe('a')
+      expect((events[1] as { type: string }).type).toBe('b')
+    })
+
+    it('ignores unparseable SSE data', () => {
+      const raw = 'data: not-json\n\n'
+      const events = parseSSEBuffer(raw)
+      expect(events).toHaveLength(0)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // hasSessionConflict / hadOutput
+  // ---------------------------------------------------------------------------
+
+  describe('diagnostic methods', () => {
+    it('hasSessionConflict always returns false', () => {
+      expect(ocp.hasSessionConflict()).toBe(false)
+    })
+
+    it('hadOutput returns false before any events', () => {
+      expect(ocp.hadOutput()).toBe(false)
+    })
+
+    it('hadOutput returns true after handling an SSE event', () => {
+      setSessionId(ocp, 'oc-session-1')
+      callHandleSSE(ocp, {
+        type: 'message.part.delta',
+        properties: { sessionID: 'oc-session-1', field: 'text', delta: 'x' },
+      })
+      expect(ocp.hadOutput()).toBe(true)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 

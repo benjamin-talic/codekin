@@ -245,6 +245,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private workingDir: string
   private model?: string
   private alive = false
+  private receivedOutput = false
   private abortController: AbortController | null = null
   private startupTimer: ReturnType<typeof setTimeout> | null = null
   private permissionMode?: PermissionMode
@@ -373,7 +374,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
           if (done) break
 
           buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
+          const lines = buffer.split(/\r?\n/)
           buffer = lines.pop() || ''
 
           let currentData = ''
@@ -440,6 +441,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   /** Map an OpenCode SSE event to CodingProcess events. */
   private handleSSEEvent(event: OpenCodeSSEEvent): void {
     const { type, properties } = event
+    this.receivedOutput = true
 
     switch (type) {
       // Delta events carry the actual streaming text content
@@ -563,7 +565,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         // Auto-approve for headless sessions (webhook/workflow)
         if (this.permissionMode === 'bypassPermissions' || this.permissionMode === 'dangerouslySkipPermissions') {
           void this.replyToPermission(requestId, 'always')
-          return
+          break
         }
 
         // Emit as control_request for SessionManager to handle
@@ -776,6 +778,16 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
 
   getSessionId(): string {
     return this.opencodeSessionId ?? this.sessionId
+  }
+
+  /** OpenCode does not have session locking, so conflicts never occur. */
+  hasSessionConflict(): boolean {
+    return false
+  }
+
+  /** Whether the process received at least one SSE event before exiting. */
+  hadOutput(): boolean {
+    return this.receivedOutput
   }
 
   waitForExit(timeoutMs = 10000): Promise<void> {

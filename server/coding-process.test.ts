@@ -55,8 +55,11 @@ describe('CodingProcess interface', () => {
       sendRaw: (_data: string) => {},
       sendControlResponse: (_requestId: string, _behavior: 'allow' | 'deny') => {},
       isAlive: () => true,
+      isReady: () => true,
       getSessionId: () => 'test-id',
       waitForExit: () => Promise.resolve(),
+      hasSessionConflict: () => false,
+      hadOutput: () => true,
       // EventEmitter methods
       on: () => mock,
       once: () => mock,

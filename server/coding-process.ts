@@ -85,6 +85,12 @@ export interface CodingProcess extends EventEmitter<ClaudeProcessEvents> {
   /** Returns a promise that resolves when the process exits. */
   waitForExit(timeoutMs?: number): Promise<void>
 
+  /** Whether the process exited due to a session lock conflict (Claude-specific). */
+  hasSessionConflict(): boolean
+
+  /** Whether the process produced at least one valid event before exiting. */
+  hadOutput(): boolean
+
   /** Which provider this process belongs to. */
   readonly provider: CodingProvider
 
