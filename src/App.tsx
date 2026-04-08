@@ -232,7 +232,7 @@ export default function App() {
         else if (models.length > 0) setModel(models[0].id)
       }
     }).catch(() => { /* OpenCode server not available */ })
-  }, [activeSessionProvider, settings.token, openCodeModels.length, setModel]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSessionProvider, settings.token, openCodeModels.length, setModel, activeOpenCodeWd])
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {
