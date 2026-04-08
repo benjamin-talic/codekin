@@ -34,7 +34,7 @@ export interface PersistedSession {
   addDirs?: string[]
   claudeSessionId: string | null
   wasActive?: boolean
-  outputHistory: WsServerMessage[]
+  outputHistory?: WsServerMessage[]
 }
 
 export class SessionPersistence {
@@ -107,7 +107,7 @@ export class SessionPersistence {
           addDirs: s.addDirs,
           claudeProcess: null,
           clients: new Set(),
-          outputHistory: s.outputHistory,
+          outputHistory: s.outputHistory ?? [],
           // Restore claudeSessionId so Claude CLI resumes with full conversation
           // history from its own session storage (not just our 4000-char summary).
           claudeSessionId: s.claudeSessionId ?? null,
