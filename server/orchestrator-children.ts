@@ -124,7 +124,9 @@ export class OrchestratorChildManager {
         .filter(([, c]) => c.status !== 'starting' && c.status !== 'running')
         .sort((a, b) => (a[1].completedAt ?? '').localeCompare(b[1].completedAt ?? ''))
       while (this.children.size > MAX_RETAINED_CHILDREN && completed.length > 0) {
-        const [id] = completed.shift()!
+        const entry = completed.shift()
+        if (!entry) break
+        const [id] = entry
         this.children.delete(id)
       }
     }

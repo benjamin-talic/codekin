@@ -132,7 +132,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     super()
     this.workingDir = wd
     // Normalise both call forms into the same fields
-    if (typeof sessionIdOrOpts === 'object' && sessionIdOrOpts !== null) {
+    if (typeof sessionIdOrOpts === 'object') {
       const o = sessionIdOrOpts
       this.sessionId = o.sessionId || randomUUID()
       this.extraEnv = o.extraEnv || {}
@@ -228,10 +228,13 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       }
     }, 60_000)
 
-    this.rl = createInterface({ input: this.proc.stdout! })
-    this.rl.on('line', (line) => this.handleLine(line))
+    if (!this.proc.stdout || !this.proc.stderr) {
+      throw new Error('Claude process stdout/stderr not available')
+    }
+    this.rl = createInterface({ input: this.proc.stdout })
+    this.rl.on('line', (line) => { this.handleLine(line); })
 
-    this.proc.stderr!.on('data', (data: Buffer) => {
+    this.proc.stderr.on('data', (data: Buffer) => {
       const text = data.toString().trim()
       console.error('[claude stderr]', text)
       if (text) {
@@ -269,7 +272,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private handleLine(line: string): void {
     let event: ClaudeEvent
     try {
-      event = JSON.parse(line)
+      event = JSON.parse(line) as ClaudeEvent
     } catch {
       console.warn(`[claude stdout] unparseable line: ${line.slice(0, 200)}`)
       return
@@ -289,7 +292,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
 
     // Log non-streaming event types for diagnostics
     if (event.type !== 'stream_event') {
-      const subtype = 'subtype' in event ? (event as Record<string, unknown>).subtype : '-'
+      const subtype = 'subtype' in event ? ((event as Record<string, unknown>).subtype as string | undefined) ?? '-' : '-'
       console.log(`[event] type=${event.type} subtype=${subtype || '-'}`)
     }
     // Log all event types we DON'T handle to catch unknown protocol messages
@@ -326,7 +329,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
 
       case 'control_request': {
         const ctrlEvent = event as ClaudeControlRequest
-        if (TOOL_DEBUG) console.log(`[control_request] requestId=${ctrlEvent.request_id} tool=${ctrlEvent.request?.tool_name}`)
+        if (TOOL_DEBUG) console.log(`[control_request] requestId=${ctrlEvent.request_id} tool=${ctrlEvent.request.tool_name}`)
         this.handleControlRequest(ctrlEvent)
         break
       }
@@ -354,7 +357,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
           } else if (this.tool.name === 'ExitPlanMode') {
             this.emit('planning_mode', false)
           } else {
-            this.emit('tool_active', this.tool.name!, undefined)
+            this.emit('tool_active', this.tool.name ?? 'unknown', undefined)
           }
         } else if (inner.content_block?.type === 'thinking') {
           this.thinking = { active: true, text: '', summaryEmitted: false }
@@ -401,18 +404,19 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private handleToolBlockStop(): void {
     let summary: string | undefined
     try {
-      const parsed = JSON.parse(this.tool.input)
-      summary = this.summarizeToolInput(this.tool.name!, parsed) || undefined
+      const parsed = JSON.parse(this.tool.input) as Record<string, unknown>
+      const toolName = this.tool.name ?? 'unknown'
+      summary = this.summarizeToolInput(toolName, parsed) || undefined
       const isTask = this.tool.name === 'TaskCreate' || this.tool.name === 'TaskUpdate' || this.tool.name === 'TodoWrite' || this.tool.name === 'TodoRead'
       if (isTask && TOOL_DEBUG) console.log('[task-debug] tool:', this.tool.name, 'input:', JSON.stringify(parsed).slice(0, 200))
-      if (this.handleTaskTool(this.tool.name!, parsed)) {
+      if (this.handleTaskTool(toolName, parsed)) {
         if (TOOL_DEBUG) console.log('[task-debug] emitting todo_update, tasks:', this.tasks.size)
         this.emit('todo_update', Array.from(this.tasks.values()))
       }
     } catch (err) {
       console.warn(`[claude] Failed to parse tool input for ${this.tool.name}:`, err instanceof Error ? err.message : err)
     }
-    this.emit('tool_done', this.tool.name!, summary)
+    this.emit('tool_done', this.tool.name ?? 'unknown', summary)
     this.tool = { name: null, input: '' }
   }
 
@@ -493,7 +497,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       // Parse questions from input and emit as a single prompt with all questions bundled.
       // Each question has its own options and multiSelect flag; the frontend
       // walks the user through them one-by-one and returns all answers at once.
-      const questions = toolInput?.questions as Array<{ question: string; options?: Array<{ label: string; description?: string }>; multiSelect?: boolean; header?: string }> | undefined
+      const questions = toolInput.questions as Array<{ question: string; options?: Array<{ label: string; description?: string }>; multiSelect?: boolean; header?: string }> | undefined
       if (!Array.isArray(questions) || questions.length === 0) {
         console.warn(`[control_request] AskUserQuestion with no/empty questions array, forwarding as generic control_request`)
         this.emit('control_request', request_id, toolName, toolInput)
@@ -524,7 +528,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       // All other tools (Bash, WebSearch, WebFetch, Agent, etc.)
       // Forward to session manager for registry check / UI prompt
       const logDetail = toolName === 'Bash'
-        ? `: ${redactSecrets(String(toolInput.command || '').slice(0, 80))}`
+        ? `: ${redactSecrets(((toolInput.command as string | undefined) ?? '').slice(0, 80))}`
         : ''
       if (TOOL_DEBUG) console.log(`[control_request] forwarding ${toolName} to session manager for approval${logDetail}`)
       this.emit('control_request', request_id, toolName, toolInput)
@@ -572,14 +576,14 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       this.tasks.clear()
       this.taskSeq = 0
       for (const item of todos) {
-        const id = String(item.id || ++this.taskSeq)
+        const id = item.id != null ? String(item.id as string | number) : String(++this.taskSeq)
         const status = item.status as string
         if (status !== 'pending' && status !== 'in_progress' && status !== 'completed') continue
         this.tasks.set(id, {
           id,
-          subject: String(item.content || item.subject || ''),
+          subject: (item.content as string | undefined) ?? (item.subject as string | undefined) ?? '',
           status,
-          activeForm: item.activeForm ? String(item.activeForm) : undefined,
+          activeForm: item.activeForm ? (item.activeForm as string) : undefined,
         })
       }
       return true
@@ -589,14 +593,14 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       const id = String(++this.taskSeq)
       this.tasks.set(id, {
         id,
-        subject: String(input.subject || ''),
+        subject: (input.subject as string | undefined) ?? '',
         status: 'pending',
-        activeForm: input.activeForm ? String(input.activeForm) : undefined,
+        activeForm: input.activeForm ? (input.activeForm as string) : undefined,
       })
       return true
     }
     if (toolName === 'TaskUpdate') {
-      const id = String(input.taskId || '')
+      const id = (input.taskId as string | undefined) ?? ''
       const task = this.tasks.get(id)
       if (!task) return false
       const status = input.status as string | undefined
@@ -607,8 +611,8 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       if (status === 'pending' || status === 'in_progress' || status === 'completed') {
         task.status = status
       }
-      if (input.subject) task.subject = String(input.subject)
-      if (input.activeForm !== undefined) task.activeForm = input.activeForm ? String(input.activeForm) : undefined
+      if (input.subject) task.subject = input.subject as string
+      if (input.activeForm !== undefined) task.activeForm = input.activeForm ? (input.activeForm as string) : undefined
       return true
     }
     return false
@@ -642,34 +646,34 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private summarizeToolInput(toolName: string, input: Record<string, unknown>): string {
     switch (toolName) {
       case 'Bash': {
-        const cmd = String(input.command || '')
+        const cmd = (input.command as string | undefined) ?? ''
         // Truncate long commands to first line
         const firstLine = cmd.split('\n')[0]
         return firstLine.length < cmd.length ? `$ ${firstLine}...` : `$ ${cmd}`
       }
       case 'Read':
-        return String(input.file_path || '')
+        return (input.file_path as string | undefined) ?? ''
       case 'Write':
       case 'Edit':
-        return String(input.file_path || '')
+        return (input.file_path as string | undefined) ?? ''
       case 'Glob':
-        return String(input.pattern || '')
+        return (input.pattern as string | undefined) ?? ''
       case 'Grep':
-        return String(input.pattern || '')
+        return (input.pattern as string | undefined) ?? ''
       case 'Task':
-        return String(input.description || '')
+        return (input.description as string | undefined) ?? ''
       case 'EnterPlanMode':
         return 'Entering plan mode'
       case 'ExitPlanMode':
         return 'Exiting plan mode'
       case 'TaskCreate':
-        return String(input.subject || '')
+        return (input.subject as string | undefined) ?? ''
       case 'TaskUpdate':
-        return `#${input.taskId || ''} → ${input.status || ''}`
+        return `#${(input.taskId as string | undefined) ?? ''} → ${(input.status as string | undefined) ?? ''}`
       case 'TaskList':
         return 'Listing tasks'
       case 'TaskGet':
-        return `#${input.taskId || ''}`
+        return `#${(input.taskId as string | undefined) ?? ''}`
       case 'TodoWrite': {
         const todos = input.todos as Array<Record<string, unknown>> | undefined
         return todos ? `${todos.length} tasks` : ''

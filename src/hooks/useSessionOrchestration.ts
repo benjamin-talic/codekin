@@ -138,6 +138,10 @@ export function useSessionOrchestration({
     // worktree path if groupDir was missing on the active session.
     const workingDir = repo?.workingDir ?? activeWorkingDir
     const repoId = repo?.id ?? workingDir.split('/').pop() ?? 'session'
+    if (provider) {
+      providerRef.current = provider
+      localStorage.setItem('codekin-provider', provider)
+    }
     clearMessages()
     leaveSession()
     wsCreateSession(`hub:${repoId}`, workingDir, useWorktreeRef.current, permissionModeRef.current, provider ?? providerRef.current)

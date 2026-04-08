@@ -8,10 +8,10 @@ vi.stubGlobal('fetch', mockFetch)
 // Mock child_process.spawn for the server process
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>()
+  const { EventEmitter } = await import('events')
   return {
     ...actual,
     spawn: vi.fn(() => {
-      const EventEmitter = require('events').EventEmitter
       const proc = Object.assign(new EventEmitter(), {
         stdin: { write: vi.fn(), end: vi.fn() },
         stdout: Object.assign(new EventEmitter(), { on: vi.fn() }),
@@ -85,7 +85,7 @@ describe('OpenCodeProcess', () => {
       const ocp2 = new OpenCodeProcess('/tmp/test-repo', {
         opencodeSessionId: 'oc-resume-id',
       })
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       expect((ocp2 as any).opencodeSessionId).toBe('oc-resume-id')
       ocp2.stop()
     })
@@ -106,13 +106,13 @@ describe('OpenCodeProcess', () => {
 
   // Access the private handleSSEEvent method for testing event mapping
   const callHandleSSE = (ocp: OpenCodeProcess, event: Record<string, unknown>) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     ;(ocp as any).handleSSEEvent(event)
   }
 
   // Set the opencodeSessionId so session filtering works
   const setSessionId = (ocp: OpenCodeProcess, id: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     ;(ocp as any).opencodeSessionId = id
   }
 
@@ -406,12 +406,89 @@ describe('OpenCodeProcess', () => {
   })
 
   // ---------------------------------------------------------------------------
+  // SSE buffer parsing (exercises the split logic, not just handleSSEEvent)
+  // ---------------------------------------------------------------------------
+
+  describe('SSE buffer parsing', () => {
+    // Simulate the SSE buffer parsing logic from subscribeToEvents
+    function parseSSEBuffer(raw: string): unknown[] {
+      const events: unknown[] = []
+      const lines = raw.split(/\r?\n/)
+      let currentData = ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          currentData += line.slice(6)
+        } else if (line === '' && currentData) {
+          try {
+            events.push(JSON.parse(currentData))
+          } catch { /* ignore */ }
+          currentData = ''
+        }
+      }
+      return events
+    }
+
+    it('parses SSE data with \\n line endings', () => {
+      const raw = 'data: {"type":"message.part.delta","properties":{"field":"text","delta":"hi"}}\n\n'
+      const events = parseSSEBuffer(raw)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toEqual({ type: 'message.part.delta', properties: { field: 'text', delta: 'hi' } })
+    })
+
+    it('parses SSE data with \\r\\n line endings', () => {
+      const raw = 'data: {"type":"message.part.delta","properties":{"field":"text","delta":"hi"}}\r\n\r\n'
+      const events = parseSSEBuffer(raw)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toEqual({ type: 'message.part.delta', properties: { field: 'text', delta: 'hi' } })
+    })
+
+    it('parses multiple SSE events with mixed line endings', () => {
+      const raw =
+        'data: {"type":"a","properties":{}}\r\n\r\n' +
+        'data: {"type":"b","properties":{}}\n\n'
+      const events = parseSSEBuffer(raw)
+      expect(events).toHaveLength(2)
+      expect((events[0] as { type: string }).type).toBe('a')
+      expect((events[1] as { type: string }).type).toBe('b')
+    })
+
+    it('ignores unparseable SSE data', () => {
+      const raw = 'data: not-json\n\n'
+      const events = parseSSEBuffer(raw)
+      expect(events).toHaveLength(0)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // hasSessionConflict / hadOutput
+  // ---------------------------------------------------------------------------
+
+  describe('diagnostic methods', () => {
+    it('hasSessionConflict always returns false', () => {
+      expect(ocp.hasSessionConflict()).toBe(false)
+    })
+
+    it('hadOutput returns false before any events', () => {
+      expect(ocp.hadOutput()).toBe(false)
+    })
+
+    it('hadOutput returns true after handling an SSE event', () => {
+      setSessionId(ocp, 'oc-session-1')
+      callHandleSSE(ocp, {
+        type: 'message.part.delta',
+        properties: { sessionID: 'oc-session-1', field: 'text', delta: 'x' },
+      })
+      expect(ocp.hadOutput()).toBe(true)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 
   describe('lifecycle', () => {
     it('stop() sets alive to false and emits exit', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       ;(ocp as any).alive = true
       expect(ocp.isAlive()).toBe(true)
 
@@ -424,7 +501,7 @@ describe('OpenCodeProcess', () => {
     })
 
     it('waitForExit resolves after stop', async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       ;(ocp as any).alive = true
 
       const exitPromise = ocp.waitForExit(5000)
@@ -441,14 +518,14 @@ describe('OpenCodeProcess', () => {
     })
 
     it('sendControlResponse calls replyToPermission', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const replyFn = vi.spyOn(ocp as any, 'replyToPermission').mockResolvedValue(undefined)
       ocp.sendControlResponse('req-1', 'allow')
       expect(replyFn).toHaveBeenCalledWith('req-1', 'once')
     })
 
     it('sendControlResponse maps deny to reject', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const replyFn = vi.spyOn(ocp as any, 'replyToPermission').mockResolvedValue(undefined)
       ocp.sendControlResponse('req-2', 'deny')
       expect(replyFn).toHaveBeenCalledWith('req-2', 'reject')
@@ -460,7 +537,7 @@ describe('OpenCodeProcess', () => {
   // ---------------------------------------------------------------------------
 
   describe('summarizeToolInput', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const summarize = (tool: string, input: Record<string, unknown>) => (ocp as any).summarizeToolInput(tool, input)
 
     it('summarizes bash commands', () => {

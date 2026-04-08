@@ -53,7 +53,7 @@ export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos 
           body: JSON.stringify({ owner: repo.owner, name: repo.name }),
         })
         if (!res.ok) {
-          const data = await res.json()
+          const data = (await res.json()) as { error?: string }
           throw new Error(data.error || 'Clone failed')
         }
         repo.cloned = true
@@ -98,7 +98,7 @@ export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos 
         ) : (
           <RepoList
             groups={groups}
-            onSelect={handleSelect}
+            onSelect={(repo) => { void handleSelect(repo) }}
             cloningId={cloning}
             autoFocus
           />

@@ -13,7 +13,7 @@ import type { ChatMessage } from '../types'
 export function deriveActivityLabel(messages: ChatMessage[], isProcessing: boolean, thinkingSummary?: string | null): string | undefined {
   // Check for incomplete assistant (streaming text)
   const last = messages[messages.length - 1]
-  if (last && last.type === 'assistant' && !last.complete) return 'Writing...'
+  if (messages.length > 0 && last.type === 'assistant' && !last.complete) return 'Writing...'
   // Check for active tool
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]

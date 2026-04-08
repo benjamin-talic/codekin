@@ -64,8 +64,8 @@ describe('WorkflowEngine', () => {
   })
 
   describe('startRun', () => {
-    it('throws for unknown workflow kind', async () => {
-      await expect(engine.startRun('unknown-kind')).rejects.toThrow('Unknown workflow kind: unknown-kind')
+    it('throws for unknown workflow kind', () => {
+      expect(() => engine.startRun('unknown-kind')).toThrow('Unknown workflow kind: unknown-kind')
     })
 
     it('creates a run and step rows', async () => {
@@ -416,9 +416,9 @@ describe('WorkflowEngine', () => {
   })
 
   describe('triggerSchedule', () => {
-    it('throws for non-existent schedule', async () => {
+    it('throws for non-existent schedule', () => {
       mockGet.mockReturnValueOnce(undefined)
-      await expect(engine.triggerSchedule('nonexistent')).rejects.toThrow('Schedule not found')
+      expect(() => engine.triggerSchedule('nonexistent')).toThrow('Schedule not found')
     })
   })
 

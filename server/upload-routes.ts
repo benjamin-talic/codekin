@@ -114,7 +114,7 @@ async function fetchGhRepos(owner: string, reposRoot: string) {
     '--json', 'name,url,description',
     '--limit', '100',
   ], { env: ghEnv })
-  const repos: Array<{ name: string; url: string; description?: string }> = JSON.parse(stdout)
+  const repos = JSON.parse(stdout) as Array<{ name: string; url: string; description?: string }>
   repos.sort((a, b) => a.name.localeCompare(b.name))
   return repos.map((r) => {
     const repoPath = `${reposRoot}/${r.name}`
@@ -193,10 +193,10 @@ export function createUploadRouter(
     }
     next()
   }, (req, res, next) => {
-    upload.single('file')(req, res, (err) => {
+    upload.single('file')(req, res, (err: unknown) => {
       if (err) {
-        const status = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE' ? 413 : 400
-        res.status(status).json({ error: err.message })
+        const status = (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') ? 413 : 400
+        res.status(status).json({ error: err instanceof Error ? err.message : 'Upload failed' })
         return
       }
       next()
@@ -305,9 +305,9 @@ export function createUploadRouter(
         console.log(`Cloned ${owner}/${name}`)
         res.json({ success: true, path: dest })
       })
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         console.error(`Clone failed for ${owner}/${name}:`, err)
-        res.status(500).json({ error: `Clone failed: ${err.message}` })
+        res.status(500).json({ error: `Clone failed: ${err instanceof Error ? err.message : String(err)}` })
       })
   })
 

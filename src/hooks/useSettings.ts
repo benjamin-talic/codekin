@@ -19,7 +19,7 @@ const defaults: Settings = {
 function load(): Settings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    const saved = raw ? JSON.parse(raw) : null
+    const saved = (raw ? JSON.parse(raw) : null) as { token?: string; theme?: string } | null
     const base: Settings = {
       ...defaults,
       token: saved?.token ?? defaults.token,

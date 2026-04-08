@@ -35,7 +35,7 @@ export function DiffFileTree({ files, activeFile, onSelectFile }: DiffFileTreePr
             className={`flex items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-10 transition-colors ${
               isActive ? 'bg-neutral-10 text-neutral-1' : 'text-neutral-3'
             }`}
-            onClick={() => onSelectFile(file.path)}
+            onClick={() => { onSelectFile(file.path); }}
           >
             <span className={`inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold shrink-0 ${cfg.color}`}>
               {cfg.label}

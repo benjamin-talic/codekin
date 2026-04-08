@@ -265,7 +265,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
         }
         // Always restart Claude — in the worktree on success, or original dir on failure
         sessions.startClaude(sessionId)
-      }).catch((err) => {
+      }).catch((err: unknown) => {
         console.error('[worktree] move_to_worktree failed:', err)
         send({ type: 'system_message', subtype: 'error', text: 'Failed to move to worktree.' })
         sessions.startClaude(sessionId)

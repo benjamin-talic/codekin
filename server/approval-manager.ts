@@ -300,7 +300,7 @@ export class ApprovalManager {
     // Dual-write: also persist to Claude Code's native settings.local.json
     const nativePerm = toNativePermission(toolName, toolInput)
     if (nativePerm) {
-      addNativePermission(workingDir, nativePerm).catch(err => {
+      addNativePermission(workingDir, nativePerm).catch((err: unknown) => {
         console.error(`[auto-approve] failed to write native permission:`, err)
       })
     }

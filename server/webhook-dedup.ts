@@ -34,8 +34,8 @@ export class WebhookDedup {
 
   constructor() {
     this.loadFromDisk()
-    this.flushTimer = setInterval(() => this.flushToDisk(), FLUSH_INTERVAL_MS)
-    if (this.flushTimer.unref) this.flushTimer.unref()
+    this.flushTimer = setInterval(() => { this.flushToDisk(); }, FLUSH_INTERVAL_MS)
+    this.flushTimer.unref()
   }
 
   /**
@@ -45,7 +45,7 @@ export class WebhookDedup {
   isDuplicate(deliveryId: string, idempotencyKey: string): boolean {
     this.evictExpired()
 
-    if (deliveryId && this.byDeliveryId.has(deliveryId)) return true
+    if (this.byDeliveryId.has(deliveryId)) return true
     if (this.byIdempotencyKey.has(idempotencyKey)) return true
 
     return false
@@ -81,12 +81,14 @@ export class WebhookDedup {
   private enforceMaxEntries(): void {
     // If over limit, evict oldest from both maps
     while (this.byIdempotencyKey.size > MAX_ENTRIES) {
-      const oldestKey = this.byIdempotencyKey.keys().next().value!
-      this.byIdempotencyKey.delete(oldestKey)
+      const oldest = this.byIdempotencyKey.keys().next()
+      if (oldest.done) break
+      this.byIdempotencyKey.delete(oldest.value)
     }
     while (this.byDeliveryId.size > MAX_ENTRIES) {
-      const oldestKey = this.byDeliveryId.keys().next().value!
-      this.byDeliveryId.delete(oldestKey)
+      const oldest = this.byDeliveryId.keys().next()
+      if (oldest.done) break
+      this.byDeliveryId.delete(oldest.value)
     }
   }
 

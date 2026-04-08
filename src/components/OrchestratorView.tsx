@@ -56,7 +56,7 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.ok) {
-        const data = await res.json()
+        const data = (await res.json()) as { stats: DashboardStats }
         setStats(data.stats)
       }
     } catch {
@@ -93,7 +93,7 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
   useEffect(() => {
     if (status !== 'active' || !token) return
     const interval = setInterval(() => void refreshStats(), 30000)
-    return () => clearInterval(interval)
+    return () => { clearInterval(interval); }
   }, [status, token, refreshStats])
 
   if (status === 'loading') {

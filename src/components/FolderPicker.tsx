@@ -46,7 +46,7 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
       }
     }
     document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    return () => { document.removeEventListener('mousedown', handleClick); }
   }, [browserOpen])
 
   async function save() {
@@ -120,7 +120,7 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
         />
         <button
           type="button"
-          onClick={() => browserOpen ? setBrowserOpen(false) : void browse(path || undefined)}
+          onClick={() => { if (browserOpen) { setBrowserOpen(false) } else { void browse(path || undefined) } }}
           disabled={!token || browseLoading}
           className="flex items-center gap-1 rounded border border-neutral-9 bg-neutral-10 px-2.5 py-2 text-[13px] text-neutral-4 hover:border-neutral-7 hover:text-neutral-3 disabled:opacity-50"
           title="Browse folders"
@@ -164,7 +164,7 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
             <span className="flex-1 truncate font-mono text-[12px] text-neutral-4">{browsePath}</span>
             <button
               type="button"
-              onClick={() => setBrowserOpen(false)}
+              onClick={() => { setBrowserOpen(false); }}
               className="rounded p-0.5 text-neutral-5 hover:bg-neutral-8 hover:text-neutral-3"
             >
               <IconX size={14} />
@@ -180,7 +180,7 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
                 <button
                   key={dir}
                   type="button"
-                  onClick={() => selectDir(dir)}
+                  onClick={() => { selectDir(dir); }}
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-neutral-3 hover:bg-neutral-8"
                 >
                   <IconFolder size={14} className="shrink-0 text-neutral-5" />

@@ -155,9 +155,9 @@ function parseHunk(lines: string[], startIdx: number): HunkParseResult | null {
   if (!hunkMatch) return null
 
   const oldStart = parseInt(hunkMatch[1], 10)
-  const oldLines = hunkMatch[2] !== undefined ? parseInt(hunkMatch[2], 10) : 1
+  const oldLines = hunkMatch[2] ? parseInt(hunkMatch[2], 10) : 1
   const newStart = parseInt(hunkMatch[3], 10)
-  const newLines = hunkMatch[4] !== undefined ? parseInt(hunkMatch[4], 10) : 1
+  const newLines = hunkMatch[4] ? parseInt(hunkMatch[4], 10) : 1
 
   const diffLines: DiffLine[] = []
   let additions = 0

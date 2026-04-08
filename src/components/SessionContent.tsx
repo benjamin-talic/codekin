@@ -155,7 +155,7 @@ export function SessionContent({
 
       {/* Input bar */}
       <InputBar
-        key={activeSessionId ?? 'no-session'}
+        key={activeSessionId}
         ref={inputBarRef}
         onSendInput={onSendInput}
         isWaiting={!!activePrompt}

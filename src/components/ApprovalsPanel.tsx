@@ -97,8 +97,8 @@ export function ApprovalsPanel({ token, workingDir, visible }: Props) {
         </div>
         <ApprovalsContent
           approvals={approvals}
-          onRemove={handleRemove}
-          onRevokeMultiple={handleRevokeMultiple}
+          onRemove={(opts) => { void handleRemove(opts) }}
+          onRevokeMultiple={(items) => { void handleRevokeMultiple(items) }}
         />
       </div>
     </div>
@@ -132,7 +132,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
   )
 
   const filteredPatterns = useMemo(
-    () => [...(approvals.patterns ?? [])].sort(),
+    () => [...approvals.patterns].sort(),
     [approvals.patterns],
   )
 
@@ -159,7 +159,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
                 const items: Array<{ tool?: string; command?: string; pattern?: string }> = [
                   ...approvals.tools.map(t => ({ tool: t })),
                   ...approvals.commands.map(c => ({ command: c })),
-                  ...(approvals.patterns ?? []).map(p => ({ pattern: p })),
+                  ...approvals.patterns.map(p => ({ pattern: p })),
                 ]
                 if (confirm(`Revoke all ${totalCount} approval rules?`)) {
                   onRevokeMultiple(items)
@@ -279,7 +279,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
 /* ── Helpers ────────────────────────────────────────────────────── */
 
 function groupCommandsByPrefix(commands: string[]): Record<string, string[]> {
-  const groups: Record<string, string[]> = {}
+  const groups: Partial<Record<string, string[]>> = {}
   for (const cmd of commands) {
     const prefix = cmd.split(/\s+/)[0] || 'other'
     if (!groups[prefix]) groups[prefix] = []
@@ -287,7 +287,7 @@ function groupCommandsByPrefix(commands: string[]): Record<string, string[]> {
   }
   const sorted: Record<string, string[]> = {}
   for (const key of Object.keys(groups).sort()) {
-    sorted[key] = groups[key].sort()
+    sorted[key] = groups[key]?.sort() ?? []
   }
   return sorted
 }

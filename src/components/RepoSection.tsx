@@ -211,7 +211,7 @@ export function RepoSection({
           </button>
         )}
         <button
-          onClick={() => setApprovalsOpen(!approvalsOpen)}
+          onClick={() => { setApprovalsOpen(!approvalsOpen); }}
           className={`flex-shrink-0 rounded p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
             approvalsOpen ? 'text-primary-5 opacity-100!' : 'text-neutral-5 hover:text-neutral-2'
           }`}
@@ -220,7 +220,7 @@ export function RepoSection({
           <IconShieldCheck size={16} stroke={2} />
         </button>
         <button
-          onClick={() => setArchiveOpen(!archiveOpen)}
+          onClick={() => { setArchiveOpen(!archiveOpen); }}
           className={`flex-shrink-0 rounded p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
             archiveOpen ? 'text-primary-5 opacity-100!' : 'text-neutral-5 hover:text-neutral-2'
           }`}
@@ -241,7 +241,7 @@ export function RepoSection({
         <div className="px-2 pb-1">
           {node.sessions.map(s => {
             const isActiveSession = s.id === activeSessionId
-            const isTentative = (tentativeQueues[s.id]?.length ?? 0) > 0
+            const isTentative = s.id in tentativeQueues && tentativeQueues[s.id].length > 0
             const [dotColor, dotTitle] = isTentative
               ? ['bg-accent-6 animate-pulse', 'Queued']
               : waitingSessions[s.id]
@@ -271,13 +271,13 @@ export function RepoSection({
                   <input
                     autoFocus
                     value={editValue}
-                    onChange={e => setEditValue(e.target.value)}
+                    onChange={e => { setEditValue(e.target.value); }}
                     onBlur={commitRename}
                     onKeyDown={e => {
                       if (e.key === 'Enter') commitRename()
                       if (e.key === 'Escape') setEditingSessionId(null)
                     }}
-                    onClick={e => e.stopPropagation()}
+                    onClick={e => { e.stopPropagation(); }}
                     className="flex-1 min-w-0 bg-neutral-10 border border-neutral-7 rounded px-1 py-0 text-[15px] text-neutral-1 outline-none focus:border-primary-6"
                   />
                 ) : (
@@ -309,14 +309,14 @@ export function RepoSection({
           {onNewSession && (
             <div className={`pl-10 flex gap-1 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover/repo:opacity-100'}`}>
               <button
-                onClick={() => onNewSession('claude')}
+                onClick={() => { onNewSession('claude'); }}
                 className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[13px] text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50 transition-colors"
               >
                 <IconPlus size={12} stroke={2} className="flex-shrink-0" />
                 <span>Claude</span>
               </button>
               <button
-                onClick={() => onNewSession('opencode')}
+                onClick={() => { onNewSession('opencode'); }}
                 className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[13px] text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50 transition-colors"
               >
                 <IconPlus size={12} stroke={2} className="flex-shrink-0" />
@@ -357,7 +357,7 @@ export function RepoSection({
                   {visibleArchived.map(s => (
                     <button
                       key={s.id}
-                      onClick={() => onViewArchivedSession(s.id)}
+                      onClick={() => { onViewArchivedSession(s.id); }}
                       className="group w-full flex items-baseline gap-2 pl-12 pr-2 py-0.5 text-left text-[15px] text-neutral-4 hover:bg-neutral-6/50 hover:text-neutral-2 transition-colors"
                     >
                       <IconArchive size={12} className="flex-shrink-0 self-center opacity-40" />
@@ -367,7 +367,7 @@ export function RepoSection({
                   ))}
                   {hasMore && !archiveExpanded && (
                     <button
-                      onClick={() => setArchiveExpanded(true)}
+                      onClick={() => { setArchiveExpanded(true); }}
                       className="w-full pl-12 pr-2 py-0.5 text-left text-[13px] text-neutral-5 hover:text-neutral-2 transition-colors"
                     >
                       Show all {archivedSessions.length} archived...
@@ -375,7 +375,7 @@ export function RepoSection({
                   )}
                   {archiveExpanded && hasMore && (
                     <button
-                      onClick={() => setArchiveExpanded(false)}
+                      onClick={() => { setArchiveExpanded(false); }}
                       className="w-full pl-12 pr-2 py-0.5 text-left text-[13px] text-neutral-5 hover:text-neutral-2 transition-colors"
                     >
                       Show less

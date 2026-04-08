@@ -74,7 +74,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
         className="w-[480px] max-h-[90vh] overflow-y-auto rounded-xl border border-neutral-7 bg-neutral-11 p-6 shadow-2xl"
-        onClick={e => e.stopPropagation()}
+        onClick={e => { e.stopPropagation(); }}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
@@ -91,7 +91,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={(e) => { void handleSubmit(e) }} className="space-y-5">
           {/* Workflow kind */}
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -103,7 +103,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
                 <button
                   key={k.value}
                   type="button"
-                  onClick={() => setForm(f => ({ ...f, kind: k.value }))}
+                  onClick={() => { setForm(f => ({ ...f, kind: k.value })); }}
                   className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
                     form.kind === k.value
                       ? 'border-accent-6 bg-accent-9/30 ring-1 ring-accent-6/30'
@@ -134,7 +134,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
               <TimePicker
                 hour={form.cronHour}
                 minute={form.cronMinute}
-                onChange={(h, m) => setForm(f => ({ ...f, cronHour: h, cronMinute: m }))}
+                onChange={(h, m) => { setForm(f => ({ ...f, cronHour: h, cronMinute: m })); }}
                 className="mb-3"
               />
               <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
@@ -143,7 +143,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
                   <button
                     key={p.dow}
                     type="button"
-                    onClick={() => setForm(f => ({ ...f, cronDow: p.dow }))}
+                    onClick={() => { setForm(f => ({ ...f, cronDow: p.dow })); }}
                     className={btnClass(form.cronDow === p.dow)}
                   >
                     {p.label}
@@ -155,7 +155,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
                   <button
                     key={p.dow}
                     type="button"
-                    onClick={() => setForm(f => ({ ...f, cronDow: biweekly ? `biweekly-${p.dow}` : p.dow }))}
+                    onClick={() => { setForm(f => ({ ...f, cronDow: biweekly ? `biweekly-${p.dow}` : p.dow })); }}
                     className={btnClass(baseDow === p.dow)}
                   >
                     {p.label}
@@ -164,10 +164,10 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
               </div>
               {isDay && (
                 <div className="flex gap-1.5 mt-2">
-                  <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: baseDow }))} className={btnClass(!biweekly)}>
+                  <button type="button" onClick={() => { setForm(f => ({ ...f, cronDow: baseDow })); }} className={btnClass(!biweekly)}>
                     Every week
                   </button>
-                  <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: `biweekly-${baseDow}` }))} className={btnClass(biweekly)}>
+                  <button type="button" onClick={() => { setForm(f => ({ ...f, cronDow: `biweekly-${baseDow}` })); }} className={btnClass(biweekly)}>
                     Every 2 weeks
                   </button>
                 </div>
@@ -186,7 +186,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
                 <button
                   key={m.value}
                   type="button"
-                  onClick={() => setForm(f => ({ ...f, model: m.value }))}
+                  onClick={() => { setForm(f => ({ ...f, model: m.value })); }}
                   className={btnClass(form.model === m.value)}
                 >
                   {m.label}
@@ -202,7 +202,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
             </label>
             <textarea
               value={form.customPrompt}
-              onChange={e => setForm(f => ({ ...f, customPrompt: e.target.value }))}
+              onChange={e => { setForm(f => ({ ...f, customPrompt: e.target.value })); }}
               rows={3}
               placeholder="e.g. Focus on the auth module and payment flows"
               className="w-full rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 placeholder-neutral-5 focus:border-accent-6 focus:outline-none resize-none"

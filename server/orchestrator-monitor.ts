@@ -66,10 +66,10 @@ export class OrchestratorMonitor {
     console.log('[orchestrator-monitor] Starting proactive monitor (poll every 15m)')
 
     // Initial scan to populate seen reports
-    void this.initialScan()
+    this.initialScan()
 
     this.pollTimer = setInterval(() => {
-      void this.poll()
+      this.poll()
     }, POLL_INTERVAL_MS)
 
     // Run aging cycle daily (check every 6 hours)
@@ -136,7 +136,7 @@ export class OrchestratorMonitor {
   }
 
   /** Initial scan — populate the set of already-seen reports. */
-  private async initialScan(): Promise<void> {
+  private initialScan(): void {
     const repoPaths = this.discoverRepoPaths()
     for (const repoPath of repoPaths) {
       const reports = scanRepoReports(repoPath)
@@ -148,7 +148,7 @@ export class OrchestratorMonitor {
   }
 
   /** Periodic poll — check for new reports and idle repos. */
-  private async poll(): Promise<void> {
+  private poll(): void {
     const repoPaths = this.discoverRepoPaths()
 
     // Check for new reports

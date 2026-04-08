@@ -98,8 +98,8 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
     setLoading(true)
     getArchivedSession(token, initialViewId)
       .then(setViewing)
-      .catch(err => console.error('Failed to load archived session:', err))
-      .finally(() => setLoading(false))
+      .catch((err: unknown) => { console.error('Failed to load archived session:', err); })
+      .finally(() => { setLoading(false); })
   }, [visible, initialViewId, token])
 
   const handleView = useCallback(async (id: string) => {
@@ -221,7 +221,7 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
             min={1}
             max={365}
             value={retentionDays}
-            onChange={e => handleRetentionChange(Number(e.target.value))}
+            onChange={e => { void handleRetentionChange(Number(e.target.value)) }}
             className="w-10 text-[13px] text-neutral-2 bg-neutral-8 border border-neutral-7 rounded px-1 py-0.5 text-center"
           />
           <span className="text-[12px] text-neutral-5">d</span>
@@ -238,7 +238,7 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
           {sessions.map(s => (
             <button
               key={s.id}
-              onClick={() => handleView(s.id)}
+              onClick={() => { void handleView(s.id) }}
               className="group flex items-center gap-2 px-3 py-1 text-left transition-colors text-neutral-3 hover:bg-neutral-8/50 hover:text-neutral-1"
             >
               {s.source === 'workflow' ? (
@@ -256,7 +256,7 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
                 <IconLoader2 size={14} className="shrink-0 text-neutral-5 animate-spin" />
               ) : (
                 <span
-                  onClick={e => handleDelete(s.id, e)}
+                  onClick={e => { void handleDelete(s.id, e) }}
                   className="cursor-pointer text-transparent hover:text-error-5 group-hover:text-neutral-5 flex-shrink-0"
                 >
                   <IconTrash size={14} />

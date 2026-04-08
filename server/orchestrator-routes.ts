@@ -146,13 +146,13 @@ export function createOrchestratorRouter(
   router.post('/api/orchestrator/children', async (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model, allowedTools } = req.body
+    const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model, allowedTools } = req.body as Record<string, unknown>
     if (!repo || !task || !branchName) {
       return res.status(400).json({ error: 'Missing required fields: repo, task, branchName' })
     }
 
     // Validate branchName to prevent prompt injection
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$/.test(branchName)) {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$/.test(branchName as string)) {
       return res.status(400).json({ error: 'Invalid branchName: only alphanumeric, /, _, ., and - are allowed' })
     }
 
@@ -164,7 +164,7 @@ export function createOrchestratorRouter(
     }
 
     // Validate repo path: must resolve under REPOS_ROOT and be an existing directory
-    const resolvedRepo = resolve(repo)
+    const resolvedRepo = resolve(repo as string)
     if (!resolvedRepo.startsWith(REPOS_ROOT + '/') && resolvedRepo !== REPOS_ROOT) {
       return res.status(400).json({ error: 'Invalid repo path: must be under configured repos root' })
     }
@@ -174,13 +174,13 @@ export function createOrchestratorRouter(
 
     try {
       const child = await children.spawn({
-        repo,
-        task,
-        branchName,
-        completionPolicy: completionPolicy ?? 'pr',
-        deployAfter: deployAfter ?? false,
-        useWorktree: useWorktree ?? true,
-        model,
+        repo: repo as string,
+        task: task as string,
+        branchName: branchName as string,
+        completionPolicy: (completionPolicy ?? 'pr') as 'pr' | 'merge' | 'commit-only',
+        deployAfter: (deployAfter ?? false) as boolean,
+        useWorktree: (useWorktree ?? true) as boolean,
+        model: model as string | undefined,
         allowedTools,
       })
       res.json({ child })
@@ -227,22 +227,22 @@ export function createOrchestratorRouter(
   router.post('/api/orchestrator/memory', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { id, memoryType, scope, title, content, sourceRef, confidence, expiresAt, isPinned, tags } = req.body
+    const { id, memoryType, scope, title, content, sourceRef, confidence, expiresAt, isPinned, tags } = req.body as Record<string, unknown>
     if (!memoryType || !content) {
       return res.status(400).json({ error: 'Missing required fields: memoryType, content' })
     }
 
     const itemId = memory.upsert({
-      id,
-      memoryType,
-      scope: scope ?? null,
-      title: title ?? null,
-      content,
-      sourceRef: sourceRef ?? null,
-      confidence: confidence ?? 0.8,
-      expiresAt: expiresAt ?? null,
-      isPinned: isPinned ?? false,
-      tags: tags ?? [],
+      id: id as string | undefined,
+      memoryType: memoryType as import('./orchestrator-memory.js').MemoryType,
+      scope: (scope ?? null) as string | null,
+      title: (title ?? null) as string | null,
+      content: content as string,
+      sourceRef: (sourceRef ?? null) as string | null,
+      confidence: (confidence ?? 0.8) as number,
+      expiresAt: (expiresAt ?? null) as string | null,
+      isPinned: (isPinned ?? false) as boolean,
+      tags: (tags ?? []) as string[],
     })
 
     res.json({ id: itemId })
@@ -271,7 +271,7 @@ export function createOrchestratorRouter(
   router.get('/api/orchestrator/trust/level', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { action, category, severity, repo } = req.query as Record<string, string>
+    const { action, category, severity, repo } = req.query as Record<string, string | undefined>
     if (!action || !category) {
       return res.status(400).json({ error: 'Provide ?action=X&category=Y' })
     }
@@ -284,12 +284,12 @@ export function createOrchestratorRouter(
   router.post('/api/orchestrator/trust/approve', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { action, category, repo } = req.body
+    const { action, category, repo } = req.body as Record<string, unknown>
     if (!action || !category) {
       return res.status(400).json({ error: 'Missing required fields: action, category' })
     }
 
-    const record = memory.recordApproval(action, category, repo ?? null)
+    const record = memory.recordApproval(action as string, category as string, (repo ?? null) as string | null)
     res.json({ record })
   })
 
@@ -297,12 +297,12 @@ export function createOrchestratorRouter(
   router.post('/api/orchestrator/trust/reject', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { action, category, repo } = req.body
+    const { action, category, repo } = req.body as Record<string, unknown>
     if (!action || !category) {
       return res.status(400).json({ error: 'Missing required fields: action, category' })
     }
 
-    const record = memory.recordRejection(action, category, repo ?? null)
+    const record = memory.recordRejection(action as string, category as string, (repo ?? null) as string | null)
     res.json({ record })
   })
 
@@ -310,12 +310,12 @@ export function createOrchestratorRouter(
   router.post('/api/orchestrator/trust/pin', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { action, category, repo, level } = req.body
+    const { action, category, repo, level } = req.body as Record<string, unknown>
     if (!action || !category || !level) {
       return res.status(400).json({ error: 'Missing required fields: action, category, level' })
     }
 
-    memory.pinTrust(action, category, repo ?? null, level)
+    memory.pinTrust(action as string, category as string, (repo ?? null) as string | null, level as import('./orchestrator-memory.js').TrustLevel)
     res.json({ ok: true })
   })
 
@@ -349,8 +349,8 @@ export function createOrchestratorRouter(
     const monitor = monitorRef?.current
     if (!monitor) return res.json({ ok: true })
 
-    const { ids } = req.body
-    if (Array.isArray(ids)) monitor.markDelivered(ids)
+    const { ids } = req.body as Record<string, unknown>
+    if (Array.isArray(ids)) monitor.markDelivered(ids as string[])
     res.json({ ok: true })
   })
 
@@ -389,13 +389,13 @@ export function createOrchestratorRouter(
   router.post('/api/orchestrator/memory/extract', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { userMessage, assistantResponse, repo, sourceRef } = req.body
+    const { userMessage, assistantResponse, repo, sourceRef } = req.body as Record<string, unknown>
     if (!userMessage || !assistantResponse) {
       return res.status(400).json({ error: 'Missing required fields: userMessage, assistantResponse' })
     }
 
-    const candidates = extractMemoryCandidates(userMessage, assistantResponse, repo ?? null)
-    const results = candidates.map(c => smartUpsert(memory, c, sourceRef ?? null))
+    const candidates = extractMemoryCandidates(userMessage as string, assistantResponse as string, (repo ?? null) as string | null)
+    const results = candidates.map(c => smartUpsert(memory, c, (sourceRef ?? null) as string | null))
 
     res.json({ candidates: candidates.length, results })
   })
@@ -416,17 +416,17 @@ export function createOrchestratorRouter(
   router.post('/api/orchestrator/findings/outcome', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { findingId, repo, category, severity, action, reason, sessionId, outcome } = req.body
+    const { findingId, repo, category, severity, action, reason, sessionId, outcome } = req.body as Record<string, unknown>
     if (!findingId || !repo || !category || !action) {
       return res.status(400).json({ error: 'Missing required fields' })
     }
 
     const id = recordFindingOutcome(memory, {
-      findingId, repo, category,
-      severity: severity ?? 'medium',
-      action, reason: reason ?? '',
-      sessionId: sessionId ?? null,
-      outcome: outcome ?? null,
+      findingId: findingId as string, repo: repo as string, category: category as string,
+      severity: (severity ?? 'medium') as string,
+      action: action as string, reason: (reason ?? '') as string,
+      sessionId: (sessionId ?? null) as string | null,
+      outcome: (outcome ?? null) as string | null,
       timestamp: new Date().toISOString(),
     } as FindingOutcome)
 
@@ -437,7 +437,7 @@ export function createOrchestratorRouter(
   router.get('/api/orchestrator/findings/recommend', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { category, severity, repo } = req.query as Record<string, string>
+    const { category, severity, repo } = req.query as Record<string, string | undefined>
     if (!category) return res.status(400).json({ error: 'Provide ?category=X' })
 
     const recommendation = getTriageRecommendation(memory, category, severity ?? 'medium', repo ?? null)
@@ -462,12 +462,12 @@ export function createOrchestratorRouter(
   router.post('/api/orchestrator/skills', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { domain, signal, level } = req.body
+    const { domain, signal, level } = req.body as Record<string, unknown>
     if (!domain || !signal || !level) {
       return res.status(400).json({ error: 'Missing required fields: domain, signal, level' })
     }
 
-    const updated = updateSkillLevel(domain, signal, level)
+    const updated = updateSkillLevel(domain as string, signal as string, level as 'beginner' | 'intermediate' | 'advanced' | 'expert')
     res.json({ skill: updated, guidanceStyle: getGuidanceStyle() })
   })
 
@@ -479,16 +479,16 @@ export function createOrchestratorRouter(
   router.post('/api/orchestrator/decisions', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { decision, rationale, repo, relatedFinding, expectedOutcome } = req.body
+    const { decision, rationale, repo, relatedFinding, expectedOutcome } = req.body as Record<string, unknown>
     if (!decision || !rationale) {
       return res.status(400).json({ error: 'Missing required fields: decision, rationale' })
     }
 
     const id = recordDecision(memory, {
-      decision, rationale,
-      repo: repo ?? null,
-      relatedFinding: relatedFinding ?? null,
-      expectedOutcome: expectedOutcome ?? '',
+      decision: decision as string, rationale: rationale as string,
+      repo: (repo ?? null) as string | null,
+      relatedFinding: (relatedFinding ?? null) as string | null,
+      expectedOutcome: (expectedOutcome ?? '') as string,
     })
     res.json({ id })
   })
@@ -497,10 +497,10 @@ export function createOrchestratorRouter(
   router.post('/api/orchestrator/decisions/:id/assess', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { actualOutcome } = req.body
+    const { actualOutcome } = req.body as Record<string, unknown>
     if (!actualOutcome) return res.status(400).json({ error: 'Missing required field: actualOutcome' })
 
-    const updated = assessDecisionOutcome(memory, req.params.id, actualOutcome)
+    const updated = assessDecisionOutcome(memory, req.params.id, actualOutcome as string)
     res.json({ updated })
   })
 
@@ -527,7 +527,7 @@ export function createOrchestratorRouter(
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const sessionId = req.params.id
-    const { requestId, value } = req.body
+    const { requestId, value } = req.body as Record<string, unknown>
     if (!value) {
       return res.status(400).json({ error: 'Missing required field: value (e.g. "allow", "deny", or answer text)' })
     }
@@ -537,7 +537,7 @@ export function createOrchestratorRouter(
 
     // Verify there's actually a pending prompt (optionally for the specific requestId)
     const hasPending = requestId
-      ? (session.pendingToolApprovals.has(requestId) || session.pendingControlRequests.has(requestId))
+      ? (session.pendingToolApprovals.has(requestId as string) || session.pendingControlRequests.has(requestId as string))
       : (session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0)
 
     if (!hasPending) {
@@ -548,8 +548,8 @@ export function createOrchestratorRouter(
     let promptToolName = 'unknown'
     let promptType: 'permission' | 'question' = 'permission'
     if (requestId) {
-      const toolApproval = session.pendingToolApprovals.get(requestId)
-      const controlReq = session.pendingControlRequests.get(requestId)
+      const toolApproval = session.pendingToolApprovals.get(requestId as string)
+      const controlReq = session.pendingControlRequests.get(requestId as string)
       if (toolApproval) {
         promptToolName = toolApproval.toolName
         promptType = toolApproval.toolName === 'AskUserQuestion' ? 'question' : 'permission'
@@ -559,7 +559,7 @@ export function createOrchestratorRouter(
       }
     }
 
-    sessions.sendPromptResponse(sessionId, value, requestId)
+    sessions.sendPromptResponse(sessionId, value as string, requestId as string | undefined)
 
     // Broadcast a notification to the orchestrator channel so users can see
     // what the orchestrator approved/denied/answered.
@@ -568,7 +568,7 @@ export function createOrchestratorRouter(
     if (orchestratorSession && orchestratorSession.clients.size > 0) {
       const actionLabel = promptType === 'question'
         ? `answered question from ${promptToolName}`
-        : `responded "${value}" to ${promptToolName}`
+        : `responded "${typeof value === 'string' ? value : JSON.stringify(value)}" to ${promptToolName}`
       const notifMsg = {
         type: 'system_message' as const,
         subtype: 'info' as const,
@@ -597,8 +597,8 @@ export function createOrchestratorRouter(
   router.delete('/api/orchestrator/sessions/cleanup', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const automatedSources = new Set(['workflow', 'webhook', 'stepflow', 'agent'])
-    const toDelete = sessions.listAll().filter((s) => automatedSources.has(s.source ?? ''))
+    const automatedSources = new Set<string>(['workflow', 'webhook', 'stepflow', 'agent'])
+    const toDelete = sessions.listAll().filter((s) => automatedSources.has(s.source))
 
     let deleted = 0
     for (const s of toDelete) {

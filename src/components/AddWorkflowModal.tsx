@@ -168,7 +168,7 @@ function StepKind({
   for (const k of kinds) {
     const cat = kindCategory(k.kind)
     if (!grouped.has(cat)) grouped.set(cat, [])
-    grouped.get(cat)!.push(k)
+    grouped.get(cat)?.push(k)
   }
 
   return (
@@ -556,7 +556,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
           ) : (
             <button
               type="button"
-              onClick={handleSubmit}
+              onClick={() => { void handleSubmit() }}
               disabled={saving}
               className="flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50 transition-colors"
             >

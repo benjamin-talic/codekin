@@ -73,7 +73,7 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
           body: JSON.stringify({ owner: repo.owner, name: repo.name }),
         })
         if (!res.ok) {
-          const data = await res.json()
+          const data = (await res.json()) as { error?: string }
           throw new Error(data.error || 'Clone failed')
         }
         repo.cloned = true
@@ -91,7 +91,7 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
   return (
     <div ref={containerRef} className="relative h-full flex items-center">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => { setOpen(!open); }}
         className={`app-new-session-btn rounded p-1.5 transition ${open ? 'bg-neutral-6 text-neutral-1' : 'text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1'}`}
         title="New session"
       >
@@ -107,7 +107,7 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
           <div className="px-2 pb-2">
             <RepoList
               groups={groups}
-              onSelect={handleSelect}
+              onSelect={(repo) => { void handleSelect(repo) }}
               cloningId={cloning}
               maxHeight="240px"
               autoFocus

@@ -72,8 +72,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     })
 
-    // Auto-kill webhook sessions after Claude completes its turn so they don't
+    // Auto-kill PR review sessions after Claude completes its turn so they don't
     // sit idle waiting for more input and consume memory indefinitely.
+    // Only applies to pull_request events — workflow_run CI triage sessions may
+    // be multi-turn (using tools) and must complete naturally via onSessionExit.
     sessions.onSessionResult((sessionId, isError) => {
       if (isError) return
 
@@ -81,6 +83,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         e => e.sessionId === sessionId && (e.status === 'session_created' || e.status === 'processing'),
       )
       if (!event) return
+      if (event.event !== 'pull_request') return
 
       this.updateEventStatus(event.id, 'completed')
       console.log(`[webhook] Session ${sessionId} completed review, scheduling cleanup`)
@@ -120,17 +123,17 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
    * Main entry point: handle an incoming GitHub webhook request.
    * Returns the response to send back to GitHub.
    */
-  async handleWebhook(
+  handleWebhook(
     rawBody: Buffer,
     headers: {
       event: string
       delivery: string
       signature: string
     },
-  ): Promise<{
+  ): {
     statusCode: number
     body: Record<string, unknown>
-  }> {
+  } {
     const eventId = headers.delivery || randomUUID()
 
     // --- Enabled check ---
@@ -168,9 +171,9 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     // --- Event type dispatch ---
     switch (headers.event) {
       case 'workflow_run':
-        return this.handleWorkflowRunEvent(payload as WorkflowRunPayload, eventId, headers)
+        return this.handleWorkflowRunEvent(payload as Partial<WorkflowRunPayload>, eventId, headers)
       case 'pull_request':
-        return this.handlePullRequestEvent(payload as PullRequestPayload, eventId, headers)
+        return this.handlePullRequestEvent(payload as Partial<PullRequestPayload>, eventId)
       default:
         return {
           statusCode: 200,
@@ -183,15 +186,16 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   // workflow_run handling (existing logic, extracted into its own method)
   // ---------------------------------------------------------------------------
 
-  private async handleWorkflowRunEvent(
-    payload: WorkflowRunPayload,
+  private handleWorkflowRunEvent(
+    rawPayload: Partial<WorkflowRunPayload>,
     eventId: string,
     headers: { event: string; delivery: string; signature: string },
-  ): Promise<{ statusCode: number; body: Record<string, unknown> }> {
-    const wr = payload.workflow_run
-    if (!wr) {
+  ): { statusCode: number; body: Record<string, unknown> } {
+    const wr = rawPayload.workflow_run
+    if (!wr || !rawPayload.action || !rawPayload.repository) {
       return { statusCode: 400, body: { error: 'Missing workflow_run in payload' } }
     }
+    const payload = rawPayload as WorkflowRunPayload
 
     if (payload.action !== 'completed' || wr.conclusion !== 'failure') {
       return {
@@ -220,12 +224,14 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     }
 
     // --- Deduplication ---
+    // After the action/conclusion filter above, wr.conclusion is narrowed to 'failure'
+    const conclusion = wr.conclusion as string
     const idempotencyKey = computeIdempotencyKey(
       payload.repository.full_name,
       headers.event,
       wr.id,
       payload.action,
-      wr.conclusion ?? '',
+      conclusion,
       wr.run_attempt,
     )
 
@@ -241,7 +247,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         workflow: wr.name,
         runId: wr.id,
         runAttempt: wr.run_attempt,
-        conclusion: wr.conclusion ?? 'unknown',
+        conclusion,
         status: 'duplicate',
       })
       return {
@@ -251,7 +257,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     }
 
     // --- Session cap check ---
-    if (this.isAtSessionCap(eventId)) {
+    if (this.isAtSessionCap()) {
       this.recordEvent({
         id: eventId,
         idempotencyKey,
@@ -263,7 +269,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         workflow: wr.name,
         runId: wr.id,
         runAttempt: wr.run_attempt,
-        conclusion: wr.conclusion ?? 'unknown',
+        conclusion,
         status: 'error',
         error: `Max concurrent webhook sessions reached (${this.config.maxConcurrentSessions})`,
       })
@@ -286,7 +292,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       workflow: wr.name,
       runId: wr.id,
       runAttempt: wr.run_attempt,
-      conclusion: wr.conclusion ?? 'unknown',
+      conclusion,
       status: 'processing',
       sessionId,
     }
@@ -294,7 +300,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     this.dedup.recordProcessed(eventId, idempotencyKey)
 
     // Process asynchronously — don't block the 202 response
-    this.processWebhookAsync(payload, webhookEvent, sessionId).catch(err => {
+    this.processWebhookAsync(payload, webhookEvent, sessionId).catch((err: unknown) => {
       console.error('[webhook] Async processing error:', err)
       this.updateEventStatus(eventId, 'error', String(err))
     })
@@ -309,15 +315,15 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   // pull_request handling (new)
   // ---------------------------------------------------------------------------
 
-  private async handlePullRequestEvent(
-    payload: PullRequestPayload,
+  private handlePullRequestEvent(
+    rawPayload: Partial<PullRequestPayload>,
     eventId: string,
-    _headers: { event: string; delivery: string; signature: string },
-  ): Promise<{ statusCode: number; body: Record<string, unknown> }> {
-    const pr = payload.pull_request
-    if (!pr) {
+  ): { statusCode: number; body: Record<string, unknown> } {
+    const pr = rawPayload.pull_request
+    if (!pr || !rawPayload.action || !rawPayload.repository || !rawPayload.sender) {
       return { statusCode: 400, body: { error: 'Missing pull_request in payload' } }
     }
+    const payload = rawPayload as PullRequestPayload
 
     // --- Closed/merged handling (cleanup, no review) ---
     if (payload.action === 'closed') {
@@ -400,7 +406,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     this.supersedePrSessions(payload.repository.full_name, pr.number)
 
     // --- Session cap check ---
-    if (this.isAtSessionCap(eventId)) {
+    if (this.isAtSessionCap()) {
       this.recordEvent({
         id: eventId,
         idempotencyKey,
@@ -451,7 +457,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     this.dedup.recordProcessed(eventId, idempotencyKey)
 
     // Process asynchronously — don't block the 202 response
-    this.processPullRequestAsync(payload, webhookEvent, sessionId).catch(err => {
+    this.processPullRequestAsync(payload, webhookEvent, sessionId).catch((err: unknown) => {
       console.error('[webhook] PR async processing error:', err)
       // Don't overwrite 'superseded' status if a newer event already took over
       if (this.getEvent(eventId)?.status !== 'superseded') {
@@ -535,7 +541,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       console.error(`[webhook] Failed to create workspace for PR ${repo}#${pr.number}:`, err)
       // Don't overwrite 'superseded' status if a newer event already took over
       if (this.getEvent(event.id)?.status !== 'superseded') {
-        this.updateEventStatus(event.id, 'error', `Workspace creation failed: ${err}`)
+        this.updateEventStatus(event.id, 'error', `Workspace creation failed: ${String(err)}`)
       }
       return
     }
@@ -676,7 +682,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   /**
    * Check if the webhook session concurrency cap has been reached.
    */
-  private isAtSessionCap(_eventId: string): boolean {
+  private isAtSessionCap(): boolean {
     const activeWebhookSessions = this.sessions.list().filter(s => s.source === 'webhook' && s.active).length
     const processingEvents = this.countByStatus('processing')
     const effectiveConcurrency = activeWebhookSessions + processingEvents
@@ -746,7 +752,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       )
     } catch (err) {
       console.error(`[webhook] Failed to create workspace for ${repo}:`, err)
-      this.updateEventStatus(event.id, 'error', `Workspace creation failed: ${err}`)
+      this.updateEventStatus(event.id, 'error', `Workspace creation failed: ${String(err)}`)
       return
     }
 

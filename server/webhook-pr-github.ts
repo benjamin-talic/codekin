@@ -102,13 +102,6 @@ export async function fetchPrFiles(repo: string, prNumber: number): Promise<stri
 }
 
 /**
- * Fetch commit messages for a pull request.
- *
- * @param repo     - GitHub repo in `owner/name` format.
- * @param prNumber - Pull request number.
- * @returns Formatted commit list, or empty string on error.
- */
-/**
  * Fetch existing review comments (inline code comments) for a pull request.
  *
  * @param repo     - GitHub repo in `owner/name` format.
@@ -213,6 +206,13 @@ export async function fetchExistingReviewComment(repo: string, prNumber: number)
   }
 }
 
+/**
+ * Fetch commit messages for a pull request.
+ *
+ * @param repo     - GitHub repo in `owner/name` format.
+ * @param prNumber - Pull request number.
+ * @returns Formatted commit list, or empty string on error.
+ */
 export async function fetchPrCommits(repo: string, prNumber: number): Promise<string> {
   try {
     const raw = await ghRunner([

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'

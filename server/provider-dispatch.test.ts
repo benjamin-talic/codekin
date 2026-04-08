@@ -41,13 +41,13 @@ vi.mock('better-sqlite3', () => {
 const mockSpawn = vi.hoisted(() => vi.fn())
 const mockExecFile = vi.hoisted(() => vi.fn())
 const makeExecFileWrapper = vi.hoisted(() => (mockFn: ReturnType<typeof vi.fn>) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const wrapper = (...args: any[]) => mockFn(...args)
   const sym = Symbol.for('nodejs.util.promisify.custom')
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   ;(wrapper as any)[sym] = (...args: any[]) => {
     return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       mockFn(...args, (err: Error | null, stdout: string, stderr: string) => {
         if (err) reject(err)
         else resolve({ stdout, stderr })
@@ -61,7 +61,7 @@ vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>()
   return {
     ...actual,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     spawn: (...args: any[]) => mockSpawn(...args),
     execFile: makeExecFileWrapper(mockExecFile),
   }
@@ -70,7 +70,7 @@ vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>()
   return {
     ...actual,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     spawn: (...args: any[]) => mockSpawn(...args),
     execFile: makeExecFileWrapper(mockExecFile),
   }
@@ -140,7 +140,7 @@ describe('Provider dispatch', () => {
         claudeSessionId: null,
       })
 
-      const persistence = new SessionPersistence(sessions as Parameters<typeof SessionPersistence.prototype['persistToDisk']>[0] extends void ? never : typeof sessions)
+      new SessionPersistence(sessions as Parameters<typeof SessionPersistence.prototype['persistToDisk']>[0] extends void ? never : typeof sessions)
       // The persistence object writes to disk — we check the serialized shape
       const serialized = Array.from(sessions.values()).map((s) => ({
         id: s.id,

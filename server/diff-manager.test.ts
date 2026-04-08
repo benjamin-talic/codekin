@@ -1,5 +1,5 @@
 /** Tests for DiffManager — verifies git env cleaning, file status parsing, diff retrieval, and discard operations; mocks child_process, fs, and diff-parser to avoid real disk and git side-effects. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // ---------------------------------------------------------------------------

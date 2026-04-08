@@ -27,7 +27,7 @@ export default function TimePicker({ hour, minute, onChange, step = 15, classNam
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    return () => { document.removeEventListener('mousedown', handler); }
   }, [open])
 
   // Scroll selected items into view when opening
@@ -48,7 +48,7 @@ export default function TimePicker({ hour, minute, onChange, step = 15, classNam
       {/* Display button */}
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => { setOpen(o => !o); }}
         className="flex items-center gap-2 rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] font-mono text-neutral-1 focus:border-accent-6 focus:outline-none w-40 cursor-pointer hover:border-neutral-5 transition-colors"
       >
         <span className="flex-1 text-left">{pad(hour)}:{pad(minute)}</span>

@@ -52,14 +52,14 @@ export class CommitEventHandler {
 
   constructor() {
     // Periodically prune expired dedup entries
-    this.cleanupTimer = setInterval(() => this.pruneExpired(), DEDUP_CLEANUP_INTERVAL_MS)
+    this.cleanupTimer = setInterval(() => { this.pruneExpired(); }, DEDUP_CLEANUP_INTERVAL_MS)
   }
 
   /**
    * Process a commit event through the filter chain.
    * Returns accepted=true if a workflow run was dispatched.
    */
-  async handle(event: CommitEvent): Promise<CommitEventResult> {
+  handle(event: CommitEvent): CommitEventResult {
     // Layer 1: Branch filter
     if (event.branch === 'codekin/reports') {
       return { accepted: false, reason: 'Rejected: reports branch' }
@@ -100,7 +100,7 @@ export class CommitEventHandler {
 
     // All filters passed — dispatch the workflow
     try {
-      const run = await engine.startRun('commit-review', {
+      const run = engine.startRun('commit-review', {
         repoPath: event.repoPath,
         repoName: repoConfig.name,
         commitHash: event.commitHash,

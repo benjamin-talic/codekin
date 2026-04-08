@@ -327,7 +327,7 @@ export class WorkflowEngine extends EventEmitter {
   // -------------------------------------------------------------------------
 
   /** Create and immediately start executing a workflow run. */
-  async startRun(kind: string, input: Record<string, unknown> = {}): Promise<WorkflowRun> {
+  startRun(kind: string, input: Record<string, unknown> = {}): WorkflowRun {
     const definition = this.workflows.get(kind)
     if (!definition) throw new Error(`Unknown workflow kind: ${kind}`)
 
@@ -361,7 +361,7 @@ export class WorkflowEngine extends EventEmitter {
     this.emitEvent('run_queued', run)
 
     // Execute asynchronously
-    this.executeRun(run, definition).catch(err => {
+    this.executeRun(run, definition).catch((err: unknown) => {
       console.error(`[workflow] Unhandled error in run ${run.id}:`, err)
     })
 
@@ -507,8 +507,8 @@ export class WorkflowEngine extends EventEmitter {
         runId: s.run_id,
         key: s.key,
         status: s.status as StepStatus,
-        input: s.input ? JSON.parse(s.input) : null,
-        output: s.output ? JSON.parse(s.output) : null,
+        input: s.input ? JSON.parse(s.input) as Record<string, unknown> : null,
+        output: s.output ? JSON.parse(s.output) as Record<string, unknown> : null,
         error: s.error,
         startedAt: s.started_at,
         completedAt: s.completed_at,
@@ -518,8 +518,8 @@ export class WorkflowEngine extends EventEmitter {
       id: row.id,
       kind: row.kind,
       status: row.status as RunStatus,
-      input: JSON.parse(row.input),
-      output: row.output ? JSON.parse(row.output) : null,
+      input: JSON.parse(row.input) as Record<string, unknown>,
+      output: row.output ? JSON.parse(row.output) as Record<string, unknown> : null,
       error: row.error,
       createdAt: row.created_at,
       startedAt: row.started_at,
@@ -544,8 +544,8 @@ export class WorkflowEngine extends EventEmitter {
       id: row.id,
       kind: row.kind,
       status: row.status as RunStatus,
-      input: JSON.parse(row.input),
-      output: row.output ? JSON.parse(row.output) : null,
+      input: JSON.parse(row.input) as Record<string, unknown>,
+      output: row.output ? JSON.parse(row.output) as Record<string, unknown> : null,
       error: row.error,
       createdAt: row.created_at,
       startedAt: row.started_at,
@@ -589,7 +589,7 @@ export class WorkflowEngine extends EventEmitter {
       id: row.id as string,
       kind: row.kind as string,
       cronExpression: row.cron_expression as string,
-      input: JSON.parse(row.input as string),
+      input: JSON.parse(row.input as string) as Record<string, unknown>,
       enabled: !!(row.enabled as number),
       lastRunAt: row.last_run_at as string | null,
       nextRunAt: row.next_run_at as string | null,
@@ -604,7 +604,7 @@ export class WorkflowEngine extends EventEmitter {
       id: row.id as string,
       kind: row.kind as string,
       cronExpression: row.cron_expression as string,
-      input: JSON.parse(row.input as string),
+      input: JSON.parse(row.input as string) as Record<string, unknown>,
       enabled: !!(row.enabled as number),
       lastRunAt: row.last_run_at as string | null,
       nextRunAt: row.next_run_at as string | null,
@@ -612,7 +612,7 @@ export class WorkflowEngine extends EventEmitter {
   }
 
   /** Trigger a schedule immediately, creating a new run. */
-  async triggerSchedule(id: string): Promise<WorkflowRun> {
+  triggerSchedule(id: string): WorkflowRun {
     const schedule = this.getSchedule(id)
     if (!schedule) throw new Error(`Schedule not found: ${id}`)
     return this.startRun(schedule.kind, schedule.input)
@@ -628,7 +628,7 @@ export class WorkflowEngine extends EventEmitter {
       const schedules = this.listSchedules().filter(s => s.enabled && s.nextRunAt)
 
       for (const schedule of schedules) {
-        if (new Date(schedule.nextRunAt!) <= now) {
+        if (schedule.nextRunAt && new Date(schedule.nextRunAt) <= now) {
           console.log(`[workflow] Cron triggered: ${schedule.id} (${schedule.kind})`)
 
           // Update last/next run times
@@ -640,9 +640,11 @@ export class WorkflowEngine extends EventEmitter {
           const runInput = schedule.lastRunAt
             ? { ...schedule.input, sinceTimestamp: schedule.lastRunAt }
             : schedule.input
-          this.startRun(schedule.kind, runInput).catch(err => {
+          try {
+            this.startRun(schedule.kind, runInput)
+          } catch (err) {
             console.error(`[workflow] Cron trigger failed for ${schedule.id}:`, err)
-          })
+          }
         }
       }
     }
@@ -671,7 +673,7 @@ export class WorkflowEngine extends EventEmitter {
    * died mid-execution and the AbortController / step callbacks are gone, so there
    * is no safe way to resume; failing fast is cleaner than leaving them stuck.
    */
-  async resumeInterrupted() {
+  resumeInterrupted(): void {
     const interrupted = this.db.prepare(`SELECT id FROM workflow_runs WHERE status = 'running'`).all() as { id: string }[]
     if (interrupted.length === 0) return
 

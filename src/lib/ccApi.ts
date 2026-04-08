@@ -95,7 +95,7 @@ export async function verifyToken(token: string): Promise<boolean> {
     body: JSON.stringify({ token }),
   })
   if (!res.ok) return false
-  const data = await res.json()
+  const data = (await res.json()) as { valid?: boolean }
   return data.valid === true
 }
 
@@ -109,7 +109,10 @@ export async function fetchOpenCodeModels(token: string, workingDir?: string): P
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) return { models: [], defaults: {} }
-  return res.json()
+  return res.json() as Promise<{
+    models: Array<{ id: string; name: string; providerID: string; providerName: string }>
+    defaults: Record<string, string>
+  }>
 }
 
 /** Fetch all sessions from the server. */
@@ -118,7 +121,7 @@ export async function listSessions(token: string): Promise<Session[]> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to list sessions: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { sessions?: Session[] }
   return data.sessions ?? []
 }
 
@@ -134,7 +137,7 @@ export async function createSession(
     body: JSON.stringify({ name, workingDir }),
   })
   if (!res.ok) throw new Error(`Failed to create session: ${res.status}`)
-  return res.json()
+  return res.json() as Promise<{ sessionId: string; session: Session }>
 }
 
 /** Rename a session. */
@@ -162,7 +165,7 @@ export async function getOrchestratorStatus(token: string): Promise<{ sessionId:
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get orchestrator status: ${res.status}`)
-  return res.json()
+  return res.json() as Promise<{ sessionId: string | null; status: string; agentName?: string }>
 }
 
 /** Ensure the orchestrator session is running and return its session ID. */
@@ -172,7 +175,7 @@ export async function startOrchestrator(token: string): Promise<{ sessionId: str
     headers: headers(token),
   })
   if (!res.ok) throw new Error(`Failed to start orchestrator: ${res.status}`)
-  return res.json()
+  return res.json() as Promise<{ sessionId: string; status: string; agentName?: string }>
 }
 
 /** Get reports for a repo or since a date. */
@@ -184,7 +187,7 @@ export async function getOrchestratorReports(token: string, opts: { repo?: strin
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get reports: ${res.status}`)
-  return res.json()
+  return res.json() as Promise<{ reports: unknown[] }>
 }
 
 /** List Orchestrator child sessions. */
@@ -193,7 +196,7 @@ export async function getOrchestratorChildren(token: string): Promise<{ children
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get children: ${res.status}`)
-  return res.json()
+  return res.json() as Promise<{ children: unknown[] }>
 }
 
 /** Spawn an orchestrator child session. */
@@ -207,7 +210,7 @@ export async function spawnOrchestratorChild(token: string, request: {
     body: JSON.stringify(request),
   })
   if (!res.ok) throw new Error(`Failed to spawn child: ${res.status}`)
-  return res.json()
+  return res.json() as Promise<{ child: unknown }>
 }
 
 /** Query orchestrator memory. */
@@ -220,7 +223,7 @@ export async function queryOrchestratorMemory(token: string, opts?: { q?: string
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to query memory: ${res.status}`)
-  return res.json()
+  return res.json() as Promise<{ items: unknown[] }>
 }
 
 /** Get orchestrator trust records. */
@@ -229,7 +232,7 @@ export async function getOrchestratorTrust(token: string): Promise<{ records: un
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get trust records: ${res.status}`)
-  return res.json()
+  return res.json() as Promise<{ records: unknown[] }>
 }
 
 /** Get orchestrator dashboard stats. */
@@ -238,7 +241,7 @@ export async function getOrchestratorDashboard(token: string): Promise<{ stats: 
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get dashboard: ${res.status}`)
-  return res.json()
+  return res.json() as Promise<{ stats: Record<string, number> }>
 }
 
 /** Get orchestrator notifications. */
@@ -247,7 +250,7 @@ export async function getOrchestratorNotifications(token: string, all = false): 
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get notifications: ${res.status}`)
-  return res.json()
+  return res.json() as Promise<{ notifications: unknown[] }>
 }
 
 /** Upload a file via the server. Returns the server-side file path. */
@@ -260,7 +263,7 @@ export async function uploadFile(token: string, file: File): Promise<string> {
     body: form,
   })
   if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { path: string }
   return data.path
 }
 
@@ -293,7 +296,7 @@ export async function getRepoApprovals(token: string, workingDir: string): Promi
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to fetch approvals: ${res.status}`)
-  return res.json()
+  return res.json() as Promise<RepoApprovals>
 }
 
 /** Remove an auto-approval rule for a repo (by workingDir path). */
@@ -356,7 +359,7 @@ export async function listArchivedSessions(token: string, workingDir?: string): 
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to list archived sessions: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { sessions?: ArchivedSessionInfo[] }
   return data.sessions ?? []
 }
 
@@ -366,7 +369,7 @@ export async function getArchivedSession(token: string, sessionId: string): Prom
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get archived session: ${res.status}`)
-  return res.json()
+  return res.json() as Promise<ArchivedSessionFull>
 }
 
 /** Delete an archived session permanently. */
@@ -384,7 +387,7 @@ export async function getRetentionDays(token: string): Promise<number> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get retention settings: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { days: number }
   return data.days
 }
 
@@ -396,7 +399,7 @@ export async function setRetentionDays(token: string, days: number): Promise<num
     body: JSON.stringify({ days }),
   })
   if (!res.ok) throw new Error(`Failed to update retention settings: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { days: number }
   return data.days
 }
 
@@ -406,7 +409,7 @@ export async function getReposPath(token: string): Promise<string> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get repos path: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { path: string }
   return data.path
 }
 
@@ -418,10 +421,10 @@ export async function setReposPath(token: string, path: string): Promise<string>
     body: JSON.stringify({ path }),
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'Failed to save repos path' }))
+    const data = (await res.json().catch(() => ({ error: 'Failed to save repos path' }))) as { error?: string }
     throw new Error(data.error || `Failed to set repos path: ${res.status}`)
   }
-  const data = await res.json()
+  const data = (await res.json()) as { path: string }
   return data.path
 }
 
@@ -431,7 +434,7 @@ export async function getQueueMessages(token: string): Promise<boolean> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get queue messages setting: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { enabled: boolean }
   return data.enabled
 }
 
@@ -443,7 +446,7 @@ export async function setQueueMessages(token: string, enabled: boolean): Promise
     body: JSON.stringify({ enabled }),
   })
   if (!res.ok) throw new Error(`Failed to update queue messages setting: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { enabled: boolean }
   return data.enabled
 }
 
@@ -453,7 +456,7 @@ export async function getWorktreePrefix(token: string): Promise<string> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get worktree prefix: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { prefix: string }
   return data.prefix
 }
 
@@ -465,10 +468,10 @@ export async function setWorktreePrefix(token: string, prefix: string): Promise<
     body: JSON.stringify({ prefix }),
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'Failed to save worktree prefix' }))
+    const data = (await res.json().catch(() => ({ error: 'Failed to save worktree prefix' }))) as { error?: string }
     throw new Error(data.error || `Failed to set worktree prefix: ${res.status}`)
   }
-  const data = await res.json()
+  const data = (await res.json()) as { prefix: string }
   return data.prefix
 }
 
@@ -478,7 +481,7 @@ export async function getAgentName(token: string): Promise<string> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get agent name: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { name: string }
   return data.name
 }
 
@@ -490,10 +493,10 @@ export async function setAgentName(token: string, name: string): Promise<string>
     body: JSON.stringify({ name }),
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'Failed to save agent name' }))
+    const data = (await res.json().catch(() => ({ error: 'Failed to save agent name' }))) as { error?: string }
     throw new Error(data.error || `Failed to set agent name: ${res.status}`)
   }
-  const data = await res.json()
+  const data = (await res.json()) as { name: string }
   return data.name
 }
 
@@ -504,10 +507,10 @@ export async function browseDirs(token: string, path?: string): Promise<{ path: 
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'Failed to browse directory' }))
+    const data = (await res.json().catch(() => ({ error: 'Failed to browse directory' }))) as { error?: string }
     throw new Error(data.error || `Failed to browse: ${res.status}`)
   }
-  return res.json()
+  return res.json() as Promise<{ path: string; dirs: string[] }>
 }
 
 /** Webhook configuration (public subset, no secret). */
@@ -523,7 +526,7 @@ export async function getWebhookConfig(token: string): Promise<WebhookConfigInfo
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get webhook config: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { config: WebhookConfigInfo }
   return data.config
 }
 
@@ -533,7 +536,7 @@ export async function getWebhookEvents(token: string): Promise<Array<{ id: strin
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get webhook events: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { events?: Array<{ id: string; repo: string; branch: string; workflow: string; conclusion: string; status: string; receivedAt: string }> }
   return data.events ?? []
 }
 

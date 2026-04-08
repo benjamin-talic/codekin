@@ -1,6 +1,6 @@
 /** Tests for usePageVisibility — verifies document visibility state tracking with mocked document.visibilityState and visibilitychange events. */
 // @vitest-environment jsdom
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
 import { describe, it, expect, vi, afterEach } from 'vitest'

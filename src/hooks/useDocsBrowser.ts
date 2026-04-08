@@ -18,7 +18,7 @@ interface DocFile {
 /** Load starred doc paths from localStorage. Keyed by repo dir. */
 function loadStarred(): Record<string, string[]> {
   try {
-    return JSON.parse(localStorage.getItem(STARRED_KEY) || '{}')
+    return JSON.parse(localStorage.getItem(STARRED_KEY) || '{}') as Record<string, string[]>
   } catch {
     return {}
   }
@@ -44,7 +44,7 @@ interface UseDocsBrowserReturn {
   /** Toggle between raw and rendered view. */
   toggleRawMode: () => void
   /** Open a doc file by path — fetches content from the server. */
-  openFile: (repoWorkingDir: string, filePath: string, token: string) => void
+  openFile: (repoWorkingDir: string, filePath: string, token: string) => Promise<void>
   /** Close the doc viewer and reset state. */
   close: () => void
   /** The repo working dir that's currently being viewed. */
@@ -55,7 +55,7 @@ interface UseDocsBrowserReturn {
   pickerFiles: DocFile[]
   pickerLoading: boolean
   /** Open the file picker for a repo — fetches the file list. */
-  openPicker: (repoWorkingDir: string, token: string) => void
+  openPicker: (repoWorkingDir: string, token: string) => Promise<void>
   /** Close the file picker. */
   closePicker: () => void
   /** The repo working dir for the open picker. */
@@ -96,7 +96,7 @@ export function useDocsBrowser(): UseDocsBrowserReturn {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) throw new Error(`Failed to list docs: ${res.status}`)
-      const data = await res.json()
+      const data = (await res.json()) as { files?: DocFile[] }
       setPickerFiles(data.files ?? [])
     } catch {
       setPickerFiles([])
@@ -124,7 +124,7 @@ export function useDocsBrowser(): UseDocsBrowserReturn {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) throw new Error(`Failed to load file: ${res.status}`)
-      const data = await res.json()
+      const data = (await res.json()) as { content: string }
       setContent(data.content)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load file')

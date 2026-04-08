@@ -148,7 +148,7 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
           exitCode: code ?? 1,
           error,
         }
-        this.postCallback(event.callbackUrl, result, callbackSecret).catch(err => {
+        this.postCallback(event.callbackUrl, result, callbackSecret).catch((err: unknown) => {
           console.warn(`[stepflow] Callback POST failed for event ${event.id}:`, err)
         })
       }
@@ -180,7 +180,7 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
           status,
           exitCode: 0,
         }
-        this.postCallback(event.callbackUrl, result, callbackSecret).catch(err => {
+        this.postCallback(event.callbackUrl, result, callbackSecret).catch((err: unknown) => {
           console.warn(`[stepflow] Callback POST failed for event ${event.id}:`, err)
         })
       }
@@ -206,10 +206,10 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
    *                  exact bytes — do NOT re-serialize before passing in.
    * @param signature Value of the `X-Webhook-Signature` header.
    */
-  async handleWebhook(
+  handleWebhook(
     rawBody: Buffer,
     signature: string,
-  ): Promise<{ statusCode: number; body: Record<string, unknown> }> {
+  ): { statusCode: number; body: Record<string, unknown> } {
 
     // 1. Master switch
     if (!this.config.enabled) {
@@ -235,7 +235,7 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
       return { statusCode: 400, body: { error: 'Malformed JSON payload' } }
     }
 
-    if (!payload.event || !payload.webhookId) {
+    if (!payload.webhookId) {
       return { statusCode: 400, body: { error: 'Missing event or webhookId in payload' } }
     }
 
@@ -335,7 +335,7 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
     }
 
     // Fire-and-forget
-    this.processAsync(req, stepflowEvent, sessionId, event.runId, event.kind).catch(err => {
+    this.processAsync(req, stepflowEvent, sessionId, event.runId, event.kind).catch((err: unknown) => {
       console.error('[stepflow] Async processing error:', err)
       this.updateEventStatus(deliveryId, 'error', String(err))
     })
@@ -376,7 +376,7 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
       )
     } catch (err) {
       console.error(`[stepflow] Workspace creation failed for ${req.repo}:`, err)
-      this.updateEventStatus(event.id, 'error', `Workspace creation failed: ${err}`)
+      this.updateEventStatus(event.id, 'error', `Workspace creation failed: ${String(err)}`)
       // Clean up the orphaned callback secret
       this.sessionCallbackSecrets.delete(sessionId)
       return

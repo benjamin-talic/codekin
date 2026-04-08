@@ -16,7 +16,7 @@ import { join } from 'path'
 const writeLocks = new Map<string, Promise<void>>()
 
 /** Acquire a per-repo write lock. All sessions share one Node process. */
-function withLock(repoDir: string, fn: () => Promise<void>): Promise<void> {
+function withLock(repoDir: string, fn: () => void | Promise<void>): Promise<void> {
   const prev = writeLocks.get(repoDir) ?? Promise.resolve()
   const next = prev.then(fn, fn)
   writeLocks.set(repoDir, next)
@@ -53,7 +53,7 @@ export function readNativePermissions(repoDir: string): string[] {
 
 /** Add a native permission to `.claude/settings.local.json` (append-only, atomic write). */
 export async function addNativePermission(repoDir: string, permission: string): Promise<void> {
-  await withLock(repoDir, async () => {
+  await withLock(repoDir, () => {
     const filePath = settingsPath(repoDir)
     const dir = join(repoDir, '.claude')
 
@@ -84,7 +84,7 @@ export async function addNativePermission(repoDir: string, permission: string): 
 
 /** Remove a native permission from `.claude/settings.local.json`. */
 export async function removeNativePermission(repoDir: string, permission: string): Promise<void> {
-  await withLock(repoDir, async () => {
+  await withLock(repoDir, () => {
     const filePath = settingsPath(repoDir)
     if (!existsSync(filePath)) return
 

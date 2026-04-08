@@ -101,7 +101,7 @@ function PermissionModeDropdown({ currentMode, isOpen, menuRef, onToggle, onSele
             return (
               <button
                 key={m.id}
-                onClick={() => onSelect(m.id)}
+                onClick={() => { onSelect(m.id); }}
                 className={`w-full text-left px-3 py-2 hover:bg-neutral-7 transition-colors flex items-start gap-2.5 ${
                   m.dangerous ? 'hover:bg-error-9/20' : ''
                 }`}
@@ -152,7 +152,7 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
           {models.map(m => (
             <button
               key={m.id}
-              onClick={() => onChange(m.id)}
+              onClick={() => { onChange(m.id); }}
               className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-neutral-7 transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
             >
               {m.label}
@@ -277,9 +277,9 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   }, [isWaiting, isMobile])
 
   // Close dropdown menus on outside click
-  useOutsideClick(mobileMenuRef, mobileMenuOpen, useCallback(() => setMobileMenuOpen(false), []))
-  useOutsideClick(permMenuRef, permMenuOpen, useCallback(() => setPermMenuOpen(false), []))
-  useOutsideClick(modelMenuRef, modelMenuOpen, useCallback(() => setModelMenuOpen(false), []))
+  useOutsideClick(mobileMenuRef, mobileMenuOpen, useCallback(() => { setMobileMenuOpen(false); }, []))
+  useOutsideClick(permMenuRef, permMenuOpen, useCallback(() => { setPermMenuOpen(false); }, []))
+  useOutsideClick(modelMenuRef, modelMenuOpen, useCallback(() => { setModelMenuOpen(false); }, []))
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -397,7 +397,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     setPermMenuOpen(false)
   }, [onPermissionModeChange])
 
-  const hasSkills = !isOrchestrator && skillGroups && skillGroups.some(g => g.skills.length > 0)
+  const resolvedSkillGroups = skillGroups ?? []
+  const hasSkills = !isOrchestrator && resolvedSkillGroups.some(g => g.skills.length > 0)
   const hasSlashCommands = !isOrchestrator && slashCommands && slashCommands.length > 0
 
   return (
@@ -410,7 +411,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           commands={slashCommands}
           filter={slashFilter}
           onSelect={handleSlashSelect}
-          onClose={() => setSlashMenuOpen(false)}
+          onClose={() => { setSlashMenuOpen(false); }}
         />
       )}
 
@@ -432,7 +433,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
             >
               <span className="max-w-[150px] truncate">{file.name}</span>
               <button
-                onClick={() => onRemoveFile(i)}
+                onClick={() => { onRemoveFile(i); }}
                 className="flex-shrink-0 rounded p-0.5 text-neutral-4 hover:text-neutral-1"
               >
                 <IconX size={12} stroke={2} />
@@ -495,7 +496,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 </span>
               ) : showWorktreeToggle && onWorktreeChange ? (
                 <button
-                  onClick={() => onWorktreeChange(!useWorktree)}
+                  onClick={() => { onWorktreeChange(!useWorktree); }}
                   className={`flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors ${
                     useWorktree
                       ? 'text-primary-5 bg-primary-9/30 hover:bg-primary-9/50'
@@ -542,13 +543,13 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   </button>
                   {skillMenuOpen && (
                     <SkillMenu
-                      groups={skillGroups ?? []}
+                      groups={resolvedSkillGroups}
                       onSelectSkill={(command) => {
                         setValue(command + ' ')
                         setSkillMenuOpen(false)
                         setTimeout(() => textareaRef.current?.focus(), 0)
                       }}
-                      onClose={() => setSkillMenuOpen(false)}
+                      onClose={() => { setSkillMenuOpen(false); }}
                     />
                   )}
                 </div>
@@ -577,7 +578,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
             <div className="flex items-center gap-1.5">
               <div className="relative" ref={mobileMenuRef}>
                 <button
-                  onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                  onClick={() => { setMobileMenuOpen(!mobileMenuOpen); }}
                   disabled={disabled}
                   className="flex items-center justify-center rounded min-w-[34px] min-h-[34px] p-1.5 text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30"
                   title="More options"
@@ -656,7 +657,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                       setSkillMenuOpen(false)
                       setTimeout(() => textareaRef.current?.focus(), 0)
                     }}
-                    onClose={() => setSkillMenuOpen(false)}
+                    onClose={() => { setSkillMenuOpen(false); }}
                   />
                 )}
               </div>

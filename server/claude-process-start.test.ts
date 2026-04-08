@@ -18,7 +18,7 @@ vi.mock('child_process', () => ({
 
 import { ClaudeProcess } from './claude-process.js'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type CP = any
 
 function makeFakeProc() {

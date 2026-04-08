@@ -134,7 +134,7 @@ export class SessionManager {
       this.wirePlanManager(session)
     }
     // Start idle session reaper
-    this._idleReaperInterval = setInterval(() => this.reapIdleSessions(), IDLE_CHECK_INTERVAL_MS)
+    this._idleReaperInterval = setInterval(() => { this.reapIdleSessions(); }, IDLE_CHECK_INTERVAL_MS)
   }
 
   /**
@@ -300,13 +300,13 @@ export class SessionManager {
       // Clean up stale state from previous failed attempts:
       // 1. Prune orphaned worktree entries (directory gone but git still tracks it)
       await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, env, timeout: 5000 })
-        .catch((e: unknown) => console.warn(`[worktree] prune failed:`, e instanceof Error ? e.message : e))
+        .catch((e: unknown) => { console.warn(`[worktree] prune failed:`, e instanceof Error ? e.message : e); })
       // 2. Remove existing worktree directory if leftover from a partial failure
       await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot, env, timeout: 5000 })
-        .catch((e: unknown) => console.debug(`[worktree] remove prior worktree (expected if fresh):`, e instanceof Error ? e.message : e))
+        .catch((e: unknown) => { console.debug(`[worktree] remove prior worktree (expected if fresh):`, e instanceof Error ? e.message : e); })
       // 3. Delete the branch if it exists (leftover from a failed worktree add)
       await execFileAsync('git', ['branch', '-D', branchName], { cwd: repoRoot, env, timeout: 5000 })
-        .catch((e: unknown) => console.debug(`[worktree] branch cleanup (expected if fresh):`, e instanceof Error ? e.message : e))
+        .catch((e: unknown) => { console.debug(`[worktree] branch cleanup (expected if fresh):`, e instanceof Error ? e.message : e); })
 
       // Create the worktree with a new branch
       await execFileAsync('git', ['worktree', 'add', '-b', branchName, worktreePath], {
@@ -431,7 +431,7 @@ export class SessionManager {
 
         // Prune any stale worktree references
         await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, timeout: 5000 })
-          .catch((e: unknown) => console.warn(`[worktree] prune after cleanup failed:`, e instanceof Error ? e.message : e))
+          .catch((e: unknown) => { console.warn(`[worktree] prune after cleanup failed:`, e instanceof Error ? e.message : e); })
       } catch (err) {
         console.warn(`[worktree] Failed to clean up worktree ${worktreePath}:`, err instanceof Error ? err.message : err)
       }
@@ -700,7 +700,7 @@ export class SessionManager {
     // first user message or fall back to a short ID-based placeholder.
     let archiveName = session.name
     if (archiveName.startsWith('hub:')) {
-      const firstUserMsg = session._lastUserInput?.slice(0, 60)?.trim()
+      const firstUserMsg = session._lastUserInput?.slice(0, 60).trim()
       archiveName = firstUserMsg || `session-${session.id.slice(0, 8)}`
     }
     try {
@@ -753,7 +753,7 @@ export class SessionManager {
       CODEKIN_PORT: String(this._serverPort || PORT),
       CODEKIN_TOKEN: sessionToken,
       CODEKIN_AUTH_TOKEN: sessionToken,
-      CODEKIN_SESSION_TYPE: session.source || 'manual',
+      CODEKIN_SESSION_TYPE: session.source,
       ...(session.permissionMode === 'dangerouslySkipPermissions' ? { CODEKIN_SKIP_PERMISSIONS: '1' } : {}),
     }
     // Pass CLAUDE_PROJECT_DIR so hooks and CLAUDE.md resolve correctly
@@ -832,8 +832,8 @@ export class SessionManager {
         session.claudeProcess?.removeListener('exit', done)
         resolve()
       }, timeoutMs)
-      session.claudeProcess!.once('system_init', done)
-      session.claudeProcess!.once('exit', done) // fail-fast if process dies during init
+      session.claudeProcess?.once('system_init', done)
+      session.claudeProcess?.once('exit', done) // fail-fast if process dies during init
     })
   }
 
@@ -842,13 +842,13 @@ export class SessionManager {
    * Extracted from startClaude() to keep that method focused on process setup.
    */
   private wireClaudeEvents(cp: CodingProcess, session: Session, sessionId: string): void {
-    cp.on('system_init', (model) => this.onSystemInit(cp, session, model))
-    cp.on('text', (text) => this.onTextEvent(session, sessionId, text))
-    cp.on('thinking', (summary) => this.onThinkingEvent(session, summary))
-    cp.on('tool_output', (content, isError) => this.onToolOutputEvent(session, content, isError))
-    cp.on('image', (base64Data, mediaType) => this.onImageEvent(session, base64Data, mediaType))
-    cp.on('tool_active', (toolName, toolInput) => this.onToolActiveEvent(session, toolName, toolInput))
-    cp.on('tool_done', (toolName, summary) => this.onToolDoneEvent(session, toolName, summary))
+    cp.on('system_init', (model) => { this.onSystemInit(cp, session, model); })
+    cp.on('text', (text) => { this.onTextEvent(session, sessionId, text); })
+    cp.on('thinking', (summary) => { this.onThinkingEvent(session, summary); })
+    cp.on('tool_output', (content, isError) => { this.onToolOutputEvent(session, content, isError); })
+    cp.on('image', (base64Data, mediaType) => { this.onImageEvent(session, base64Data, mediaType); })
+    cp.on('tool_active', (toolName, toolInput) => { this.onToolActiveEvent(session, toolName, toolInput); })
+    cp.on('tool_done', (toolName, summary) => { this.onToolDoneEvent(session, toolName, summary); })
     cp.on('planning_mode', (active) => {
       // Route EnterPlanMode through PlanManager for UI state tracking.
       // ExitPlanMode (active=false) is ignored here — the PreToolUse hook
@@ -860,22 +860,16 @@ export class SessionManager {
       // ExitPlanMode stream event intentionally ignored — hook handles it.
     })
     cp.on('todo_update', (tasks) => { this.broadcastAndHistory(session, { type: 'todo_update', tasks }) })
-    cp.on('prompt', (...args) => this.onPromptEvent(session, ...args))
-    cp.on('control_request', (requestId, toolName, toolInput) => this.onControlRequestEvent(cp, session, sessionId, requestId, toolName, toolInput))
+    cp.on('prompt', (...args) => { this.onPromptEvent(session, ...args); })
+    cp.on('control_request', (requestId, toolName, toolInput) => { this.onControlRequestEvent(cp, session, sessionId, requestId, toolName, toolInput); })
     cp.on('result', (result, isError) => {
       session.planManager.onTurnEnd()
       this.handleClaudeResult(session, sessionId, result, isError)
     })
-    cp.on('error', (message) => this.broadcast(session, { type: 'error', message }))
+    cp.on('error', (message) => { this.broadcast(session, { type: 'error', message }); })
     cp.on('exit', (code, signal) => {
-      // Capture process diagnostics before removing listeners — these are
-      // ClaudeProcess-specific; OpenCodeProcess always returns false/true.
-      const sessionConflict = 'hasSessionConflict' in cp && typeof (cp as any).hasSessionConflict === 'function'
-        ? (cp as any).hasSessionConflict() as boolean
-        : false
-      const producedOutput = 'hadOutput' in cp && typeof (cp as any).hadOutput === 'function'
-        ? (cp as any).hadOutput() as boolean
-        : true
+      const sessionConflict = cp.hasSessionConflict()
+      const producedOutput = cp.hadOutput()
       cp.removeAllListeners()
       this.handleClaudeExit(session, sessionId, code, signal, sessionConflict, producedOutput)
     })
@@ -1124,7 +1118,7 @@ export class SessionManager {
         session._apiRetryTimer = undefined
         if (!session.claudeProcess?.isAlive() || session._stoppedByUser) return
         console.log(`[api-retry] resending message for session=${sessionId} attempt=${attempt}`)
-        session.claudeProcess.sendMessage(session._lastUserInput!)
+        session.claudeProcess.sendMessage(session._lastUserInput ?? '')
       }, delay)
       return true
     }
@@ -1505,14 +1499,14 @@ export class SessionManager {
     pending: { requestId: string; toolInput: Record<string, unknown> },
     value: string | string[],
   ): void {
-    const questions = pending.toolInput?.questions as Array<{ question: string }> | undefined
+    const questions = pending.toolInput.questions as Array<{ question: string }> | undefined
     const updatedInput: Record<string, unknown> = { ...pending.toolInput }
 
     let answers: Record<string, string> = {}
     if (typeof value === 'string') {
       // Try parsing as JSON answers map (multi-question flow)
       try {
-        const parsed = JSON.parse(value)
+        const parsed: unknown = JSON.parse(value)
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           answers = parsed as Record<string, string>
         } else if (Array.isArray(questions) && questions.length > 0) {
@@ -1530,7 +1524,7 @@ export class SessionManager {
     }
 
     updatedInput.answers = answers
-    session.claudeProcess!.sendControlResponse(pending.requestId, 'allow', updatedInput)
+    session.claudeProcess?.sendControlResponse(pending.requestId, 'allow', updatedInput)
   }
 
   /** Send a permission control response (allow/always_allow/approve_pattern/deny). */
@@ -1549,7 +1543,7 @@ export class SessionManager {
     }
 
     const behavior = isDeny ? 'deny' : 'allow'
-    session.claudeProcess!.sendControlResponse(pending.requestId, behavior)
+    session.claudeProcess?.sendControlResponse(pending.requestId, behavior)
   }
 
   /**
@@ -1813,7 +1807,7 @@ export class SessionManager {
         if (patternTool !== toolName) continue
         // For Bash, check command prefix
         if (toolName === 'Bash') {
-          const cmd = String(toolInput.command || '').trimStart()
+          const cmd = ((toolInput.command as string | undefined) ?? '').trimStart()
           if (cmd === prefix || cmd.startsWith(prefix + ' ')) return true
         }
       }
@@ -1825,15 +1819,15 @@ export class SessionManager {
   private summarizeToolPermission(toolName: string, toolInput: Record<string, unknown>): string {
     switch (toolName) {
       case 'Bash': {
-        const cmd = String(toolInput.command || '')
+        const cmd = (toolInput.command as string | undefined) ?? ''
         const firstLine = cmd.split('\n')[0]
         const display = firstLine.length < cmd.length ? `${firstLine}...` : cmd
         return `Allow Bash? \`$ ${display}\``
       }
       case 'Task':
-        return `Allow Task? ${String(toolInput.description || toolName)}`
+        return `Allow Task? ${(toolInput.description as string | undefined) ?? toolName}`
       case 'Read': {
-        const filePath = String(toolInput.file_path || '')
+        const filePath = (toolInput.file_path as string | undefined) ?? ''
         return `Allow Read? \`${filePath}\``
       }
       default:
@@ -2064,7 +2058,7 @@ export class SessionManager {
   addToHistory(session: Session, msg: WsServerMessage): void {
     if (msg.type === 'output') {
       const last = session.outputHistory[session.outputHistory.length - 1]
-      if (last?.type === 'output' && (last as { type: 'output'; data: string }).data.length < SessionManager.MAX_OUTPUT_CHUNK) {
+      if (session.outputHistory.length > 0 && last.type === 'output' && (last as { type: 'output'; data: string }).data.length < SessionManager.MAX_OUTPUT_CHUNK) {
         (last as { type: 'output'; data: string }).data += msg.data
         this.persistToDiskDebounced()
         return
@@ -2170,8 +2164,8 @@ export class SessionManager {
     for (const session of this.sessions.values()) {
       if (session.claudeProcess?.isAlive()) {
         exitPromises.push(new Promise<void>((resolve) => {
-          session.claudeProcess!.once('exit', () => resolve())
-          session.claudeProcess!.stop()
+          session.claudeProcess?.once('exit', () => { resolve(); })
+          session.claudeProcess?.stop()
         }))
       }
     }

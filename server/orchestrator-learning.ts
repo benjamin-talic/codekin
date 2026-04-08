@@ -508,7 +508,7 @@ const SKILL_PROFILE_FILE = join(ORCHESTRATOR_DIR, 'skill-profile.json')
 export function loadSkillProfile(): SkillLevel[] {
   if (!existsSync(SKILL_PROFILE_FILE)) return []
   try {
-    return JSON.parse(readFileSync(SKILL_PROFILE_FILE, 'utf-8'))
+    return JSON.parse(readFileSync(SKILL_PROFILE_FILE, 'utf-8')) as SkillLevel[]
   } catch {
     return []
   }

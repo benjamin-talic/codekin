@@ -34,7 +34,7 @@ export function DiffToolbar({
   const handleDiscardAll = () => {
     if (!confirmDiscard) {
       setConfirmDiscard(true)
-      setTimeout(() => setConfirmDiscard(false), 3000)
+      setTimeout(() => { setConfirmDiscard(false); }, 3000)
       return
     }
     onDiscardAll()
@@ -55,7 +55,7 @@ export function DiffToolbar({
         <div className="relative flex-1">
           <button
             className="flex items-center gap-1 text-xs text-neutral-2 bg-neutral-10 hover:bg-neutral-9 rounded px-2 py-1"
-            onClick={() => setScopeOpen(!scopeOpen)}
+            onClick={() => { setScopeOpen(!scopeOpen); }}
           >
             <span>{SCOPE_LABELS[scope]}</span>
             {summary.filesChanged > 0 && (
@@ -65,7 +65,7 @@ export function DiffToolbar({
           </button>
           {scopeOpen && (
             <>
-              <div className="fixed inset-0 z-10" onClick={() => setScopeOpen(false)} />
+              <div className="fixed inset-0 z-10" onClick={() => { setScopeOpen(false); }} />
               <div className="absolute top-full left-0 mt-1 bg-neutral-10 border border-neutral-8 rounded shadow-lg z-20 min-w-[160px]">
                 {(['all', 'staged', 'unstaged'] as DiffScope[]).map(s => (
                   <button

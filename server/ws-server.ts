@@ -107,7 +107,8 @@ function extractToken(req: express.Request): string | undefined {
   }
 
   // Check body (used by auth-verify and legacy callers)
-  if (req.body?.token) return req.body.token
+  const body = req.body as Record<string, unknown> | undefined
+  if (body?.token) return body.token as string
 
   return undefined
 }
@@ -133,7 +134,7 @@ let apiKeySet = apiKeyEnvSet
 if (claudeAvailable && !apiKeyEnvSet) {
   try {
     const authJson = execFileSync(CLAUDE_BINARY, ['auth', 'status'], { timeout: 5000 }).toString()
-    const auth = JSON.parse(authJson)
+    const auth = JSON.parse(authJson) as { loggedIn?: boolean; authMethod?: string }
     if (auth.loggedIn) {
       apiKeySet = true
       console.log(`Claude CLI authenticated via ${auth.authMethod || 'unknown method'}`)
@@ -221,13 +222,14 @@ app.post(
   '/api/webhooks/github',
   express.raw({ type: 'application/json', limit: '5mb' }),
   githubRateLimiter,
-  async (req, res) => {
+  (req, res) => {
     const rawBody = req.body as Buffer
     if (!Buffer.isBuffer(rawBody) || rawBody.length === 0) {
-      return res.status(400).json({ error: 'Empty or non-JSON body' })
+      res.status(400).json({ error: 'Empty or non-JSON body' })
+      return
     }
 
-    const result = await webhookHandler.handleWebhook(rawBody, {
+    const result = webhookHandler.handleWebhook(rawBody, {
       event: req.headers['x-github-event'] as string || '',
       delivery: req.headers['x-github-delivery'] as string || '',
       signature: req.headers['x-hub-signature-256'] as string || '',
@@ -248,14 +250,15 @@ app.post(
   '/api/webhooks/stepflow',
   express.raw({ type: 'application/json', limit: '1mb' }),
   stepflowRateLimiter,
-  async (req, res) => {
+  (req, res) => {
     const rawBody = req.body as Buffer
     if (!Buffer.isBuffer(rawBody) || rawBody.length === 0) {
-      return res.status(400).json({ error: 'Empty or non-JSON body' })
+      res.status(400).json({ error: 'Empty or non-JSON body' })
+      return
     }
 
     const signature = req.headers['x-webhook-signature'] as string || ''
-    const result = await stepflowHandler.handleWebhook(rawBody, signature)
+    const result = stepflowHandler.handleWebhook(rawBody, signature)
     res.status(result.statusCode).json(result.body)
   },
 )
@@ -334,7 +337,7 @@ app.use((_req, res) => {
 // Generic error handler — never leak stack traces
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  const status = (err as { status?: number })?.status ?? 500
+  const status = (err as { status?: number }).status ?? 500
   if (res.headersSent) return
   if (status === 404) {
     res.status(404).type('html').send(generate404Page())
@@ -394,7 +397,7 @@ function checkWsRateLimit(ip: string): boolean {
 
 wss.on('connection', (ws: WebSocket, req) => {
   // Rate-limit by IP before any processing
-  const ip = (TRUST_PROXY && (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) || req.socket.remoteAddress || 'unknown'
+  const ip = (TRUST_PROXY && (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()) || req.socket.remoteAddress || 'unknown'
   if (!checkWsRateLimit(ip)) {
     ws.close(4029, 'Too many connections')
     return
@@ -423,10 +426,10 @@ wss.on('connection', (ws: WebSocket, req) => {
   let msgCount = 0
   let msgWindowStart = Date.now()
 
-  ws.on('message', (raw) => {
+  ws.on('message', (raw: Buffer) => {
     let msg: WsClientMessage
     try {
-      msg = JSON.parse(raw.toString())
+      msg = JSON.parse(raw.toString()) as WsClientMessage
     } catch {
       return
     }
@@ -485,7 +488,7 @@ const heartbeat = setInterval(() => {
   })
 }, 30000)
 
-wss.on('close', () => clearInterval(heartbeat))
+wss.on('close', () => { clearInterval(heartbeat); })
 
 // ---------------------------------------------------------------------------
 // Start server and handle graceful shutdown
@@ -538,9 +541,11 @@ server.listen(port, '0.0.0.0', () => {
   try {
     const engine = initWorkflowEngine()
     loadMdWorkflows(engine, sessions)
-    engine.resumeInterrupted().catch(err => {
+    try {
+      engine.resumeInterrupted()
+    } catch (err) {
       console.error('[workflow] Failed to resume interrupted runs:', err)
-    })
+    }
 
     // Broadcast workflow events to all WebSocket clients
     engine.on('workflow_event', (event: WorkflowEvent) => {

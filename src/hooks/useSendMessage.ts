@@ -135,7 +135,8 @@ export function useSendMessage({
 
     // Tentative mode: hold message if another session for the same repo is processing,
     // or if this session already has queued messages (only when queue is enabled)
-    const isAlreadyTentative = (tentativeQueues[activeSessionId ?? '']?.length ?? 0) > 0
+    const sid = activeSessionId ?? ''
+    const isAlreadyTentative = sid in tentativeQueues && tentativeQueues[sid].length > 0
     const hasConflict = !!activeWorkingDir &&
       sessions.some(s => groupKey(s) === activeWorkingDir && s.isProcessing && s.id !== activeSessionId)
     if (queueEnabled && activeSessionId && (isAlreadyTentative || hasConflict)) {
@@ -150,7 +151,7 @@ export function useSendMessage({
           // Upload failed — queue text only so the message isn't lost
           addToQueue(activeSessionId, docsPrefix + expanded)
           setUploadStatus(`Upload failed: ${err instanceof Error ? err.message : 'unknown error'}`)
-          setTimeout(() => setUploadStatus(null), 3000)
+          setTimeout(() => { setUploadStatus(null); }, 3000)
         }
       } else {
         addToQueue(activeSessionId, docsPrefix + expanded)
@@ -171,7 +172,7 @@ export function useSendMessage({
       sendInput(message)
     } catch (err) {
       setUploadStatus(`Upload failed: ${err instanceof Error ? err.message : 'unknown error'}`)
-      setTimeout(() => setUploadStatus(null), 3000)
+      setTimeout(() => { setUploadStatus(null); }, 3000)
     }
   }, [token, activeSessionId, activeWorkingDir, sessions, tentativeQueues, addToQueue, pendingFiles, processSlashCommand, sendInput, docsContext.isOpen, docsContext.selectedFile, docsContext.repoWorkingDir, queueEnabled])
 
@@ -214,7 +215,7 @@ export function useSendMessage({
         void handleExecuteTentative(sessionId)
         setTimeout(() => {
           setUploadStatus('Session finished — starting queued session.')
-          setTimeout(() => setUploadStatus(null), 3000)
+          setTimeout(() => { setUploadStatus(null); }, 3000)
         }, 0)
       }
     }
@@ -232,7 +233,7 @@ export function useSendMessage({
       }))
     : []
 
-  const activeTentativeCount = activeSessionId ? (tentativeQueues[activeSessionId]?.length ?? 0) : 0
+  const activeTentativeCount = activeSessionId && activeSessionId in tentativeQueues ? tentativeQueues[activeSessionId].length : 0
 
   return {
     handleSend,

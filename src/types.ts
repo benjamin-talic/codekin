@@ -57,12 +57,6 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermiss
  */
 export type CodingProvider = 'claude' | 'opencode'
 
-/** Provider metadata for the UI selector. */
-export const PROVIDERS: { id: CodingProvider; label: string; description: string }[] = [
-  { id: 'claude', label: 'Claude Code', description: 'Anthropic Claude Code CLI' },
-  { id: 'opencode', label: 'OpenCode', description: 'OpenCode server (multi-provider)' },
-]
-
 /** Model option for UI selectors. */
 export interface ModelOption { id: string; label: string }
 

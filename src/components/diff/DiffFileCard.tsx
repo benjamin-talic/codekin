@@ -36,7 +36,7 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
   const handleDiscard = () => {
     if (!confirmDiscard) {
       setConfirmDiscard(true)
-      setTimeout(() => setConfirmDiscard(false), 3000)
+      setTimeout(() => { setConfirmDiscard(false); }, 3000)
       return
     }
     onDiscard(file.path, file.status)
@@ -53,7 +53,7 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
       {/* Card header */}
       <div
         className="flex items-center gap-2 px-3 py-2 bg-neutral-9 cursor-pointer select-none"
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => { setExpanded(!expanded); }}
       >
         {expanded
           ? <IconChevronDown size={14} className="text-neutral-5 shrink-0" />
@@ -74,7 +74,7 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
         )}
 
         {/* Action buttons */}
-        <div className="flex items-center gap-1 ml-1" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-1 ml-1" onClick={e => { e.stopPropagation(); }}>
           <button
             className="p-1 rounded hover:bg-neutral-8 text-neutral-4 hover:text-neutral-2"
             onClick={handleCopyPath}
@@ -120,7 +120,7 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
       {!expanded && isLarge && (
         <div
           className="border-t border-neutral-9 px-4 py-2 text-xs text-neutral-5 italic cursor-pointer hover:text-neutral-3"
-          onClick={() => setExpanded(true)}
+          onClick={() => { setExpanded(true); }}
         >
           Large diff ({totalChanges} lines) — click to expand
         </div>

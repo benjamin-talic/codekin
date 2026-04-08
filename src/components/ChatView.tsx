@@ -46,11 +46,11 @@ function parseApiError(text: string): { prefix: string; errorType: string; messa
   const jsonMatch = text.match(/^(.*?)\s*(\{.+\})\s*$/)
   if (!jsonMatch) return null
   try {
-    const parsed = JSON.parse(jsonMatch[2])
-    if (parsed?.error?.message) {
+    const parsed = JSON.parse(jsonMatch[2]) as { error?: { message?: string; type?: string }; request_id?: string }
+    if (parsed.error?.message) {
       return {
         prefix: jsonMatch[1].replace(/\s*$/, ''),
-        errorType: parsed.error.type || 'error',
+        errorType: parsed.error.type ?? 'error',
         message: parsed.error.message,
         requestId: parsed.request_id,
       }
@@ -130,7 +130,7 @@ function CodeCopyButton({ code }: { code: string }) {
   const handleCopy = useCallback(() => {
     void navigator.clipboard.writeText(code).then(() => {
       setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      setTimeout(() => { setCopied(false); }, 1500)
     })
   }, [code])
 
@@ -168,7 +168,7 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
           components={{
             code({ className, children, ...props }) {
               const match = /language-(\w+)/.exec(className || '')
-              const codeString = String(children).replace(/\n$/, '')
+              const codeString = String(children as string | string[]).replace(/\n$/, '')
               if (match) {
                 return (
                   <div className="group/codeblock relative">
@@ -263,7 +263,7 @@ function ToolOutputInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_
       <div className="whitespace-pre-wrap break-all">{displayContent}</div>
       {collapsible && (
         <button
-          onClick={() => setExpanded(!expanded)}
+          onClick={() => { setExpanded(!expanded); }}
           className="text-neutral-6 hover:text-neutral-3 transition-colors mt-0.5"
           style={{ fontSize: `${smallSize}px` }}
         >
@@ -295,7 +295,7 @@ function ToolActivity({ run, fontSize }: { run: ToolRun; fontSize: number }) {
   return (
     <div className="px-4 py-0.5">
       <button
-        onClick={() => setExpanded(!isOpen)}
+        onClick={() => { setExpanded(!isOpen); }}
         className="flex items-center gap-1.5 text-neutral-5 hover:text-neutral-3 transition-colors w-full text-left"
         style={{ fontSize: `${smallSize}px`, fontFamily: "'Inconsolata', monospace" }}
       >
@@ -341,7 +341,7 @@ function ImageInline({ msg }: { msg: ChatMessage & { type: 'image' } }) {
         src={src}
         alt="Tool output"
         className={`rounded-lg border border-neutral-8 cursor-pointer transition-all ${expanded ? 'max-w-full' : 'max-w-xs max-h-48 object-contain'}`}
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => { setExpanded(!expanded); }}
       />
     </div>
   )
@@ -412,7 +412,7 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
     const interval = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startRef.current) / 1000))
     }, 1000)
-    return () => clearInterval(interval)
+    return () => { clearInterval(interval); }
   }, [label])
 
   return (

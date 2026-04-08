@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { ClaudeProcess } from './claude-process.js'
 
 // Access private methods/fields for testing via any-cast
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type CP = any
 
 function makeCP(): CP {

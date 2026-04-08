@@ -60,7 +60,7 @@ export function SkillMenu({ groups, onSelectSkill, onClose }: Props) {
           {group.skills.map(skill => (
             <button
               key={skill.id}
-              onClick={() => onSelectSkill(skill.command)}
+              onClick={() => { onSelectSkill(skill.command); }}
               className="flex w-full flex-col px-3 py-1.5 text-left hover:bg-neutral-7 transition-colors"
             >
               <span className="text-[15px] font-medium text-accent-6">{skill.command}</span>

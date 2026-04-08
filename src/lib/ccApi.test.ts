@@ -306,12 +306,12 @@ describe('redirectToLogin', () => {
       set: hrefSetter,
       configurable: true,
     })
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     ;(globalThis as any).window = { location: loc }
   })
 
   afterEach(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     ;(globalThis as any).window = origWindow
   })
 
@@ -342,12 +342,12 @@ describe('authFetch / checkAuthResponse (indirect)', () => {
       set: vi.fn(),
       configurable: true,
     })
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     ;(globalThis as any).window = { location: loc }
   })
 
   afterEach(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     delete (globalThis as any).window
   })
 

@@ -40,7 +40,7 @@ export function SlashAutocomplete({ commands, filter, onSelect, onClose }: Props
       }
     }
     document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    return () => { document.removeEventListener('mousedown', handleClick); }
   }, [onClose])
 
   const handleSelect = useCallback((value: string) => {
@@ -83,7 +83,7 @@ export function SlashAutocomplete({ commands, filter, onSelect, onClose }: Props
               <Command.Item
                 key={cmd.command}
                 value={`${cmd.command.slice(1)} ${cmd.name}`}
-                onSelect={() => handleSelect(cmd.command)}
+                onSelect={() => { handleSelect(cmd.command); }}
                 className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[14px] text-neutral-3 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
               >
                 <span className={`font-mono text-[13px] ${iconClass}`}>/</span>
