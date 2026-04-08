@@ -8,6 +8,7 @@
 
 import type { WebSocket } from 'ws'
 import type { CodingProcess, CodingProvider } from './coding-process.js'
+export type { CodingProvider }
 import type { PlanManager } from './plan-manager.js'
 
 /**
@@ -176,7 +177,7 @@ export type ClaudeContentBlock =
  */
 export interface ClaudeStreamEvent {
   type: 'stream_event'
-  event: {
+  event?: {
     type: string
     delta?: {
       type: string

@@ -56,7 +56,7 @@ export abstract class WebhookHandlerBase<
         }
       }
     }, 60_000)
-    if (this._processingWatchdog.unref) this._processingWatchdog.unref()
+    this._processingWatchdog.unref()
   }
 
   // ---------------------------------------------------------------------------

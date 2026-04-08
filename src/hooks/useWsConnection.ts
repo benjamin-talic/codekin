@@ -95,7 +95,7 @@ export function useWsConnection({
 
     ws.onmessage = (event) => {
       let msg: WsServerMessage
-      try { msg = JSON.parse(event.data) } catch { return }
+      try { msg = JSON.parse(event.data as string) as WsServerMessage } catch { return }
 
       // Intercept health-check pong before forwarding
       if (msg.type === 'pong' && awaitingHealthPong.current) {
@@ -107,7 +107,7 @@ export function useWsConnection({
         onHealthPongRef.current?.(send)
       }
 
-      onMessageRef.current?.(msg)
+      onMessageRef.current(msg)
     }
 
     ws.onclose = (event) => {
@@ -199,7 +199,7 @@ export function useWsConnection({
       const valid = await checkAuthSession()
       if (!valid) redirectToLogin()
     }, AUTH_CHECK_INTERVAL_MS)
-    return () => clearInterval(id)
+    return () => { clearInterval(id); }
   }, [token])
 
   return { connState, send, disconnect, restoreSession, reconnect: connect }

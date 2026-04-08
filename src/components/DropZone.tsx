@@ -84,7 +84,7 @@ export function DropZone({ onUpload, disabled }: Props) {
       }
     }
     window.addEventListener('paste', handlePaste)
-    return () => window.removeEventListener('paste', handlePaste)
+    return () => { window.removeEventListener('paste', handlePaste); }
   }, [onUpload, disabled])
 
   if (!dragOver || disabled) return null

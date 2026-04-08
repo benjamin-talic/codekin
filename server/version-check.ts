@@ -33,7 +33,7 @@ const state: VersionState = {
 function getCurrentVersion(): string {
   if (!state.currentVersion) {
     const pkgPath = join(import.meta.dirname, '..', 'package.json')
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version: string }
     state.currentVersion = pkg.version
   }
   return state.currentVersion
@@ -54,7 +54,7 @@ function isNewer(a: string, b: string): boolean {
 async function fetchLatestVersion(): Promise<string | null> {
   try {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 5000)
+    const timeout = setTimeout(() => { controller.abort(); }, 5000)
     const res = await fetch(REGISTRY_URL, { signal: controller.signal })
     clearTimeout(timeout)
     if (!res.ok) return null

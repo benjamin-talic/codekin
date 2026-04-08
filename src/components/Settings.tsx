@@ -61,7 +61,7 @@ function CopyButton({ text }: { text: string }) {
   const handleCopy = useCallback(() => {
     void navigator.clipboard.writeText(text)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    setTimeout(() => { setCopied(false); }, 2000)
   }, [text])
 
   return (
@@ -115,7 +115,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
   const [eventsExpanded, setEventsExpanded] = useState(false)
 
   // Re-sync token input when settings change or modal reopens
-  useEffect(() => { setTokenInput(settings.token); setStatus('idle'); setSaveError(null) }, [settings.token, open]) // eslint-disable-line react-hooks/set-state-in-effect -- sync on reopen
+  useEffect(() => { setTokenInput(settings.token); setStatus('idle'); setSaveError(null) }, [settings.token, open])  
 
   // Fetch server-side settings when modal opens
   useEffect(() => {
@@ -175,10 +175,10 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                 onChange={e => { setTokenInput(e.target.value); setStatus('idle') }}
                 placeholder="Enter your auth token"
                 className="flex-1 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
-                onKeyDown={e => e.key === 'Enter' && handleVerify()}
+                onKeyDown={e => { if (e.key === 'Enter') void handleVerify() }}
               />
               <button
-                onClick={handleVerify}
+                onClick={() => { void handleVerify() }}
                 disabled={verifying || !tokenInput.trim()}
                 className="rounded bg-primary-8 px-3 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50"
               >
@@ -216,14 +216,14 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                     onBlur={e => {
                       const val = e.target.value.trim()
                       if (val && val !== agentName) {
-                        setAgentNameApi(settings.token, val).then(saved => onAgentNameChange?.(saved)).catch(() => setSaveError('Failed to save agent name'))
+                        setAgentNameApi(settings.token, val).then(saved => onAgentNameChange?.(saved)).catch(() => { setSaveError('Failed to save agent name'); })
                       }
                     }}
                     onKeyDown={e => {
                       if (e.key === 'Enter') {
                         const val = (e.target as HTMLInputElement).value.trim()
                         if (val) {
-                          setAgentNameApi(settings.token, val).then(saved => onAgentNameChange?.(saved)).catch(() => setSaveError('Failed to save agent name'))
+                          setAgentNameApi(settings.token, val).then(saved => onAgentNameChange?.(saved)).catch(() => { setSaveError('Failed to save agent name'); })
                         }
                       }
                     }}
@@ -244,7 +244,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                   <label className="mb-1.5 block text-[15px] text-neutral-4">Theme</label>
                   <div className="flex gap-2">
                     <button
-                      onClick={() => onUpdate({ theme: 'dark' })}
+                      onClick={() => { onUpdate({ theme: 'dark' }); }}
                       className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
                         settings.theme !== 'light'
                           ? 'bg-primary-8 text-neutral-1'
@@ -254,7 +254,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                       Dark
                     </button>
                     <button
-                      onClick={() => onUpdate({ theme: 'light' })}
+                      onClick={() => { onUpdate({ theme: 'light' }); }}
                       className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
                         settings.theme === 'light'
                           ? 'bg-primary-8 text-neutral-1'
@@ -283,7 +283,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                       onChange={e => {
                         const days = Math.max(1, Math.min(365, Number(e.target.value)))
                         setRetentionDays(days)
-                        setRetentionDaysApi(settings.token, days).catch(() => setSaveError('Failed to save retention setting'))
+                        setRetentionDaysApi(settings.token, days).catch(() => { setSaveError('Failed to save retention setting'); })
                       }}
                       className="w-20 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
                     />
@@ -304,7 +304,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                     onChange={e => {
                       const next = e.target.checked
                       setQueueMessages(next)
-                      setQueueMessagesApi(settings.token, next).catch(() => setSaveError('Failed to save queue messages setting'))
+                      setQueueMessagesApi(settings.token, next).catch(() => { setSaveError('Failed to save queue messages setting'); })
                     }}
                     className="h-4 w-4 rounded border-neutral-7 bg-neutral-10 text-primary-7 accent-primary-7 cursor-pointer"
                   />
@@ -358,7 +358,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                       onChange={e => {
                         const val = e.target.value
                         setWorktreePrefix(val)
-                        setWorktreePrefixApi(settings.token, val).catch(() => setSaveError('Failed to save worktree prefix'))
+                        setWorktreePrefixApi(settings.token, val).catch(() => { setSaveError('Failed to save worktree prefix'); })
                       }}
                       placeholder="wt/"
                       className="w-40 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
@@ -413,7 +413,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
             {/* Setup guide (collapsible) */}
             <button
-              onClick={() => setWebhookExpanded(!webhookExpanded)}
+              onClick={() => { setWebhookExpanded(!webhookExpanded); }}
               className="flex items-center gap-1.5 text-[13px] text-primary-6 hover:text-primary-5 mb-2 transition-colors"
             >
               {webhookExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
@@ -456,7 +456,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
             {webhookEvents.length > 0 && (
               <>
                 <button
-                  onClick={() => setEventsExpanded(!eventsExpanded)}
+                  onClick={() => { setEventsExpanded(!eventsExpanded); }}
                   className="flex items-center gap-1.5 text-[13px] text-primary-6 hover:text-primary-5 transition-colors"
                 >
                   {eventsExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}

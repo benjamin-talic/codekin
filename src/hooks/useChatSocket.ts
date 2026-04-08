@@ -172,7 +172,7 @@ export function useChatSocket({
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [currentModel, setCurrentModel] = useState<string | null>(() => localStorage.getItem('claude-model') ?? null)
   const [currentPermissionMode, setCurrentPermissionMode] = useState<PermissionMode>(() =>
-    (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
+    (localStorage.getItem('claude-permission-mode') as PermissionMode | null) ?? 'acceptEdits'
   )
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
   const promptState = usePromptState()
@@ -196,7 +196,7 @@ export function useChatSocket({
     pendingTextRef.current = ''
     setMessages(prev => {
       const last = prev[prev.length - 1]
-      if (last && last.type === 'assistant' && !last.complete) {
+      if (prev.length > 0 && last.type === 'assistant' && !last.complete) {
         const updated = [...prev]
         updated[updated.length - 1] = { ...last, text: last.text + text }
         return trimMessages(updated)
@@ -334,7 +334,7 @@ export function useChatSocket({
         let rebuilt: ChatMessage[] = []
         let restoredPlanMode = false
         let restoredTasks: TaskItem[] = []
-        if (msg.outputBuffer?.length) {
+        if (msg.outputBuffer.length) {
           rebuilt = rebuildFromHistory(msg.outputBuffer)
           for (const bufferedMsg of msg.outputBuffer) {
             if (bufferedMsg.type === 'planning_mode') {

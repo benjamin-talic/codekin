@@ -361,7 +361,7 @@ export class OrchestratorMemory {
       updatedAt: row.updated_at as string,
       expiresAt: row.expires_at as string | null,
       isPinned: (row.is_pinned as number) === 1,
-      tags: JSON.parse((row.tags as string) || '[]'),
+      tags: JSON.parse((row.tags as string) || '[]') as string[],
     }
   }
 

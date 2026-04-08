@@ -39,7 +39,7 @@ export function useRouter() {
       setRoute(parsePath(window.location.pathname))
     }
     window.addEventListener('popstate', onPopState)
-    return () => window.removeEventListener('popstate', onPopState)
+    return () => { window.removeEventListener('popstate', onPopState); }
   }, [])
 
   const navigate = useCallback((path: string, replace = false) => {

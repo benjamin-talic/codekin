@@ -32,7 +32,7 @@ export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = 
         ...g,
         repos: g.repos.filter(r =>
           r.name.toLowerCase().includes(search.toLowerCase()) ||
-          r.description?.toLowerCase().includes(search.toLowerCase())
+          r.description.toLowerCase().includes(search.toLowerCase())
         ),
       })).filter(g => g.repos.length > 0)
     : groups
@@ -49,7 +49,7 @@ export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = 
         ref={inputRef}
         type="text"
         value={search}
-        onChange={e => setSearch(e.target.value)}
+        onChange={e => { setSearch(e.target.value); }}
         placeholder="Search repos…"
         className="mb-2 w-full rounded-lg border border-neutral-7 bg-neutral-11/50 px-3 py-2 text-[15px] text-neutral-2 placeholder-neutral-5 focus:border-accent-6 focus:outline-none"
       />
@@ -69,7 +69,7 @@ export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = 
                   <button
                     key={repo.id}
                     type="button"
-                    onClick={() => onSelect(repo)}
+                    onClick={() => { onSelect(repo); }}
                     disabled={!!cloningId}
                     className={`group flex w-full items-start gap-3 border-b border-neutral-7/50 px-3 py-2.5 text-left transition last:border-b-0 ${
                       isSelected

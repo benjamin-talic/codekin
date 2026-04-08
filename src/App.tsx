@@ -109,12 +109,12 @@ export default function App() {
 
   /** Permission mode ref for session orchestration (read at session creation time). */
   const permissionModeRef = useRef<PermissionMode>(
-    (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
+    (localStorage.getItem('claude-permission-mode') as PermissionMode | null) ?? 'acceptEdits'
   )
 
   /** Provider ref for session orchestration (read at session creation time). */
   const providerRef = useRef<CodingProvider>(
-    (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
+    (localStorage.getItem('codekin-provider') as CodingProvider | null) ?? 'claude'
   )
 
   const inputBarRef = useRef<InputBarHandle>(null)
@@ -151,7 +151,7 @@ export default function App() {
       if (pendingContextRef.current) {
         const ctx = pendingContextRef.current
         pendingContextRef.current = null
-        setTimeout(() => sendInputRef.current(ctx), 500)
+        setTimeout(() => { sendInputRef.current(ctx); }, 500)
       }
     },
     onSessionJoined: (sessionId) => {
@@ -167,7 +167,7 @@ export default function App() {
     onError: (msg) => {
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current)
       setError(msg)
-      errorTimerRef.current = setTimeout(() => setError(null), 5000)
+      errorTimerRef.current = setTimeout(() => { setError(null); }, 5000)
       if (msg.toLowerCase().includes('not found')) {
         setActiveSessionId(null)
       }
@@ -193,7 +193,7 @@ export default function App() {
 
   // Provider is per-session; default for new sessions is persisted to localStorage
   const currentProvider: CodingProvider =
-    (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
+    (localStorage.getItem('codekin-provider') as CodingProvider | null) ?? 'claude'
   // Dynamic model list for OpenCode (fetched from server on demand, keyed by workingDir)
   const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
   const openCodeModelsDirRef = useRef<string | undefined>(undefined)
@@ -206,19 +206,16 @@ export default function App() {
   const currentModelRef = useRef(currentModel)
   useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
 
-  // Clear cached models when switching to an OpenCode session with a different workingDir
+  // Derive the active OpenCode workingDir
   const activeOpenCodeWd = activeSessionProvider === 'opencode'
     ? sessions.find(s => s.id === activeSessionId)?.workingDir
     : undefined
-  useEffect(() => {
-    if (activeOpenCodeWd && activeOpenCodeWd !== openCodeModelsDirRef.current) {
-      setOpenCodeModels([]) // force re-fetch for new repo
-    }
-  }, [activeOpenCodeWd])
 
   useEffect(() => {
     if (activeSessionProvider !== 'opencode' || !settings.token) return
-    if (openCodeModels.length > 0) return // already fetched for this repo
+    // If the workingDir changed, we need a fresh fetch
+    const needsRefresh = activeOpenCodeWd !== undefined && activeOpenCodeWd !== openCodeModelsDirRef.current
+    if (openCodeModels.length > 0 && !needsRefresh) return // already fetched for this repo
     fetchOpenCodeModels(settings.token, activeOpenCodeWd).then(result => {
       const models: ModelOption[] = result.models.map(m => ({
         id: `${m.providerID}/${m.id}`,
@@ -356,7 +353,7 @@ export default function App() {
       }
     }
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    return () => { window.removeEventListener('keydown', handleKeyDown); }
   }, [])
 
   // Persist active session ID
@@ -398,7 +395,7 @@ export default function App() {
     } else {
       clearMessages()
       leaveSession()
-      setActiveSessionIdRaw(null) // eslint-disable-line react-hooks/set-state-in-effect -- browser navigation sync
+      setActiveSessionIdRaw(null)  
     }
   }, [urlSessionId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -421,7 +418,7 @@ export default function App() {
 
   // Close docs browser when switching sessions
   useEffect(() => {
-    if (docsBrowser.isOpen) docsBrowser.close() // eslint-disable-line react-hooks/set-state-in-effect -- sync with session change
+    if (docsBrowser.isOpen) docsBrowser.close()  
   }, [activeSessionId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSendSkill = useCallback((command: string) => {
@@ -470,14 +467,14 @@ export default function App() {
     if (docsBrowser.pickerOpen && docsBrowser.pickerRepoDir === workingDir) {
       docsBrowser.closePicker()
     } else {
-      docsBrowser.openPicker(workingDir, settings.token)
+      void docsBrowser.openPicker(workingDir, settings.token)
     }
   }, [docsBrowser, settings.token])
 
   // Docs browser: handle file selection from picker
   const handleSelectDocFile = useCallback((filePath: string) => {
     if (docsBrowser.pickerRepoDir) {
-      docsBrowser.openFile(docsBrowser.pickerRepoDir, filePath, settings.token)
+      void docsBrowser.openFile(docsBrowser.pickerRepoDir, filePath, settings.token)
     }
   }, [docsBrowser, settings.token])
 
@@ -515,19 +512,19 @@ export default function App() {
         view={view}
         archiveRefreshKey={archiveRefreshKey}
         onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator') navigate(`/s/${id}`); handleSelectSession(id) }}
-        onDeleteSession={handleDeleteSession}
-        onRenameSession={renameSession}
+        onDeleteSession={(id) => { void handleDeleteSession(id) }}
+        onRenameSession={(id, name) => { void renameSession(id, name) }}
         onNewSession={handleNewSessionForRepo}
         onNewSessionFromArchive={handleNewSessionFromArchive}
         onOpenSession={handleOpenSession}
         onSelectRepo={handleSelectRepo}
-        onDeleteRepo={handleDeleteRepo}
-        onSettingsOpen={() => setSettingsOpen(true)}
-        onUpdateTheme={(theme) => updateSettings({ theme: theme as 'dark' | 'light' })}
+        onDeleteRepo={(wd) => { void handleDeleteRepo(wd) }}
+        onSettingsOpen={() => { setSettingsOpen(true); }}
+        onUpdateTheme={(theme) => { updateSettings({ theme: theme as 'dark' | 'light' }); }}
         onSendModule={handleSendModule}
         agentName={agentName}
-        onNavigateToWorkflows={() => navigate('/workflows')}
-        onNavigateToOrchestrator={() => handleNavigateToOrchestrator()}
+        onNavigateToWorkflows={() => { navigate('/workflows'); }}
+        onNavigateToOrchestrator={() => { handleNavigateToOrchestrator(); }}
         onBrowseDocs={handleBrowseDocs}
         docsPicker={{
           open: docsBrowser.pickerOpen,
@@ -541,7 +538,7 @@ export default function App() {
         mobile={{
           isMobile,
           mobileOpen: mobileMenuOpen,
-          onMobileClose: () => setMobileMenuOpen(false),
+          onMobileClose: () => { setMobileMenuOpen(false); },
         }}
       />
 
@@ -552,9 +549,9 @@ export default function App() {
           <MobileTopBar
             repoName={activeRepoName}
             sessionName={activeSessionName}
-            onMenuOpen={() => setMobileMenuOpen(true)}
+            onMenuOpen={() => { setMobileMenuOpen(true); }}
             onNewSession={handleNewSessionForRepo}
-            onSettingsOpen={() => setSettingsOpen(true)}
+            onSettingsOpen={() => { setSettingsOpen(true); }}
             activeRepo={activeRepo}
           />
         )}
@@ -588,7 +585,7 @@ export default function App() {
             activePrompt={activePrompt}
             sendPromptResponse={sendPromptResponse}
             inputBarRef={inputBarRef}
-            onSendInput={handleSendWithFiles}
+            onSendInput={(text) => { void handleSendWithFiles(text) }}
             pendingFiles={pendingFiles}
             onAddFiles={addFiles}
             onRemoveFile={removeFile}
@@ -614,7 +611,7 @@ export default function App() {
         ) : docsBrowser.isOpen ? (
           <DocsBrowserContent
             docsRepoName={docsRepoName}
-            filePath={docsBrowser.selectedFile!}
+            filePath={docsBrowser.selectedFile ?? ''}
             content={docsBrowser.content}
             loading={docsBrowser.loading}
             error={docsBrowser.error}
@@ -625,7 +622,7 @@ export default function App() {
             onClose={docsBrowser.close}
             activeSessionId={activeSessionId}
             inputBarRef={inputBarRef}
-            onSendInput={handleSendWithFiles}
+            onSendInput={(text) => { void handleSendWithFiles(text) }}
             activePrompt={activePrompt}
             disabled={!settings.token}
             pendingFiles={pendingFiles}
@@ -655,16 +652,16 @@ export default function App() {
             disabled={!settings.token}
             hasFileChanges={hasFileChanges}
             diffPanelOpen={diffPanelOpen}
-            onOpenDiffPanel={() => setDiffPanelOpen(true)}
+            onOpenDiffPanel={() => { setDiffPanelOpen(true); }}
             activePrompt={activePrompt}
             promptQueueSize={promptQueueSize}
             sendPromptResponse={sendPromptResponse}
             activeTentativeCount={activeTentativeCount}
             activeRepoName={activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? 'this repo'}
-            onExecuteTentative={() => handleExecuteTentative(activeSessionId)}
-            onDiscardTentative={() => handleDiscardTentative(activeSessionId)}
+            onExecuteTentative={() => { void handleExecuteTentative(activeSessionId) }}
+            onDiscardTentative={() => { handleDiscardTentative(activeSessionId); }}
             inputBarRef={inputBarRef}
-            onSendInput={handleSendWithFiles}
+            onSendInput={(text) => { void handleSendWithFiles(text) }}
             pendingFiles={pendingFiles}
             onAddFiles={addFiles}
             onRemoveFile={removeFile}
@@ -692,7 +689,7 @@ export default function App() {
       {activeSessionId && (
         <DiffPanel
           isOpen={diffPanelOpen}
-          onClose={() => setDiffPanelOpen(false)}
+          onClose={() => { setDiffPanelOpen(false); }}
           send={wsSend}
           onHandleMessage={(fn) => { diffHandleMessageRef.current = fn }}
           onHandleToolDone={(fn) => { diffHandleToolDoneRef.current = fn }}
@@ -702,7 +699,7 @@ export default function App() {
       {/* Modals */}
       <Settings
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => { setSettingsOpen(false); }}
         settings={settings}
         onUpdate={updateSettings}
         isMobile={isMobile}
@@ -713,14 +710,14 @@ export default function App() {
       />
       <CommandPalette
         open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
+        onClose={() => { setPaletteOpen(false); }}
         repos={repos}
         globalSkills={globalSkills}
         globalModules={globalModules}
         onOpenRepo={handleOpenSession}
         onSendSkill={handleSendSkill}
         onSendModule={handleSendModule}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => { setSettingsOpen(true); }}
         isMobile={isMobile}
       />
     </div>

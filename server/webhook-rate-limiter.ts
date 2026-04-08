@@ -48,17 +48,15 @@ export function createWebhookRateLimiter(
   }, 5 * 60 * 1000)
 
   // Allow the process to exit without waiting for the interval
-  if (cleanupInterval.unref) {
-    cleanupInterval.unref()
-  }
+  cleanupInterval.unref()
 
   return (req, res, next) => {
     let key: string | undefined
 
     try {
-      const body = req.body
+      const body = req.body as unknown
       if (Buffer.isBuffer(body)) {
-        const parsed = JSON.parse(body.toString('utf-8'))
+        const parsed: unknown = JSON.parse(body.toString('utf-8'))
         key = keyExtractor(parsed)
       }
     } catch {

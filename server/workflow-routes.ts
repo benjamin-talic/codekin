@@ -119,7 +119,7 @@ export function createWorkflowRouter(
   // without touching the other routes.
   // -------------------------------------------------------------------------
 
-  router.post('/commit-event', async (req, res) => {
+  router.post('/commit-event', (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) {
       return res.status(401).json({ error: 'Unauthorized' })
@@ -130,17 +130,17 @@ export function createWorkflowRouter(
       return res.status(503).json({ error: 'Commit event handler not available' })
     }
 
-    const { repoPath, branch, commitHash, commitMessage, author } = req.body
+    const { repoPath, branch, commitHash, commitMessage, author } = req.body as Record<string, unknown>
     if (!repoPath || !branch || !commitHash || !commitMessage) {
       return res.status(400).json({ error: 'Missing required fields: repoPath, branch, commitHash, commitMessage' })
     }
 
-    const result = await handler.handle({
-      repoPath,
-      branch,
-      commitHash,
-      commitMessage,
-      author: author || 'unknown',
+    const result = handler.handle({
+      repoPath: repoPath as string,
+      branch: branch as string,
+      commitHash: commitHash as string,
+      commitMessage: commitMessage as string,
+      author: (author as string) || 'unknown',
     })
 
     res.status(result.accepted ? 202 : 200).json(result)
@@ -196,15 +196,15 @@ export function createWorkflowRouter(
     res.json({ run })
   })
 
-  router.post('/runs', async (req, res) => {
+  router.post('/runs', (req, res) => {
     const engine = getEngine(res)
     if (!engine) return
 
-    const { kind, input } = req.body
+    const { kind, input } = req.body as Record<string, unknown>
     if (!kind) return res.status(400).json({ error: 'Missing kind' })
 
     try {
-      const run = await engine.startRun(kind, input || {})
+      const run = engine.startRun(kind as string, (input || {}) as Record<string, unknown>)
       res.json({ run })
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to start run' })
@@ -235,19 +235,19 @@ export function createWorkflowRouter(
     const engine = getEngine(res)
     if (!engine) return
 
-    const { id, kind, cronExpression, input, enabled } = req.body
+    const { id, kind, cronExpression, input, enabled } = req.body as Record<string, unknown>
     if (!id || !kind || !cronExpression) {
       return res.status(400).json({ error: 'Missing id, kind, or cronExpression' })
     }
-    if (!isValidCron(cronExpression)) {
+    if (!isValidCron(cronExpression as string)) {
       return res.status(400).json({ error: 'Invalid cron expression' })
     }
 
     const schedule = engine.upsertSchedule({
-      id,
-      kind,
-      cronExpression,
-      input: input || {},
+      id: id as string,
+      kind: kind as string,
+      cronExpression: cronExpression as string,
+      input: (input || {}) as Record<string, unknown>,
       enabled: enabled !== false,
     })
     res.json({ schedule })
@@ -260,12 +260,13 @@ export function createWorkflowRouter(
     const existing = engine.getSchedule(req.params.id)
     if (!existing) return res.status(404).json({ error: 'Schedule not found' })
 
+    const body = req.body as Record<string, unknown>
     const schedule = engine.upsertSchedule({
       id: existing.id,
       kind: existing.kind,
-      cronExpression: req.body.cronExpression ?? existing.cronExpression,
-      input: req.body.input ?? existing.input,
-      enabled: req.body.enabled ?? existing.enabled,
+      cronExpression: (body.cronExpression ?? existing.cronExpression) as string,
+      input: (body.input ?? existing.input) as Record<string, unknown>,
+      enabled: (body.enabled ?? existing.enabled) as boolean,
     })
     res.json({ schedule })
   })
@@ -279,12 +280,12 @@ export function createWorkflowRouter(
     res.json({ success: true })
   })
 
-  router.post('/schedules/:id/trigger', async (req, res) => {
+  router.post('/schedules/:id/trigger', (req, res) => {
     const engine = getEngine(res)
     if (!engine) return
 
     try {
-      const run = await engine.triggerSchedule(req.params.id)
+      const run = engine.triggerSchedule(req.params.id)
       res.json({ run })
     } catch (err) {
       res.status(404).json({ error: err instanceof Error ? err.message : 'Failed to trigger schedule' })
@@ -339,11 +340,12 @@ export function createWorkflowRouter(
   })
 
   router.patch('/config/repos/:id', (req, res) => {
-    if (req.body.provider && !VALID_PROVIDERS.has(req.body.provider)) {
-      return res.status(400).json({ error: `Invalid provider: ${req.body.provider}` })
+    const patchBody = req.body as Partial<ReviewRepoConfig>
+    if (patchBody.provider && !VALID_PROVIDERS.has(patchBody.provider)) {
+      return res.status(400).json({ error: `Invalid provider: ${patchBody.provider}` })
     }
     try {
-      const config = updateReviewRepo(req.params.id, req.body)
+      const config = updateReviewRepo(req.params.id, patchBody)
       try {
         syncSchedules(sessions)
         syncCommitHooks()

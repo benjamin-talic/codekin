@@ -21,7 +21,7 @@ function createIpRateLimiter(maxPerMinute: number): RequestHandler {
       else ipTimestamps.set(ip, recent)
     }
   }, 5 * 60_000)
-  if (cleanup.unref) cleanup.unref()
+  cleanup.unref()
 
   return (req, res, next) => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown'

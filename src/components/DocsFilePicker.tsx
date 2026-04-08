@@ -31,7 +31,7 @@ export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose 
       if (e.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
+    return () => { document.removeEventListener('keydown', handleKey); }
   }, [onClose])
 
   const starredSet = new Set(starredDocs)
@@ -60,7 +60,7 @@ export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose 
               <input
                 type="text"
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={e => { setSearch(e.target.value); }}
                 placeholder="Filter docs..."
                 autoFocus
                 className="w-full rounded border border-neutral-7 bg-neutral-10/50 px-2 py-1 text-[13px] text-neutral-2 placeholder-neutral-5 focus:border-accent-6 focus:outline-none"
@@ -75,7 +75,7 @@ export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose 
                 {starred.map(f => (
                   <button
                     key={f.path}
-                    onClick={() => onSelect(f.path)}
+                    onClick={() => { onSelect(f.path); }}
                     className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-[15px] text-neutral-2 font-medium hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors cursor-pointer rounded-md"
                   >
                     <IconStarFilled size={13} className="flex-shrink-0 text-primary-5" />
@@ -88,7 +88,7 @@ export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose 
                 {pinned.map(f => (
                   <button
                     key={f.path}
-                    onClick={() => onSelect(f.path)}
+                    onClick={() => { onSelect(f.path); }}
                     className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-[15px] text-neutral-2 font-medium hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors cursor-pointer rounded-md"
                   >
                     <IconFileText size={13} className="flex-shrink-0 text-neutral-5" />
@@ -101,7 +101,7 @@ export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose 
                 {rest.map(f => (
                   <button
                     key={f.path}
-                    onClick={() => onSelect(f.path)}
+                    onClick={() => { onSelect(f.path); }}
                     className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-[15px] text-neutral-4 hover:bg-neutral-6/50 hover:text-neutral-2 transition-colors cursor-pointer rounded-md"
                   >
                     <IconFileText size={13} className="flex-shrink-0 text-neutral-6" />

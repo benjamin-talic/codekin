@@ -59,7 +59,7 @@ function buildRepoNodes(
     sessions: repoSessions,
     hasWaiting: repoSessions.some(s => waitingSessions[s.id]),
     hasActive: repoSessions.some(s => s.isProcessing),
-    hasTentative: repoSessions.some(s => (tentativeQueues[s.id]?.length ?? 0) > 0),
+    hasTentative: repoSessions.some(s => s.id in tentativeQueues && tentativeQueues[s.id].length > 0),
   }))
 }
 
@@ -200,7 +200,7 @@ export function LeftSidebar({
       }
     }
     document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    return () => { document.removeEventListener('mousedown', handleClick); }
   }, [modulesOpen])
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
@@ -232,7 +232,7 @@ export function LeftSidebar({
   // Derive orchestrator icon style from its session state
   const orchestratorSession = sessions.find(s => s.source === 'orchestrator')
   const orchestratorIconClass = orchestratorSession
-    ? (tentativeQueues[orchestratorSession.id]?.length ?? 0) > 0
+    ? orchestratorSession.id in tentativeQueues && tentativeQueues[orchestratorSession.id].length > 0
       ? '!text-accent-5 animate-pulse'
       : waitingSessions[orchestratorSession.id]
       ? '!text-warning-5 animate-pulse'
@@ -261,7 +261,7 @@ export function LeftSidebar({
           <AppIcon size={26} className="text-primary-7" />
         </div>
         <button
-          onClick={() => setCollapsed(false)}
+          onClick={() => { setCollapsed(false); }}
           className="rounded-lg p-1.5 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1"
           title="Expand sidebar"
         >
@@ -269,7 +269,7 @@ export function LeftSidebar({
         </button>
         <div className="mt-auto flex flex-col items-center gap-2">
           <button
-            onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
+            onClick={() => { onUpdateTheme(theme === 'dark' ? 'light' : 'dark'); }}
             className="rounded-lg p-1.5 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1"
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
@@ -318,7 +318,7 @@ export function LeftSidebar({
           </button>
         ) : (
           <button
-            onClick={() => setCollapsed(true)}
+            onClick={() => { setCollapsed(true); }}
             className="rounded p-1 text-neutral-3 hover:text-neutral-2 hover:bg-neutral-6 transition-colors flex-shrink-0 opacity-0 group-hover/header:opacity-100"
             title="Collapse sidebar"
           >
@@ -358,7 +358,7 @@ export function LeftSidebar({
           {hasModules && (
             <div ref={modulesRef} className="relative">
               <button
-                onClick={() => setModulesOpen(!modulesOpen)}
+                onClick={() => { setModulesOpen(!modulesOpen); }}
                 className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
                   modulesOpen
                     ? 'bg-accent-9/30 text-accent-2'
@@ -438,7 +438,7 @@ export function LeftSidebar({
           refreshKey={archiveRefreshKey}
           onNewSessionFromArchive={onNewSessionFromArchive}
           initialViewId={archiveViewSessionId}
-          onClose={() => setArchiveViewSessionId(null)}
+          onClose={() => { setArchiveViewSessionId(null); }}
         />
       </div>
 
@@ -457,7 +457,7 @@ export function LeftSidebar({
           </button>
           <div className="flex-1" />
           <button
-            onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
+            onClick={() => { onUpdateTheme(theme === 'dark' ? 'light' : 'dark'); }}
             className={`rounded text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
@@ -487,7 +487,7 @@ export function LeftSidebar({
       >
         <div
           className={`h-full w-fit transition-transform duration-200 ease-out ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
-          onClick={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); }}
         >
           {sidebarContent}
         </div>

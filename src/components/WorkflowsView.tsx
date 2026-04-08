@@ -63,7 +63,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
     if (matchingRepo) {
       const key = matchingRepo.id
       if (!runsPerRepo.has(key)) runsPerRepo.set(key, [])
-      runsPerRepo.get(key)!.push(run)
+      runsPerRepo.get(key)?.push(run)
     }
   }
 
@@ -117,7 +117,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
   const repoGroups = new Map<string, ReviewRepoConfig[]>()
   for (const repo of repos) {
     if (!repoGroups.has(repo.repoPath)) repoGroups.set(repo.repoPath, [])
-    repoGroups.get(repo.repoPath)!.push(repo)
+    repoGroups.get(repo.repoPath)?.push(repo)
   }
 
   return (
@@ -127,7 +127,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
         <h1 className="text-[18px] font-medium text-neutral-1">Workflows</h1>
         <div className="flex items-center gap-1.5">
           <button
-            onClick={() => setShowAddForm(true)}
+            onClick={() => { setShowAddForm(true); }}
             className="flex items-center gap-1.5 rounded-md bg-primary-8 px-3 py-1.5 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 transition-colors"
           >
             <IconPlus size={14} stroke={2} />
@@ -155,7 +155,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
               </div>
             </div>
             <button
-              onClick={() => setShowAddForm(true)}
+              onClick={() => { setShowAddForm(true); }}
               className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 transition-colors"
             >
               <IconPlus size={14} stroke={2} />
@@ -174,12 +174,12 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
                 selectedRunId={selectedRunId}
                 runDetail={runDetail}
                 detailLoading={detailLoading}
-                onTrigger={triggerSchedule}
-                onToggleEnabled={handleToggleEnabled}
+                onTrigger={(id) => { void triggerSchedule(id) }}
+                onToggleEnabled={(id, enabled) => { void handleToggleEnabled(id, enabled) }}
                 onEdit={setEditingRepo}
-                onDelete={handleDeleteSchedule}
+                onDelete={(id) => { void handleDeleteSchedule(id) }}
                 onToggleRun={handleToggleRun}
-                onCancel={cancelRun}
+                onCancel={(runId) => { void cancelRun(runId) }}
                 onNavigateToSession={onNavigateToSession}
               />
             ))}
@@ -190,7 +190,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
         {runs.length > 0 && (
           <div className="mt-6">
             <button
-              onClick={() => setShowActivity(!showActivity)}
+              onClick={() => { setShowActivity(!showActivity); }}
               className="flex items-center gap-2 text-[15px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors mb-2"
             >
               {showActivity
@@ -223,7 +223,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
       {showAddForm && (
         <AddWorkflowModal
           token={token}
-          onClose={() => setShowAddForm(false)}
+          onClose={() => { setShowAddForm(false); }}
           onAdd={addRepo}
         />
       )}
@@ -237,7 +237,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
             (r.input.repoPath as string | undefined) === editingRepo.repoPath ||
             (r.input.repoName as string | undefined) === editingRepo.name
           )}
-          onClose={() => setEditingRepo(null)}
+          onClose={() => { setEditingRepo(null); }}
           onSave={updateRepo}
         />
       )}

@@ -51,11 +51,11 @@ export function useRepos(token?: string) {
         setGhMissing(data.ghMissing ?? false)
         setError(null)
       })
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false))
+      .catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Unknown error'); })
+      .finally(() => { setLoading(false); })
   }, [token, refreshCount])
 
-  const refresh = useCallback(() => setRefreshCount(c => c + 1), [])
+  const refresh = useCallback(() => { setRefreshCount(c => c + 1); }, [])
 
   return { groups, repos, globalSkills, globalModules, loading, error, ghMissing, refresh }
 }

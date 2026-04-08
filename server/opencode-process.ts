@@ -144,10 +144,8 @@ async function startOpenCodeServer(workingDir: string): Promise<void> {
   }
 
   // Kill orphaned process that never became healthy
-  if (serverState.process) {
-    serverState.process.kill('SIGTERM')
-    serverState.process = null
-  }
+  proc.kill('SIGTERM')
+  serverState.process = null
   throw new Error(`OpenCode server failed to start within ${maxAttempts}s`)
 }
 
@@ -277,7 +275,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       }
     }, 60_000)
 
-    void this.initialize().catch((err) => {
+    void this.initialize().catch((err: unknown) => {
       this.emit('error', `OpenCode initialization failed: ${err instanceof Error ? err.message : String(err)}`)
       this.stop()
     })
@@ -345,7 +343,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
           Accept: 'text/event-stream',
           'x-opencode-directory': this.workingDir,
         },
-        signal: this.abortController!.signal,
+        signal: this.abortController?.signal ?? AbortSignal.timeout(300_000),
       }).then(async (res) => {
         if (!res.ok || !res.body) {
           if (this.alive) {
@@ -404,7 +402,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
           setTimeout(connectSSE, reconnectDelay)
           reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
         }
-      }).catch((err) => {
+      }).catch((err: unknown) => {
         if (err instanceof Error && err.name === 'AbortError') return
         if (this.alive) {
           reconnectAttempts++
@@ -554,8 +552,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         // properties.metadata has details (filepath, parentDir), properties.patterns
         // has the glob patterns being requested. No direct tool name — use permission type.
         const permissionType = properties.permission as string || 'unknown'
-        const metadata = properties.metadata as Record<string, unknown> || {}
-        const patterns = properties.patterns as string[] || []
+        const metadata = (properties.metadata ?? {}) as Record<string, unknown>
+        const patterns = (properties.patterns ?? []) as string[]
         const input: Record<string, unknown> = {
           permission: permissionType,
           ...metadata,
@@ -631,15 +629,15 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   /** Generate a short summary for tool input (mirrors ClaudeProcess.summarizeToolInput). */
   private summarizeToolInput(toolName: string, input: Record<string, unknown>): string {
     switch (toolName) {
-      case 'bash': return `$ ${String(input.command || '').split('\n')[0]}`
+      case 'bash': return `$ ${((input.command ?? '') as string).split('\n')[0]}`
       case 'read':
-      case 'view': return String(input.file_path || input.filePath || '')
+      case 'view': return (input.file_path ?? input.filePath ?? '') as string
       case 'write':
       case 'edit':
-      case 'multiedit': return String(input.file_path || input.filePath || '')
-      case 'glob': return String(input.pattern || '')
-      case 'grep': return String(input.pattern || '')
-      case 'task': return String(input.description || '')
+      case 'multiedit': return (input.file_path ?? input.filePath ?? '') as string
+      case 'glob': return (input.pattern ?? '') as string
+      case 'grep': return (input.pattern ?? '') as string
+      case 'task': return (input.description ?? '') as string
       default: return ''
     }
   }
@@ -657,14 +655,14 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       this.tasks.clear()
       this.taskSeq = 0
       for (const item of todos) {
-        const id = String(item.id || ++this.taskSeq)
+        const id = item.id ? (item.id as string) : String(++this.taskSeq)
         const status = item.status as string
         if (status !== 'pending' && status !== 'in_progress' && status !== 'completed') continue
         this.tasks.set(id, {
           id,
-          subject: String(item.content || item.subject || ''),
+          subject: (item.content ?? item.subject ?? '') as string,
           status,
-          activeForm: item.activeForm ? String(item.activeForm) : undefined,
+          activeForm: item.activeForm ? (item.activeForm as string) : undefined,
         })
       }
       return true
@@ -673,14 +671,14 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       const id = String(++this.taskSeq)
       this.tasks.set(id, {
         id,
-        subject: String(input.subject || ''),
+        subject: (input.subject ?? '') as string,
         status: 'pending',
-        activeForm: input.activeForm ? String(input.activeForm) : undefined,
+        activeForm: input.activeForm ? (input.activeForm as string) : undefined,
       })
       return true
     }
     if (normalized === 'taskupdate') {
-      const id = String(input.taskId || '')
+      const id = (input.taskId ?? '') as string
       const task = this.tasks.get(id)
       if (!task) return false
       const status = input.status as string | undefined
@@ -691,8 +689,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       if (status === 'pending' || status === 'in_progress' || status === 'completed') {
         task.status = status
       }
-      if (input.subject) task.subject = String(input.subject)
-      if (input.activeForm !== undefined) task.activeForm = input.activeForm ? String(input.activeForm) : undefined
+      if (input.subject) task.subject = input.subject as string
+      if (input.activeForm !== undefined) task.activeForm = input.activeForm ? (input.activeForm as string) : undefined
       return true
     }
     return false
@@ -733,21 +731,24 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       if (!res.ok) {
         this.emit('error', `Failed to send message: HTTP ${res.status}`)
       }
-    }).catch((err) => {
+    }).catch((err: unknown) => {
       this.emit('error', `Failed to send message: ${err instanceof Error ? err.message : String(err)}`)
     })
   }
 
   /** No-op for OpenCode — raw protocol data is Claude-specific. */
-  sendRaw(_data: string): void {
+  sendRaw(data: string): void {
     // OpenCode uses HTTP endpoints, not raw stdin
+    void data
   }
 
   /**
    * Respond to a permission/control request.
    * Maps Codekin's allow/deny to OpenCode's once/always/reject.
    */
-  sendControlResponse(requestId: string, behavior: 'allow' | 'deny', _updatedInput?: Record<string, unknown>, _message?: string): void {
+  sendControlResponse(requestId: string, behavior: 'allow' | 'deny', updatedInput?: Record<string, unknown>, message?: string): void {
+    void updatedInput
+    void message
     const type = behavior === 'deny' ? 'reject' : 'once'
     void this.replyToPermission(requestId, type)
   }

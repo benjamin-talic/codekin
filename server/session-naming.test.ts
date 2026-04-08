@@ -1,5 +1,5 @@
 /** Tests for SessionNaming — verifies LLM-based session name generation and retry logic; mocks node:child_process.spawn to simulate claude CLI responses. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SessionNaming, type SessionNamingDeps } from './session-naming.js'
 import { EventEmitter } from 'node:events'

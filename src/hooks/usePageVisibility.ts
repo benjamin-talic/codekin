@@ -17,6 +17,6 @@ export function usePageVisibility(onVisible: () => void) {
       }
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+    return () => { document.removeEventListener('visibilitychange', handleVisibilityChange); }
   }, [])
 }

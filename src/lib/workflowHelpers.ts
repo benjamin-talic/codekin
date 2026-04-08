@@ -180,7 +180,7 @@ export function formatTime(iso: string | null): string {
 /** Extract a display-friendly repo name from a workflow run's input, falling back to the kind. */
 export function repoNameFromRun(run: WorkflowRun): string {
   return (run.input.repoName as string)
-    || (run.input.repoPath as string)?.split('/').pop()
+    || (run.input.repoPath as string | undefined)?.split('/').pop()
     || run.kind
 }
 

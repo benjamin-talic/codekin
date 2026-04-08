@@ -43,20 +43,19 @@ export function usePromptState(): UsePromptStateReturn {
 
   const enqueue = useCallback((msg: WsServerMessage & { type: 'prompt' }, sessionId: string) => {
     const requestId = msg.requestId
-      ?? crypto?.randomUUID?.()
-      ?? `local-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+      ?? crypto.randomUUID()
     const entry: PromptEntry = {
       requestId,
       options: msg.options,
       question: msg.question || null,
       multiSelect: msg.multiSelect ?? false,
-      promptType: msg.promptType ?? null,
+      promptType: msg.promptType,
       questions: msg.questions,
       approvePattern: msg.approvePattern,
     }
     setQueues(prev => {
       const next = new Map(prev)
-      const sessionQueue = new Map(prev.get(sessionId) ?? new Map())
+      const sessionQueue = new Map(prev.get(sessionId) ?? new Map<string, PromptEntry>())
       sessionQueue.set(requestId, entry)
       next.set(sessionId, sessionQueue)
       return next

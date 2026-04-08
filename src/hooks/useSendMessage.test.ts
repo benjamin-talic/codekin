@@ -1,6 +1,6 @@
 /** Tests for useSendMessage — verifies send pipeline, slash command processing, tentative queue, and file management. */
 // @vitest-environment jsdom
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
@@ -60,7 +60,7 @@ function renderHook<T>(hookFn: () => T): { result: { current: T }; unmount: () =
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function makeOptions(overrides: Partial<any> = {}) {
   return {
     token: 'tok',

@@ -27,7 +27,7 @@ export function CommandPalette({ open, onClose, repos, globalSkills = [], global
 
   return (
     <div className={`fixed inset-0 z-50 flex bg-black/60 ${isMobile ? 'items-end' : 'items-start justify-center pt-[20vh]'}`} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className={`w-full ${isMobile ? '' : 'max-w-lg'}`}>
+      <div onClick={e => { e.stopPropagation(); }} className={`w-full ${isMobile ? '' : 'max-w-lg'}`}>
         <Command
           className="rounded-lg border border-neutral-10 bg-neutral-11 shadow-2xl"
           label="Command palette"

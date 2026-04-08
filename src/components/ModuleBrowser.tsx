@@ -30,7 +30,7 @@ export function ModuleBrowser({ repo, globalModules = [], onSendModule, disabled
             {globalModules.map(mod => (
               <button
                 key={mod.id}
-                onClick={() => onSendModule(mod)}
+                onClick={() => { onSendModule(mod); }}
                 disabled={disabled}
                 className="group rounded px-2 py-1.5 text-left transition hover:bg-neutral-10/50 disabled:opacity-50 disabled:pointer-events-none"
               >
@@ -55,7 +55,7 @@ export function ModuleBrowser({ repo, globalModules = [], onSendModule, disabled
             {repoModules.map(mod => (
               <button
                 key={mod.id}
-                onClick={() => onSendModule(mod)}
+                onClick={() => { onSendModule(mod); }}
                 disabled={disabled}
                 className="group rounded px-2 py-1.5 text-left transition hover:bg-neutral-10/50 disabled:opacity-50 disabled:pointer-events-none"
               >

@@ -164,7 +164,7 @@ export class SessionArchive {
       created: row.created,
       archivedAt: row.archived_at,
       messageCount: row.message_count,
-      outputHistory: (() => { try { return JSON.parse(row.output_history) } catch { return [] } })(),
+      outputHistory: (() => { try { return JSON.parse(row.output_history) as WsServerMessage[] } catch { return [] } })(),
     }
   }
 

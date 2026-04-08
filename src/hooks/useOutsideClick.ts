@@ -17,6 +17,6 @@ export function useOutsideClick(
       }
     }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    return () => { document.removeEventListener('mousedown', handler); }
   }, [isOpen, ref, onClose])
 }

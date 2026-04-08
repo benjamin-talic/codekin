@@ -93,7 +93,7 @@ export async function listKinds(
   const qs = params.toString()
   const res = await fetch(`${BASE}/kinds${qs ? `?${qs}` : ''}`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to list kinds: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { kinds: WorkflowKindInfo[] }
   return data.kinds
 }
 
@@ -115,7 +115,7 @@ export async function listRuns(
   const qs = params.toString()
   const res = await fetch(`${BASE}/runs${qs ? `?${qs}` : ''}`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to list runs: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { runs: WorkflowRun[] }
   return data.runs
 }
 
@@ -123,7 +123,7 @@ export async function listRuns(
 export async function getRun(token: string, runId: string): Promise<WorkflowRunWithSteps> {
   const res = await fetch(`${BASE}/runs/${runId}`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to get run: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { run: WorkflowRunWithSteps }
   return data.run
 }
 
@@ -139,7 +139,7 @@ export async function triggerRun(
     body: JSON.stringify({ kind, input }),
   })
   if (!res.ok) throw new Error(`Failed to trigger run: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { run: WorkflowRun }
   return data.run
 }
 
@@ -160,7 +160,7 @@ export async function cancelRun(token: string, runId: string): Promise<void> {
 export async function listSchedules(token: string): Promise<CronSchedule[]> {
   const res = await fetch(`${BASE}/schedules`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to list schedules: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { schedules: CronSchedule[] }
   return data.schedules
 }
 
@@ -171,7 +171,7 @@ export async function triggerSchedule(token: string, id: string): Promise<Workfl
     headers: headers(token),
   })
   if (!res.ok) throw new Error(`Failed to trigger schedule: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { run: WorkflowRun }
   return data.run
 }
 
@@ -183,7 +183,7 @@ export async function triggerSchedule(token: string, id: string): Promise<Workfl
 export async function getConfig(token: string): Promise<WorkflowConfig> {
   const res = await fetch(`${BASE}/config`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to get config: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { config: WorkflowConfig }
   return data.config
 }
 
@@ -198,7 +198,7 @@ export async function addRepoConfig(
     body: JSON.stringify(repo),
   })
   if (!res.ok) throw new Error(`Failed to add repo config: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { config: WorkflowConfig }
   return data.config
 }
 
@@ -209,7 +209,7 @@ export async function removeRepoConfig(token: string, id: string): Promise<Workf
     headers: headers(token),
   })
   if (!res.ok) throw new Error(`Failed to remove repo config: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { config: WorkflowConfig }
   return data.config
 }
 
@@ -225,6 +225,6 @@ export async function patchRepoConfig(
     body: JSON.stringify(patch),
   })
   if (!res.ok) throw new Error(`Failed to update repo config: ${res.status}`)
-  const data = await res.json()
+  const data = (await res.json()) as { config: WorkflowConfig }
   return data.config
 }

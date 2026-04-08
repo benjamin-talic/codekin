@@ -198,7 +198,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
       // Step 1: Validate repository
       {
         key: 'validate_repo',
-        handler: async (input) => {
+        handler: async (input): Promise<Record<string, unknown>> => {
           const repoPath = input.repoPath as string
           if (!repoPath) throw new Error('Missing repoPath in workflow input')
           if (!existsSync(repoPath)) throw new Error(`Repository path does not exist: ${repoPath}`)
@@ -232,7 +232,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
       // Step 2: Create session
       {
         key: 'create_session',
-        handler: async (input, ctx) => {
+        handler: (input, ctx): Promise<Record<string, unknown>> => {
           const repoPath = input.repoPath as string
           const repoName = (input.repoName as string) || repoPath.split('/').pop() || 'unknown'
 
@@ -247,7 +247,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
           })
 
           console.log(`[workflow:${def.kind}] Created session ${session.id} for ${repoName} (run ${ctx.runId})`)
-          return { sessionId: session.id, repoPath, repoName, branch: input.branch, lastCommit: input.lastCommit }
+          return Promise.resolve({ sessionId: session.id, repoPath, repoName, branch: input.branch, lastCommit: input.lastCommit })
         },
       },
 
@@ -298,7 +298,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
       // Step 4: Save report
       {
         key: 'save_report',
-        handler: async (input, ctx) => {
+        handler: (input, ctx): Promise<Record<string, unknown>> => {
           const repoPath = input.repoPath as string
           const repoName = input.repoName as string
           const reportText = input.reportText as string
@@ -373,7 +373,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
                 execFileSync('git', ['push', 'origin', REPORTS_BRANCH], { cwd: wtDir, timeout: 30_000, stdio: 'pipe' })
                 console.log(`[workflow:${def.kind}] Pushed ${REPORTS_BRANCH} to origin`)
               } catch (pushErr) {
-                console.warn(`[workflow:${def.kind}] Could not push ${REPORTS_BRANCH}: ${pushErr}`)
+                console.warn(`[workflow:${def.kind}] Could not push ${REPORTS_BRANCH}: ${String(pushErr)}`)
               }
             } finally {
               // Always clean up the temporary worktree
@@ -382,16 +382,16 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
               } catch { /* worktree cleanup is best-effort */ }
             }
           } catch (err) {
-            console.warn(`[workflow:${def.kind}] Could not commit report: ${err}`)
+            console.warn(`[workflow:${def.kind}] Could not commit report: ${String(err)}`)
           }
 
-          return { filePath, filename, sessionId }
+          return Promise.resolve({ filePath, filename, sessionId })
         },
       },
     ],
 
     // Cleanup: stop Claude process after workflow completes
-    afterRun: async (run: WorkflowRun) => {
+    afterRun: (run: WorkflowRun): Promise<void> => {
       try {
         const sessionId = run.output?.sessionId as string | undefined
         if (sessionId) {
@@ -404,6 +404,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
       } catch {
         // Ignore cleanup errors
       }
+      return Promise.resolve()
     },
   })
 }

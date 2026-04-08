@@ -16,7 +16,7 @@ import { resolve as pathResolve, join as pathJoin } from 'path'
 import { toNativePermission } from './native-permissions.js'
 import { homedir as osHomedir } from 'os'
 import type { SessionManager } from './session-manager.js'
-import type { WsServerMessage } from './types.js'
+import type { WsServerMessage, CodingProvider, PermissionMode } from './types.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
 import { VALID_PROVIDERS } from './types.js'
 import { fetchOpenCodeModels } from './opencode-process.js'
@@ -62,7 +62,8 @@ export function createSessionRouter(
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { name, workingDir } = req.body
+    const body = req.body as { name?: string; workingDir?: string; provider?: string; model?: string; permissionMode?: string }
+    const { name, workingDir } = body
     if (!name || !workingDir) {
       return res.status(400).json({ error: 'Missing name or workingDir' })
     }
@@ -80,11 +81,11 @@ export function createSessionRouter(
       return res.status(403).json({ error: 'workingDir is outside allowed directories' })
     }
 
-    const { provider, model, permissionMode } = req.body
-    if (provider && !VALID_PROVIDERS.has(provider)) {
+    const { provider, model, permissionMode } = body
+    if (provider && !VALID_PROVIDERS.has(provider as CodingProvider)) {
       return res.status(400).json({ error: `Invalid provider: ${provider}. Must be one of: ${[...VALID_PROVIDERS].join(', ')}` })
     }
-    const session = sessions.create(name, workingDir, { provider, model, permissionMode })
+    const session = sessions.create(name, workingDir, { provider: provider as CodingProvider | undefined, model, permissionMode: permissionMode as PermissionMode | undefined })
     res.json({
       sessionId: session.id,
       session: {
@@ -132,7 +133,7 @@ export function createSessionRouter(
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { name } = req.body
+    const { name } = req.body as { name?: string }
     if (typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({ error: 'Missing or empty name' })
     }
@@ -169,7 +170,7 @@ export function createSessionRouter(
   router.put('/api/settings/retention', (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-    const { days } = req.body
+    const { days } = req.body as { days?: number }
     if (typeof days !== 'number' || days < 1) {
       return res.status(400).json({ error: 'days must be a number >= 1' })
     }
@@ -188,7 +189,7 @@ export function createSessionRouter(
   router.put('/api/settings/worktree-prefix', (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-    const { prefix } = req.body
+    const { prefix } = req.body as { prefix?: string }
     if (typeof prefix !== 'string') {
       return res.status(400).json({ error: 'prefix must be a string' })
     }
@@ -211,7 +212,7 @@ export function createSessionRouter(
   router.put('/api/settings/queue-messages', (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-    const { enabled } = req.body
+    const { enabled } = req.body as { enabled?: boolean }
     if (typeof enabled !== 'boolean') {
       return res.status(400).json({ error: 'enabled must be a boolean' })
     }
@@ -231,7 +232,7 @@ export function createSessionRouter(
   router.put('/api/settings/repos-path', (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-    const { path: rawPath } = req.body
+    const { path: rawPath } = req.body as { path?: string }
     if (typeof rawPath !== 'string') {
       return res.status(400).json({ error: 'path must be a string' })
     }
@@ -258,7 +259,7 @@ export function createSessionRouter(
   router.put('/api/settings/agent-name', (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-    const { name } = req.body
+    const { name } = req.body as { name?: string }
     if (typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'name must be a non-empty string' })
     }
@@ -342,7 +343,7 @@ export function createSessionRouter(
     const workingDir = typeof req.query.path === 'string' ? req.query.path : ''
     if (!workingDir) return res.status(400).json({ error: 'Missing path query parameter' })
 
-    const { tool, command, pattern, items } = req.body
+    const { tool, command, pattern, items } = req.body as { tool?: string; command?: string; pattern?: string; items?: Array<{ tool?: string; command?: string; pattern?: string }> }
 
     // Bulk delete
     if (Array.isArray(items) && items.length > 0) {
@@ -366,7 +367,7 @@ export function createSessionRouter(
   // Hook decision endpoint (PreToolUse hook via HttpTransport)
   router.post('/api/hook-decision', async (req, res) => {
     const token = extractToken(req)
-    const { sessionId, toolName, toolInput } = req.body
+    const { sessionId, toolName, toolInput } = req.body as { sessionId?: string; toolName?: string; toolInput?: Record<string, unknown> }
     if (!verifyHookToken(token, sessionId)) return res.status(401).json({ error: 'Unauthorized' })
     if (!sessionId || !toolName) {
       return res.status(400).json({ error: 'Missing sessionId or toolName' })
@@ -374,7 +375,7 @@ export function createSessionRouter(
 
     try {
       console.log(`[hook-decision] received: session=${sessionId} tool=${toolName}`)
-      const result = await sessions.requestToolApproval(sessionId, toolName, toolInput || {})
+      const result = await sessions.requestToolApproval(sessionId, toolName, toolInput ?? {})
       console.log(`[hook-decision] resolved: allow=${result.allow} always=${result.always}`)
 
       const response: { allow: boolean; message?: string; updatedPermissions?: Array<{ type: string; tool: string }>; updatedInput?: Record<string, unknown> } = {
@@ -385,10 +386,10 @@ export function createSessionRouter(
       // The tool expects `answers: Record<string, string>` keyed by question text.
       // The UI sends either a JSON answers map (multi-question) or a plain string.
       if (toolName === 'AskUserQuestion' && result.allow && result.answer !== undefined) {
-        const questions = (toolInput || {}).questions as Array<{ question: string }> | undefined
+        const questions = (toolInput ?? {}).questions as Array<{ question: string }> | undefined
         let answers: Record<string, string> = {}
         try {
-          const parsed = JSON.parse(result.answer)
+          const parsed: unknown = JSON.parse(result.answer)
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
             answers = parsed as Record<string, string>
           } else if (Array.isArray(questions) && questions.length > 0) {
@@ -400,7 +401,7 @@ export function createSessionRouter(
             answers[questions[0].question] = result.answer
           }
         }
-        response.updatedInput = { ...(toolInput || {}), answers }
+        response.updatedInput = { ...(toolInput ?? {}), answers }
       }
       // For denied tools (e.g. ExitPlanMode rejection), pass the reason back
       // so the hook can include it as permissionDecisionReason for Claude.
@@ -408,7 +409,7 @@ export function createSessionRouter(
         response.message = result.answer
       }
       if (result.always && result.allow) {
-        const nativePerm = toNativePermission(toolName, toolInput || {})
+        const nativePerm = toNativePermission(toolName, toolInput ?? {})
         if (nativePerm) {
           response.updatedPermissions = [{ type: 'toolAlwaysAllow', tool: nativePerm }]
         }
@@ -423,7 +424,8 @@ export function createSessionRouter(
   // Hook notification endpoint (Notification hook via HttpTransport)
   router.post('/api/hook-notify', (req, res) => {
     const token = extractToken(req)
-    const { sessionId, notificationType, title, message } = req.body
+    const hookBody = req.body as { sessionId?: string; notificationType?: string; title?: string; message?: string; toolName?: string; toolInput?: Record<string, unknown> }
+    const { sessionId, notificationType, title, message } = hookBody
     if (!verifyHookToken(token, sessionId)) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
@@ -435,8 +437,8 @@ export function createSessionRouter(
     const session = sessions.get(sessionId)
     if (session) {
       if (notificationType === 'hook_denial') {
-        const toolName = req.body.toolName || ''
-        const toolInput = req.body.toolInput || {}
+        const toolName = hookBody.toolName ?? ''
+        const toolInput = hookBody.toolInput ?? {}
         const suggestion = buildAccessSuggestion(toolName, toolInput)
         const text = `\u26A0 ${title}: ${message}${suggestion ? `\n${suggestion}` : ''}`
         const msg: WsServerMessage = { type: 'system_message', subtype: 'error', text }
@@ -455,7 +457,7 @@ export function createSessionRouter(
   // Auth validation endpoint (PermissionRequest hook for webhook sessions)
   router.post('/api/auth/validate', (req, res) => {
     const token = extractToken(req)
-    const { sessionId } = req.body || {}
+    const { sessionId } = (req.body ?? {}) as { sessionId?: string }
     if (!verifyHookToken(token, sessionId)) {
       return res.status(401).json({ valid: false, error: 'Invalid token' })
     }
@@ -471,7 +473,7 @@ const KNOWN_TWO_TOKEN_CLIS = new Set(['git', 'gh', 'npm', 'npx', 'pnpm', 'yarn',
 /** Generate an actionable suggestion for how to grant access after a hook denial. */
 function buildAccessSuggestion(toolName: string, toolInput: Record<string, unknown>): string {
   if (toolName === 'Bash') {
-    const cmd = String(toolInput.command || '')
+    const cmd = (toolInput.command as string | undefined) ?? ''
     const tokens = cmd.split(/\s+/).filter(Boolean)
     if (tokens.length === 0) return ''
     const twoToken = tokens.length >= 2 ? `${tokens[0]} ${tokens[1]}` : ''

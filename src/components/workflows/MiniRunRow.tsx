@@ -32,7 +32,7 @@ export function MiniRunRow({
   onCancel: (runId: string) => void
   onNavigateToSession?: (sessionId: string) => void
 }) {
-  const sessionId = (run.output?.sessionId || run.input?.sessionId) as string | undefined
+  const sessionId = (run.output?.sessionId || run.input.sessionId) as string | undefined
 
   return (
     <div>
@@ -57,10 +57,10 @@ export function MiniRunRow({
         <span className="ml-auto">
           <StatusBadge status={run.status} />
         </span>
-        <div className="flex items-center gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-0.5 shrink-0" onClick={e => { e.stopPropagation(); }}>
           {run.status === 'running' && (
             <button
-              onClick={() => onCancel(run.id)}
+              onClick={() => { onCancel(run.id); }}
               className="rounded p-1 text-neutral-4 hover:text-error-4 hover:bg-neutral-9 transition-colors"
               title="Cancel"
             >
@@ -69,7 +69,7 @@ export function MiniRunRow({
           )}
           {sessionId && onNavigateToSession && (
             <button
-              onClick={() => onNavigateToSession(sessionId)}
+              onClick={() => { onNavigateToSession(sessionId); }}
               className="rounded p-1 text-neutral-4 hover:text-accent-3 hover:bg-neutral-9 transition-colors"
               title="View session"
             >
