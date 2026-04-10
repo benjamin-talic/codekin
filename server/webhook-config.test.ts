@@ -24,6 +24,7 @@ describe('loadWebhookConfig', () => {
     delete process.env.GITHUB_WEBHOOK_LOG_LINES
     delete process.env.GITHUB_WEBHOOK_SECRET
     delete process.env.GITHUB_WEBHOOK_ACTOR_ALLOWLIST
+    delete process.env.GITHUB_WEBHOOK_PR_DEBOUNCE_MS
   })
 
   afterEach(() => {
@@ -40,6 +41,7 @@ describe('loadWebhookConfig', () => {
         logLinesToInclude: 200,
         secret: '',
         actorAllowlist: [],
+        prDebounceMs: 60_000,
       })
     })
   })
@@ -194,6 +196,40 @@ describe('loadWebhookConfig', () => {
       process.env.GITHUB_WEBHOOK_ACTOR_ALLOWLIST = 'bob,charlie'
 
       expect(loadWebhookConfig().actorAllowlist).toEqual(['bob', 'charlie'])
+    })
+  })
+
+  describe('prDebounceMs', () => {
+    it('defaults to 60000', () => {
+      expect(loadWebhookConfig().prDebounceMs).toBe(60_000)
+    })
+
+    it('loads from config file', () => {
+      vi.mocked(existsSync).mockReturnValue(true)
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({ prDebounceMs: 30000 }))
+      expect(loadWebhookConfig().prDebounceMs).toBe(30000)
+    })
+
+    it('GITHUB_WEBHOOK_PR_DEBOUNCE_MS overrides default', () => {
+      process.env.GITHUB_WEBHOOK_PR_DEBOUNCE_MS = '5000'
+      expect(loadWebhookConfig().prDebounceMs).toBe(5000)
+    })
+
+    it('GITHUB_WEBHOOK_PR_DEBOUNCE_MS=0 disables debounce', () => {
+      process.env.GITHUB_WEBHOOK_PR_DEBOUNCE_MS = '0'
+      expect(loadWebhookConfig().prDebounceMs).toBe(0)
+    })
+
+    it('GITHUB_WEBHOOK_PR_DEBOUNCE_MS=abc is ignored', () => {
+      process.env.GITHUB_WEBHOOK_PR_DEBOUNCE_MS = 'abc'
+      expect(loadWebhookConfig().prDebounceMs).toBe(60_000)
+    })
+
+    it('env var overrides config file', () => {
+      vi.mocked(existsSync).mockReturnValue(true)
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({ prDebounceMs: 30000 }))
+      process.env.GITHUB_WEBHOOK_PR_DEBOUNCE_MS = '10000'
+      expect(loadWebhookConfig().prDebounceMs).toBe(10000)
     })
   })
 })

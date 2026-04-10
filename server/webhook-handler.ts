@@ -40,11 +40,27 @@ const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000
 /** Supported pull_request actions for code review. */
 const PR_REVIEW_ACTIONS = ['opened', 'synchronize', 'reopened', 'ready_for_review'] as const
 
+/**
+ * Actions that don't involve code changes — if the PR was already reviewed
+ * at this SHA, skip the review to avoid wasting resources.
+ */
+const NO_CODE_CHANGE_ACTIONS: readonly string[] = ['reopened', 'ready_for_review']
+
+/** Pending debounce entry for a PR event waiting to fire. */
+interface PendingDebounce {
+  payload: PullRequestPayload
+  event: WebhookEvent
+  sessionId: string
+  timer: ReturnType<typeof setTimeout>
+}
+
 export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEventStatus> {
   private config: FullWebhookConfig
   private sessions: SessionManager
   private dedup: WebhookDedup
   private ghHealthy = false
+  /** Pending debounce timers keyed by `repo#prNumber`. */
+  private pendingDebounce = new Map<string, PendingDebounce>()
 
   constructor(config: FullWebhookConfig, sessions: SessionManager) {
     super('webhook', PROCESSING_TIMEOUT_MS)
@@ -364,6 +380,45 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     }
 
+    // --- Smart filter: skip if this SHA was already reviewed ---
+    // For actions that don't involve code changes (reopened, ready_for_review),
+    // check the PR cache. If the exact SHA was already reviewed, there's nothing
+    // new to review — save the resources.
+    if (NO_CODE_CHANGE_ACTIONS.includes(payload.action)) {
+      const cache = loadPrCache(payload.repository.full_name, pr.number)
+      if (cache && cache.lastReviewedSha === pr.head.sha) {
+        this.recordEvent({
+          id: eventId,
+          idempotencyKey: computePrIdempotencyKey(payload.repository.full_name, pr.number, payload.action, pr.head.sha),
+          receivedAt: new Date().toISOString(),
+          event: 'pull_request',
+          action: payload.action,
+          repo: payload.repository.full_name,
+          branch: pr.head.ref,
+          workflow: 'PR Review',
+          runId: pr.number,
+          runAttempt: 1,
+          conclusion: payload.action,
+          status: 'filtered',
+          filterReason: `SHA ${pr.head.sha.slice(0, 7)} already reviewed — no code change since last review`,
+          prNumber: pr.number,
+          prTitle: pr.title,
+          headSha: pr.head.sha,
+          baseBranch: pr.base.ref,
+        })
+        console.log(`[webhook] Smart filter: ${payload.action} for ${payload.repository.full_name}#${pr.number} skipped — SHA ${pr.head.sha.slice(0, 7)} already reviewed`)
+        return {
+          statusCode: 200,
+          body: {
+            accepted: false,
+            eventId,
+            status: 'filtered',
+            filterReason: `SHA ${pr.head.sha.slice(0, 7)} already reviewed — no code change since last review`,
+          },
+        }
+      }
+    }
+
     // --- Deduplication ---
     const idempotencyKey = computePrIdempotencyKey(
       payload.repository.full_name,
@@ -397,39 +452,11 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     }
 
-    // --- Supersede any active session for this PR ---
-    this.supersedePrSessions(payload.repository.full_name, pr.number)
-
-    // --- Session cap check ---
-    if (this.isAtSessionCap()) {
-      this.recordEvent({
-        id: eventId,
-        idempotencyKey,
-        receivedAt: new Date().toISOString(),
-        event: 'pull_request',
-        action: payload.action,
-        repo: payload.repository.full_name,
-        branch: pr.head.ref,
-        workflow: 'PR Review',
-        runId: pr.number,
-        runAttempt: 1,
-        conclusion: payload.action,
-        status: 'error',
-        error: `Max concurrent webhook sessions reached (${this.config.maxConcurrentSessions})`,
-        prNumber: pr.number,
-        prTitle: pr.title,
-        headSha: pr.head.sha,
-        baseBranch: pr.base.ref,
-      })
-      return {
-        statusCode: 429,
-        body: { error: 'Max concurrent webhook sessions reached', max: this.config.maxConcurrentSessions },
-      }
-    }
-
-    // --- Pre-allocate session ID and respond 202 ---
+    // --- Pre-allocate session ID ---
     const sessionId = randomUUID()
-    const webhookEvent: WebhookEvent = {
+    const debounceMs = this.config.prDebounceMs
+
+    const makeEvent = (status: WebhookEventStatus): WebhookEvent => ({
       id: eventId,
       idempotencyKey,
       receivedAt: new Date().toISOString(),
@@ -441,20 +468,61 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       runId: pr.number,
       runAttempt: 1,
       conclusion: payload.action,
-      status: 'processing',
+      status,
       sessionId,
       prNumber: pr.number,
       prTitle: pr.title,
       headSha: pr.head.sha,
       baseBranch: pr.base.ref,
+    })
+
+    // --- Debounce: wait before processing to coalesce rapid events ---
+    if (debounceMs > 0) {
+      const webhookEvent = makeEvent('debounced')
+      this.recordEvent(webhookEvent)
+      this.dedup.recordProcessed(eventId, idempotencyKey)
+
+      const debounceKey = `${payload.repository.full_name}#${pr.number}`
+      const existing = this.pendingDebounce.get(debounceKey)
+      if (existing) {
+        clearTimeout(existing.timer)
+        this.updateEventStatus(existing.event.id, 'superseded', 'Superseded by newer event during debounce')
+        console.log(`[webhook] Debounce: replacing pending event ${existing.event.id} with ${eventId} for PR ${debounceKey}`)
+      }
+
+      const timer = setTimeout(() => {
+        this.pendingDebounce.delete(debounceKey)
+        this.fireDebouncedPrEvent(payload, webhookEvent, sessionId)
+      }, debounceMs)
+      if (timer.unref) timer.unref()
+
+      this.pendingDebounce.set(debounceKey, { payload, event: webhookEvent, sessionId, timer })
+
+      console.log(`[webhook] PR ${debounceKey} debounced for ${debounceMs}ms (event ${eventId})`)
+      return {
+        statusCode: 202,
+        body: { accepted: true, eventId, status: 'debounced', sessionId },
+      }
     }
+
+    // --- No debounce: process immediately (prDebounceMs = 0) ---
+    // Supersede BEFORE recording the new event so we don't supersede ourselves.
+    this.supersedePrSessions(payload.repository.full_name, pr.number)
+
+    const webhookEvent = makeEvent('processing')
     this.recordEvent(webhookEvent)
     this.dedup.recordProcessed(eventId, idempotencyKey)
 
-    // Process asynchronously — don't block the 202 response
+    if (this.isAtSessionCap()) {
+      this.updateEventStatus(eventId, 'error', `Max concurrent webhook sessions reached (${this.config.maxConcurrentSessions})`)
+      return {
+        statusCode: 429,
+        body: { error: 'Max concurrent webhook sessions reached', max: this.config.maxConcurrentSessions },
+      }
+    }
+
     this.processPullRequestAsync(payload, webhookEvent, sessionId).catch(err => {
       console.error('[webhook] PR async processing error:', err)
-      // Don't overwrite 'superseded' status if a newer event already took over
       if (this.getEvent(eventId)?.status !== 'superseded') {
         this.updateEventStatus(eventId, 'error', String(err))
       }
@@ -630,7 +698,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       baseBranch: pr.base.ref,
     })
 
-    // Kill any active review sessions for this PR
+    // Cancel pending debounce and kill any active review sessions for this PR
+    this.cancelPendingDebounce(repo, pr.number, merged ? 'PR merged' : 'PR closed')
     this.supersedePrSessions(repo, pr.number, merged ? 'PR merged' : 'PR closed')
 
     // Archive or delete the cache file
@@ -648,6 +717,56 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         status: 'processed',
         action: merged ? 'merged' : 'closed',
       },
+    }
+  }
+
+  /**
+   * Called when the debounce timer fires for a PR event.
+   * Runs the deferred supersede → cap check → async processing pipeline.
+   */
+  private fireDebouncedPrEvent(
+    payload: PullRequestPayload,
+    event: WebhookEvent,
+    sessionId: string,
+  ): void {
+    const pr = payload.pull_request
+    const repo = payload.repository.full_name
+
+    console.log(`[webhook] Debounce fired for ${repo}#${pr.number} (event ${event.id})`)
+
+    // Supersede any active session for this PR
+    this.supersedePrSessions(repo, pr.number)
+
+    // Cap check — we already responded 202 so we can't return 429; mark as error instead
+    if (this.isAtSessionCap()) {
+      this.updateEventStatus(event.id, 'error', `Max concurrent webhook sessions reached (${this.config.maxConcurrentSessions})`)
+      console.warn(`[webhook] Cap reached when debounce fired for ${repo}#${pr.number}, dropping event ${event.id}`)
+      return
+    }
+
+    // Transition from debounced → processing
+    this.updateEventStatus(event.id, 'processing')
+
+    this.processPullRequestAsync(payload, event, sessionId).catch(err => {
+      console.error('[webhook] PR async processing error:', err)
+      if (this.getEvent(event.id)?.status !== 'superseded') {
+        this.updateEventStatus(event.id, 'error', String(err))
+      }
+    })
+  }
+
+  /**
+   * Cancel a pending debounce timer for a PR, if one exists.
+   * Used when the PR is closed/merged or the server is shutting down.
+   */
+  private cancelPendingDebounce(repo: string, prNumber: number, reason: string): void {
+    const key = `${repo}#${prNumber}`
+    const pending = this.pendingDebounce.get(key)
+    if (pending) {
+      clearTimeout(pending.timer)
+      this.updateEventStatus(pending.event.id, 'superseded', reason)
+      this.pendingDebounce.delete(key)
+      console.log(`[webhook] Cancelled pending debounce for ${key}: ${reason}`)
     }
   }
 
@@ -806,10 +925,17 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       maxConcurrentSessions: this.config.maxConcurrentSessions,
       logLinesToInclude: this.config.logLinesToInclude,
       actorAllowlist: this.config.actorAllowlist,
+      prDebounceMs: this.config.prDebounceMs,
     }
   }
 
   shutdown(): void {
+    // Cancel all pending debounce timers
+    for (const [, pending] of this.pendingDebounce) {
+      clearTimeout(pending.timer)
+    }
+    this.pendingDebounce.clear()
+
     super.shutdown()
     this.dedup.shutdown()
   }

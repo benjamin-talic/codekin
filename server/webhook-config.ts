@@ -19,6 +19,7 @@ export function loadWebhookConfig(): FullWebhookConfig {
   let maxConcurrentSessions = 15
   let logLinesToInclude = 200
   let actorAllowlist: string[] = []
+  let prDebounceMs = 60_000 // 60 seconds — coalesce rapid PR events
 
   // Try loading config file
   if (existsSync(CONFIG_FILE)) {
@@ -31,6 +32,7 @@ export function loadWebhookConfig(): FullWebhookConfig {
       if (Array.isArray(file.actorAllowlist) && file.actorAllowlist.every(v => typeof v === 'string')) {
         actorAllowlist = file.actorAllowlist
       }
+      if (typeof file.prDebounceMs === 'number') prDebounceMs = file.prDebounceMs
     } catch (err) {
       console.warn('[webhook] Failed to parse config file:', err)
     }
@@ -59,6 +61,12 @@ export function loadWebhookConfig(): FullWebhookConfig {
     actorAllowlist = envActorAllowlist.split(',').map(s => s.trim()).filter(Boolean)
   }
 
+  const envPrDebounceMs = process.env.GITHUB_WEBHOOK_PR_DEBOUNCE_MS
+  if (envPrDebounceMs !== undefined) {
+    const n = parseInt(envPrDebounceMs, 10)
+    if (!isNaN(n) && n >= 0) prDebounceMs = n
+  }
+
   const secret = process.env.GITHUB_WEBHOOK_SECRET || ''
 
   return {
@@ -67,5 +75,6 @@ export function loadWebhookConfig(): FullWebhookConfig {
     maxConcurrentSessions,
     logLinesToInclude,
     actorAllowlist,
+    prDebounceMs,
   }
 }

@@ -3,6 +3,7 @@ export type WebhookEventStatus =
   | 'received'
   | 'filtered'
   | 'duplicate'
+  | 'debounced'
   | 'processing'
   | 'session_created'
   | 'completed'
@@ -114,6 +115,7 @@ export interface WebhookConfig {
   maxConcurrentSessions: number
   logLinesToInclude: number
   actorAllowlist: string[]
+  prDebounceMs: number            // delay before processing PR events (coalesces rapid events)
 }
 
 // --- GitHub payload subset (pull_request) ---
