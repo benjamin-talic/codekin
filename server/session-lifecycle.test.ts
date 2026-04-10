@@ -2,18 +2,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-// Mock fs.existsSync so we can control working-directory checks
+// Mock fs so we can control working-directory checks and prevent realpathSync
+// from crashing when the path doesn't exist (e.g. in CI).
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>()
   return {
     ...actual,
     existsSync: vi.fn(() => true),
+    realpathSync: vi.fn((p: string) => p),
   }
 })
 
 // Mock ClaudeProcess — we don't want real CLI spawns
-vi.mock('./claude-process.js', () => {
-  const { EventEmitter } = require('node:events')
+vi.mock('./claude-process.js', async () => {
+  const { EventEmitter } = await import('node:events')
   class MockClaudeProcess extends EventEmitter {
     start = vi.fn()
     stop = vi.fn()
@@ -41,7 +43,7 @@ vi.mock('./session-restart-scheduler.js', () => ({
 
 import { SessionLifecycle, type SessionLifecycleDeps } from './session-lifecycle.js'
 import { existsSync } from 'fs'
-import type { Session, WsServerMessage } from './types.js'
+import type { Session } from './types.js'
 import { EventEmitter } from 'node:events'
 
 // ---------------------------------------------------------------------------
