@@ -909,16 +909,20 @@ describe('SessionManager', () => {
       await promise
     })
 
-    it('prefix-matches git push across args (PATTERNABLE enables runtime prefix match)', async () => {
+    it('does not prefix-match git push (NEVER_PATTERN only, exact match required)', async () => {
       const s = sm.create('test', '/tmp')
       s.clients.add(fakeWs())
       sm.approvalManager.addRepoApproval(s.workingDir, { command: 'git push origin main' })
 
-      // git push is in both PATTERNABLE and NEVER_PATTERN — no stored pattern,
-      // but runtime prefix-match works (both share prefix "git push")
-      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'git push origin feat/x' })
-      expect(result).toEqual({ allow: true, always: true })
-      expect(s.pendingToolApprovals.size).toBe(0)
+      // git push is only in NEVER_PATTERN_PREFIXES — no prefix match,
+      // different args require separate approval
+      const promise = sm.requestToolApproval(s.id, 'Bash', { command: 'git push origin feat/x' })
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // Resolve the pending approval manually
+      const pending = s.pendingToolApprovals.values().next().value!
+      pending.resolve({ allow: false, always: false })
+      await promise
     })
 
     it('still allows exact match for dangerous commands', async () => {
@@ -3258,6 +3262,49 @@ describe('SessionManager', () => {
 
       const promise = sm.requestToolApproval(s.id, 'Write', { command: 'curl something' })
 
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      s.pendingToolApprovals.values().next().value!.resolve({ allow: false, always: false })
+      await promise
+    })
+  })
+
+  describe('resolveAutoApproval() via permissionMode', () => {
+    it('auto-approves file tools when permissionMode is acceptEdits', async () => {
+      const s = sm.create('perm-edits', '/tmp', { permissionMode: 'acceptEdits' })
+
+      for (const tool of ['Write', 'Edit', 'Read', 'Glob', 'Grep', 'NotebookEdit']) {
+        const result = await sm.requestToolApproval(s.id, tool, { file_path: '/tmp/x' })
+        expect(result).toEqual({ allow: true, always: false })
+      }
+      expect(s.pendingToolApprovals.size).toBe(0)
+    })
+
+    it('auto-approves file tools when permissionMode is bypassPermissions', async () => {
+      const s = sm.create('perm-bypass', '/tmp', { permissionMode: 'bypassPermissions' })
+
+      const result = await sm.requestToolApproval(s.id, 'Write', { file_path: '/tmp/x' })
+      expect(result).toEqual({ allow: true, always: false })
+    })
+
+    it('does not auto-approve file tools when permissionMode is default', async () => {
+      const s = sm.create('perm-default', '/tmp', { permissionMode: 'default' })
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const promise = sm.requestToolApproval(s.id, 'Write', { file_path: '/tmp/x' })
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      s.pendingToolApprovals.values().next().value!.resolve({ allow: false, always: false })
+      await promise
+    })
+
+    it('does not auto-approve non-file tools via permissionMode', async () => {
+      const s = sm.create('perm-bash', '/tmp', { permissionMode: 'acceptEdits' })
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const promise = sm.requestToolApproval(s.id, 'Bash', { command: 'ls' })
       expect(s.pendingToolApprovals.size).toBe(1)
 
       s.pendingToolApprovals.values().next().value!.resolve({ allow: false, always: false })

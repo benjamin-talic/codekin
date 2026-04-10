@@ -13,6 +13,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import DOMPurify from 'dompurify'
 import hljs from '../lib/hljs'
 import { IconArrowDown, IconRobotFace } from '@tabler/icons-react'
 import type { ChatMessage } from '../types'
@@ -156,7 +157,21 @@ function highlightCode(code: string, lang: string): string {
   return code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+/** Strip uninformative noise lines the agent emits (e.g. "Ignoring.", "Ignoring — all unmanaged.", "All clear.") */
+const NOISE_RE = /^\s*(Ignoring\b.*|All clear)\.?\s*$/
+function stripNoise(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !NOISE_RE.test(line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: { msg: ChatMessage & { type: 'assistant' }; fontSize: number; variant?: ChatViewVariant; repeatCount?: number }) {
+  const displayText = stripNoise(msg.text)
+  if (!displayText) return null
+
   return (
     <div className={`px-4 py-2 ${variant === 'orchestrator' ? 'orchestrator-assistant-msg' : ''}`}>
       <div
@@ -181,7 +196,7 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
                         padding: '1em',
                         overflowX: 'auto',
                       }}
-                      dangerouslySetInnerHTML={{ __html: highlightCode(codeString, match[1]) }}
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightCode(codeString, match[1])) }}
                     />
                     <CodeCopyButton code={codeString} />
                   </div>
@@ -210,7 +225,7 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
             },
           }}
         >
-          {msg.text}
+          {displayText}
         </Markdown>
         {repeatCount && repeatCount > 1 && (
           <span className="inline-block ml-1 text-[12px] text-neutral-5 bg-neutral-10 rounded-full px-2 py-0.5 align-middle">

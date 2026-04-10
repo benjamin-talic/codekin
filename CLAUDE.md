@@ -26,6 +26,16 @@ npm run lint         # eslint
 - **Do NOT use `cat` to read files** — use the Read tool instead
 - These rules prevent multi-operation approval prompts in the Codekin terminal UI
 
+## Audit & Report Output
+
+When generating audit reports, health checks, or any recurring assessment:
+
+1. **Always write the report to a file** — never just print it as conversation text.
+2. **Location**: `.codekin/reports/<category>/YYYY-MM-DD_<type>.md` (e.g., `.codekin/reports/security/2026-04-10_security-audit.md`).
+3. **Existing categories**: `code-review`, `comments`, `complexity`, `dependencies`, `docs-audit`, `repo-health`, `security`, `test-coverage`. Create new subdirectories if needed.
+4. **Clean output only** — do not include internal reasoning, chain-of-thought, or status messages (e.g., "Now I have the data...") in the report file. The file should contain only the finished report.
+5. **Commit the report** on a branch and open a PR so it is visible in the repo history.
+
 ## Output Conventions
 
 - Always use fenced code blocks (` ```language `) for code/config snippets
