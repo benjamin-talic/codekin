@@ -949,6 +949,9 @@ describe('WebhookHandler', () => {
           codebaseContext: 'context',
           reviewFindings: 'findings',
         }
+        // Called twice: once in smart filter (SHA mismatch → passes through),
+        // once in processPullRequestAsync for cache context
+        mockLoadPrCache.mockReturnValueOnce(mockCache as any)
         mockLoadPrCache.mockReturnValueOnce(mockCache as any)
         mockFetchExistingReviewComment.mockResolvedValueOnce(12345)
 
@@ -1224,10 +1227,33 @@ describe('WebhookHandler', () => {
         expect(result.body.status).toBe('debounced')
       })
 
-      it('does not apply smart filter to opened or synchronize actions', async () => {
+      it('filters opened/synchronize redeliveries when SHA was already reviewed', async () => {
         await handler.checkHealth()
-        // Even with matching cache SHA, opened/synchronize should proceed
+        const mockCache = {
+          prNumber: 42,
+          repo: 'owner/repo',
+          lastReviewedSha: 'deadbeef1234567890abcdef1234567890abcdef',
+          timestamp: '2026-04-02T10:00:00.000Z',
+          priorReviewSummary: 'summary',
+          codebaseContext: 'context',
+          reviewFindings: 'findings',
+        } as any
+
         for (const action of ['opened', 'synchronize']) {
+          mockLoadPrCache.mockReturnValueOnce(mockCache)
+          const payload = makePrPayload({ action })
+          const body = Buffer.from(JSON.stringify(payload))
+          const result = await handler.handleWebhook(body, makePrHeaders(body, { delivery: `d-${action}` }))
+          expect(result.statusCode).toBe(200)
+          expect(result.body.status).toBe('filtered')
+          expect(result.body.filterReason).toContain('redeliver')
+        }
+      })
+
+      it('proceeds for opened/synchronize when no cache exists', async () => {
+        await handler.checkHealth()
+        for (const action of ['opened', 'synchronize']) {
+          mockLoadPrCache.mockReturnValueOnce(undefined)
           const payload = makePrPayload({ action })
           const body = Buffer.from(JSON.stringify(payload))
           const result = await handler.handleWebhook(body, makePrHeaders(body, { delivery: `d-${action}` }))

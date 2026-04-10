@@ -418,41 +418,39 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     }
 
     // --- Smart filter: skip if this SHA was already reviewed ---
-    // For actions that don't involve code changes (reopened, ready_for_review),
-    // check the PR cache. If the exact SHA was already reviewed, there's nothing
-    // new to review — save the resources.
-    if (NO_CODE_CHANGE_ACTIONS.includes(payload.action)) {
-      const cache = loadPrCache(payload.repository.full_name, pr.number)
-      if (cache && cache.lastReviewedSha === pr.head.sha) {
-        this.recordEvent({
-          id: eventId,
-          idempotencyKey,
-          receivedAt: new Date().toISOString(),
-          event: 'pull_request',
-          action: payload.action,
-          repo: payload.repository.full_name,
-          branch: pr.head.ref,
-          workflow: 'PR Review',
-          runId: pr.number,
-          runAttempt: 1,
-          conclusion: payload.action,
-          status: 'filtered',
-          filterReason: `SHA ${pr.head.sha.slice(0, 7)} already reviewed — no code change since last review`,
-          prNumber: pr.number,
-          prTitle: pr.title,
-          headSha: pr.head.sha,
-          baseBranch: pr.base.ref,
-        })
-        console.log(`[webhook] Smart filter: ${payload.action} for ${payload.repository.full_name}#${pr.number} skipped — SHA ${pr.head.sha.slice(0, 7)} already reviewed`)
-        return {
-          statusCode: 200,
-          body: {
-            accepted: false,
-            eventId,
-            status: 'filtered',
-            filterReason: `SHA ${pr.head.sha.slice(0, 7)} already reviewed — no code change since last review`,
-          },
-        }
+    // Two layers:
+    //   1. NO_CODE_CHANGE_ACTIONS (reopened, ready_for_review) — these actions
+    //      inherently don't change code, so skip if SHA was already reviewed.
+    //   2. All actions — catches redelivered events (e.g. GitHub retry after
+    //      dedup TTL expires) where the SHA was already reviewed.
+    const prCache = loadPrCache(payload.repository.full_name, pr.number)
+    if (prCache && prCache.lastReviewedSha === pr.head.sha) {
+      const reason = NO_CODE_CHANGE_ACTIONS.includes(payload.action)
+        ? `SHA ${pr.head.sha.slice(0, 7)} already reviewed — no code change since last review`
+        : `SHA ${pr.head.sha.slice(0, 7)} already reviewed — possible redeliver`
+      this.recordEvent({
+        id: eventId,
+        idempotencyKey,
+        receivedAt: new Date().toISOString(),
+        event: 'pull_request',
+        action: payload.action,
+        repo: payload.repository.full_name,
+        branch: pr.head.ref,
+        workflow: 'PR Review',
+        runId: pr.number,
+        runAttempt: 1,
+        conclusion: payload.action,
+        status: 'filtered',
+        filterReason: reason,
+        prNumber: pr.number,
+        prTitle: pr.title,
+        headSha: pr.head.sha,
+        baseBranch: pr.base.ref,
+      })
+      console.log(`[webhook] Smart filter: ${payload.action} for ${payload.repository.full_name}#${pr.number} skipped — ${reason}`)
+      return {
+        statusCode: 200,
+        body: { accepted: false, eventId, status: 'filtered', filterReason: reason },
       }
     }
 
