@@ -515,17 +515,19 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     // Supersede BEFORE recording the new event so we don't supersede ourselves.
     this.supersedePrSessions(payload.repository.full_name, pr.number)
 
-    const webhookEvent = makeEvent('processing')
-    this.recordEvent(webhookEvent)
-    this.dedup.recordProcessed(eventId, idempotencyKey)
-
     if (this.isAtSessionCap()) {
+      this.recordEvent(makeEvent('error'))
       this.updateEventStatus(eventId, 'error', `Max concurrent webhook sessions reached (${this.config.maxConcurrentSessions})`)
+      // Don't record in dedup — let GitHub retry when capacity frees up
       return {
         statusCode: 429,
         body: { error: 'Max concurrent webhook sessions reached', max: this.config.maxConcurrentSessions },
       }
     }
+
+    const webhookEvent = makeEvent('processing')
+    this.recordEvent(webhookEvent)
+    this.dedup.recordProcessed(eventId, idempotencyKey)
 
     this.processPullRequestAsync(payload, webhookEvent, sessionId).catch(err => {
       console.error('[webhook] PR async processing error:', err)
