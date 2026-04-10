@@ -645,8 +645,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       model: reviewModel,
     }
 
-    // allowedTools and addDirs are Claude-specific — OpenCode configures tools via .opencode/config.jsonc
     if (reviewProvider === 'claude') {
+      // Claude uses allowedTools and addDirs for sandboxed tool access
       sessionOptions.allowedTools = [
         'Bash(gh:*)',
         'Write',
@@ -656,6 +656,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         'WebSearch',
       ]
       sessionOptions.addDirs = [dirname(cachePath)]
+    } else {
+      // OpenCode doesn't support allowedTools/addDirs — it uses its own permission system.
+      // Auto-approve permissions for automated webhook sessions to avoid interactive prompts.
+      sessionOptions.permissionMode = 'bypassPermissions'
     }
 
     this.sessions.create(sessionName, workspacePath, sessionOptions)
