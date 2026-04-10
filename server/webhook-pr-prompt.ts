@@ -93,6 +93,10 @@ function buildDefaultInstructions(ctx: PullRequestContext): string {
   return lines.join('\n')
 }
 
+function formatReviewerDisplay(provider: 'claude' | 'opencode', model: string): string {
+  return provider === 'opencode' ? `OpenCode (${model})` : `Claude (${model})`
+}
+
 /**
  * Builds the full prompt for PR review, combining PR context with review instructions.
  *
@@ -103,6 +107,9 @@ function buildDefaultInstructions(ctx: PullRequestContext): string {
 export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: string, options?: PrPromptOptions): string {
   const lines: string[] = []
   const reviewBodyPath = `${workspacePath}/pr-${ctx.prNumber}-review-body.md`
+  const reviewerDisplay = (ctx.reviewProvider && ctx.reviewModel)
+    ? formatReviewerDisplay(ctx.reviewProvider, ctx.reviewModel)
+    : undefined
 
   // --- PR metadata (always included) ---
   lines.push('A pull request needs code review.')
@@ -116,6 +123,9 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
 
   const shortHead = ctx.headSha.slice(0, 7)
   lines.push(`- **Head**: ${shortHead}`)
+  if (reviewerDisplay) {
+    lines.push(`- **Reviewer**: ${reviewerDisplay}`)
+  }
 
   if (ctx.prUrl) {
     lines.push(`- **URL**: ${ctx.prUrl}`)
@@ -218,6 +228,9 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push(`1. Write your full review to \`${reviewBodyPath}\``)
     lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
     lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/comments/${options.existingCommentId} -X PATCH -F body=@${reviewBodyPath}\``)
+    if (reviewerDisplay) {
+      lines.push(`4. Include this footer at the end of the review body: \`*Reviewed by ${reviewerDisplay} via [Codekin](https://github.com/Multiplier-Labs/codekin)*\``)
+    }
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body.`)
     lines.push('')
@@ -229,6 +242,9 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push(`1. Write your full review to \`${reviewBodyPath}\``)
     lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
     lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/${ctx.prNumber}/comments -F body=@${reviewBodyPath}\``)
+    if (reviewerDisplay) {
+      lines.push(`4. Include this footer at the end of the review body: \`*Reviewed by ${reviewerDisplay} via [Codekin](https://github.com/Multiplier-Labs/codekin)*\``)
+    }
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body. This marker allows future reviews to update this comment instead of creating a new one.`)
     lines.push('')

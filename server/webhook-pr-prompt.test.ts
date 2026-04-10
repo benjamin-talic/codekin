@@ -57,6 +57,37 @@ describe('buildPrReviewPrompt', () => {
     expect(prompt).toContain('**Repository**: owner/repo')
     expect(prompt).toContain('**PR**: #42 — Fix authentication bug')
     expect(prompt).toContain('**Author**: octocat')
+    // No reviewer line when fields are absent
+    expect(prompt).not.toContain('**Reviewer**:')
+  })
+
+  it('includes reviewer metadata when provider/model are set', () => {
+    const prompt = buildPrReviewPrompt(
+      makeContext({ reviewProvider: 'opencode', reviewModel: 'openai/gpt-5.4' }),
+      '/tmp/workspace',
+    )
+    expect(prompt).toContain('**Reviewer**: OpenCode (openai/gpt-5.4)')
+  })
+
+  it('includes claude reviewer metadata', () => {
+    const prompt = buildPrReviewPrompt(
+      makeContext({ reviewProvider: 'claude', reviewModel: 'sonnet' }),
+      '/tmp/workspace',
+    )
+    expect(prompt).toContain('**Reviewer**: Claude (sonnet)')
+  })
+
+  it('includes reviewer attribution footer instruction', () => {
+    const prompt = buildPrReviewPrompt(
+      makeContext({ reviewProvider: 'opencode', reviewModel: 'openai/gpt-5.4' }),
+      '/tmp/workspace',
+    )
+    expect(prompt).toContain('*Reviewed by OpenCode (openai/gpt-5.4) via')
+  })
+
+  it('omits reviewer attribution footer when fields are absent', () => {
+    const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
+    expect(prompt).not.toContain('*Reviewed by ')
     expect(prompt).toContain('**Branch**: fix-auth → main')
     expect(prompt).toContain('3 files changed, +25/-10')
     expect(prompt).toContain('**Head**: abc1234')

@@ -87,6 +87,9 @@ function makeConfig(overrides: Partial<FullWebhookConfig> = {}): FullWebhookConf
     logLinesToInclude: 200,
     actorAllowlist: [],
     prDebounceMs: 60_000,
+    prReviewProvider: 'claude' as const,
+    prReviewClaudeModel: 'sonnet',
+    prReviewOpencodeModel: 'openai/gpt-5.4',
     ...overrides,
   }
 }
@@ -493,6 +496,9 @@ describe('WebhookHandler', () => {
         logLinesToInclude: 200,
         actorAllowlist: [],
         prDebounceMs: 60_000,
+        prReviewProvider: 'claude',
+        prReviewClaudeModel: 'sonnet',
+        prReviewOpencodeModel: 'openai/gpt-5.4',
       })
       expect('secret' in config).toBe(false)
     })
@@ -743,6 +749,116 @@ describe('WebhookHandler', () => {
         '/tmp/workspace',
         expect.objectContaining({ source: 'webhook' }),
       )
+    })
+
+    describe('provider selection', () => {
+      it('uses claude provider with configured model by default', async () => {
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig({ prDebounceMs: 0, prReviewClaudeModel: 'opus' }), sessions)
+        await handler.checkHealth()
+
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(sessions.create).toHaveBeenCalledWith(
+          expect.any(String),
+          '/tmp/workspace',
+          expect.objectContaining({
+            provider: 'claude',
+            model: 'opus',
+            allowedTools: expect.arrayContaining(['Write']),
+          }),
+        )
+        expect(mockBuildPrReviewPrompt).toHaveBeenCalledWith(
+          expect.objectContaining({ reviewProvider: 'claude', reviewModel: 'opus' }),
+          '/tmp/workspace',
+          expect.any(Object),
+        )
+      })
+
+      it('uses opencode provider and omits claude-only options', async () => {
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig({
+          prDebounceMs: 0,
+          prReviewProvider: 'opencode',
+          prReviewOpencodeModel: 'openai/gpt-5.4',
+        }), sessions)
+        await handler.checkHealth()
+
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(sessions.create).toHaveBeenCalledWith(
+          expect.any(String),
+          '/tmp/workspace',
+          expect.objectContaining({
+            provider: 'opencode',
+            model: 'openai/gpt-5.4',
+          }),
+        )
+
+        // allowedTools and addDirs should NOT be present for opencode
+        const createCall = sessions.create.mock.calls[sessions.create.mock.calls.length - 1]
+        const options = createCall?.[2] as Record<string, unknown>
+        expect(options.allowedTools).toBeUndefined()
+        expect(options.addDirs).toBeUndefined()
+
+        expect(mockBuildPrReviewPrompt).toHaveBeenCalledWith(
+          expect.objectContaining({ reviewProvider: 'opencode', reviewModel: 'openai/gpt-5.4' }),
+          '/tmp/workspace',
+          expect.any(Object),
+        )
+      })
+
+      it('split mode chooses claude when random < 0.5', async () => {
+        vi.spyOn(Math, 'random').mockReturnValueOnce(0.1)
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig({
+          prDebounceMs: 0,
+          prReviewProvider: 'split',
+          prReviewClaudeModel: 'sonnet-split',
+          prReviewOpencodeModel: 'openai/gpt-5.4-split',
+        }), sessions)
+        await handler.checkHealth()
+
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(sessions.create).toHaveBeenCalledWith(
+          expect.any(String),
+          '/tmp/workspace',
+          expect.objectContaining({ provider: 'claude', model: 'sonnet-split' }),
+        )
+      })
+
+      it('split mode chooses opencode when random >= 0.5', async () => {
+        vi.spyOn(Math, 'random').mockReturnValueOnce(0.9)
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig({
+          prDebounceMs: 0,
+          prReviewProvider: 'split',
+          prReviewClaudeModel: 'sonnet-split',
+          prReviewOpencodeModel: 'openai/gpt-5.4-split',
+        }), sessions)
+        await handler.checkHealth()
+
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(sessions.create).toHaveBeenCalledWith(
+          expect.any(String),
+          '/tmp/workspace',
+          expect.objectContaining({ provider: 'opencode', model: 'openai/gpt-5.4-split' }),
+        )
+      })
     })
 
     describe('session superseding', () => {

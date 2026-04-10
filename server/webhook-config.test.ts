@@ -25,6 +25,9 @@ describe('loadWebhookConfig', () => {
     delete process.env.GITHUB_WEBHOOK_SECRET
     delete process.env.GITHUB_WEBHOOK_ACTOR_ALLOWLIST
     delete process.env.GITHUB_WEBHOOK_PR_DEBOUNCE_MS
+    delete process.env.GITHUB_WEBHOOK_PR_REVIEW_PROVIDER
+    delete process.env.GITHUB_WEBHOOK_PR_REVIEW_CLAUDE_MODEL
+    delete process.env.GITHUB_WEBHOOK_PR_REVIEW_OPENCODE_MODEL
   })
 
   afterEach(() => {
@@ -42,6 +45,9 @@ describe('loadWebhookConfig', () => {
         secret: '',
         actorAllowlist: [],
         prDebounceMs: 60_000,
+        prReviewProvider: 'claude',
+        prReviewClaudeModel: 'sonnet',
+        prReviewOpencodeModel: 'openai/gpt-5.4',
       })
     })
   })
@@ -230,6 +236,64 @@ describe('loadWebhookConfig', () => {
       vi.mocked(readFileSync).mockReturnValue(JSON.stringify({ prDebounceMs: 30000 }))
       process.env.GITHUB_WEBHOOK_PR_DEBOUNCE_MS = '10000'
       expect(loadWebhookConfig().prDebounceMs).toBe(10000)
+    })
+  })
+
+  describe('prReview provider/model settings', () => {
+    it('loads provider and model settings from config file', () => {
+      vi.mocked(existsSync).mockReturnValue(true)
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
+        prReviewProvider: 'opencode',
+        prReviewClaudeModel: 'opus',
+        prReviewOpencodeModel: 'openai/gpt-5.4-mini',
+      }))
+
+      const config = loadWebhookConfig()
+      expect(config.prReviewProvider).toBe('opencode')
+      expect(config.prReviewClaudeModel).toBe('opus')
+      expect(config.prReviewOpencodeModel).toBe('openai/gpt-5.4-mini')
+    })
+
+    it('env vars override config file values', () => {
+      vi.mocked(existsSync).mockReturnValue(true)
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
+        prReviewProvider: 'claude',
+        prReviewClaudeModel: 'sonnet',
+        prReviewOpencodeModel: 'openai/gpt-5.4',
+      }))
+
+      process.env.GITHUB_WEBHOOK_PR_REVIEW_PROVIDER = 'split'
+      process.env.GITHUB_WEBHOOK_PR_REVIEW_CLAUDE_MODEL = 'opus-override'
+      process.env.GITHUB_WEBHOOK_PR_REVIEW_OPENCODE_MODEL = 'openai/o3'
+
+      const config = loadWebhookConfig()
+      expect(config.prReviewProvider).toBe('split')
+      expect(config.prReviewClaudeModel).toBe('opus-override')
+      expect(config.prReviewOpencodeModel).toBe('openai/o3')
+    })
+
+    it('ignores invalid provider mode in config file', () => {
+      vi.mocked(existsSync).mockReturnValue(true)
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({ prReviewProvider: 'invalid' }))
+      expect(loadWebhookConfig().prReviewProvider).toBe('claude')
+    })
+
+    it('ignores invalid provider mode in env var', () => {
+      process.env.GITHUB_WEBHOOK_PR_REVIEW_PROVIDER = 'invalid'
+      expect(loadWebhookConfig().prReviewProvider).toBe('claude')
+    })
+
+    it('accepts split as valid provider mode', () => {
+      process.env.GITHUB_WEBHOOK_PR_REVIEW_PROVIDER = 'split'
+      expect(loadWebhookConfig().prReviewProvider).toBe('split')
+    })
+
+    it('ignores empty string model env vars', () => {
+      process.env.GITHUB_WEBHOOK_PR_REVIEW_CLAUDE_MODEL = ''
+      process.env.GITHUB_WEBHOOK_PR_REVIEW_OPENCODE_MODEL = '  '
+      const config = loadWebhookConfig()
+      expect(config.prReviewClaudeModel).toBe('sonnet')
+      expect(config.prReviewOpencodeModel).toBe('openai/gpt-5.4')
     })
   })
 })

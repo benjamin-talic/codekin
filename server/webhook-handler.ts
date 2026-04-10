@@ -23,7 +23,7 @@
 
 import { randomUUID } from 'crypto'
 import { dirname } from 'path'
-import type { SessionManager } from './session-manager.js'
+import type { CreateSessionOptions, SessionManager } from './session-manager.js'
 import { verifyHmacSignature } from './crypto-utils.js'
 import type { WsServerMessage } from './types.js'
 import type { WebhookConfig, WebhookEvent, WebhookEventStatus, WorkflowRunPayload, FailureContext, PullRequestPayload, PullRequestContext } from './webhook-types.js'
@@ -119,6 +119,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   async checkHealth(): Promise<boolean> {
     const result = await checkGhHealth()
     this.ghHealthy = result.available
+    console.log(`[webhook] PR review config: provider=${this.config.prReviewProvider}, claudeModel=${this.config.prReviewClaudeModel}, opencodeModel=${this.config.prReviewOpencodeModel}`)
     if (!result.available) {
       console.warn(`[webhook] gh health check failed: ${result.reason}`)
       console.warn('[webhook] Webhook processing disabled — manual sessions still work')
@@ -553,7 +554,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     const repo = payload.repository.full_name
     const repoName = payload.repository.name
 
-    console.log(`[webhook] Processing PR: ${repo} #${pr.number} "${pr.title}" (${payload.action})`)
+    const { provider: reviewProvider, model: reviewModel } = this.resolvePrReviewProvider()
+    console.log(`[webhook] Processing PR: ${repo} #${pr.number} "${pr.title}" (${payload.action}) — reviewer: ${reviewProvider} (${reviewModel})`)
 
     // --- Fetch PR context (all calls degrade gracefully) ---
     const [diffResult, fileList, commitMessages, reviewComments, reviews, priorCache, existingCommentId] = await Promise.all([
@@ -594,6 +596,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       commitMessages,
       reviewComments,
       reviews,
+      reviewProvider,
+      reviewModel,
     }
 
     // --- Create workspace ---
@@ -633,21 +637,28 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       sessionName = `PR #${pr.number}: ${pr.title}`
     }
 
-    this.sessions.create(sessionName, workspacePath, {
+    const sessionOptions: CreateSessionOptions = {
       source: 'webhook',
       id: sessionId,
       groupDir,
-      model: 'sonnet',
-      allowedTools: [
+      provider: reviewProvider,
+      model: reviewModel,
+    }
+
+    // allowedTools and addDirs are Claude-specific — OpenCode configures tools via .opencode/config.jsonc
+    if (reviewProvider === 'claude') {
+      sessionOptions.allowedTools = [
         'Bash(gh:*)',
         'Write',
         'mcp__plugin_context7_context7__resolve-library-id',
         'mcp__plugin_context7_context7__query-docs',
         'WebFetch',
         'WebSearch',
-      ],
-      addDirs: [dirname(cachePath)],
-    })
+      ]
+      sessionOptions.addDirs = [dirname(cachePath)]
+    }
+
+    this.sessions.create(sessionName, workspacePath, sessionOptions)
 
     console.log(`[webhook] PR session created: ${sessionName} (${sessionId})`)
     this.updateEventStatus(event.id, 'session_created')
@@ -670,6 +681,22 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   // ---------------------------------------------------------------------------
   // Shared helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Resolve the provider and model for a PR review session based on config.
+   * For 'split' mode, performs a random coin flip per event.
+   */
+  private resolvePrReviewProvider(): { provider: 'claude' | 'opencode'; model: string } {
+    if (this.config.prReviewProvider === 'opencode') {
+      return { provider: 'opencode', model: this.config.prReviewOpencodeModel }
+    }
+    if (this.config.prReviewProvider === 'split') {
+      return Math.random() < 0.5
+        ? { provider: 'claude', model: this.config.prReviewClaudeModel }
+        : { provider: 'opencode', model: this.config.prReviewOpencodeModel }
+    }
+    return { provider: 'claude', model: this.config.prReviewClaudeModel }
+  }
 
   /**
    * Handle a PR being closed or merged: kill active sessions and archive/delete cache.
@@ -936,6 +963,9 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       logLinesToInclude: this.config.logLinesToInclude,
       actorAllowlist: this.config.actorAllowlist,
       prDebounceMs: this.config.prDebounceMs,
+      prReviewProvider: this.config.prReviewProvider,
+      prReviewClaudeModel: this.config.prReviewClaudeModel,
+      prReviewOpencodeModel: this.config.prReviewOpencodeModel,
     }
   }
 
