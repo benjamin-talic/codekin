@@ -380,46 +380,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     }
 
-    // --- Smart filter: skip if this SHA was already reviewed ---
-    // For actions that don't involve code changes (reopened, ready_for_review),
-    // check the PR cache. If the exact SHA was already reviewed, there's nothing
-    // new to review — save the resources.
-    if (NO_CODE_CHANGE_ACTIONS.includes(payload.action)) {
-      const cache = loadPrCache(payload.repository.full_name, pr.number)
-      if (cache && cache.lastReviewedSha === pr.head.sha) {
-        this.recordEvent({
-          id: eventId,
-          idempotencyKey: computePrIdempotencyKey(payload.repository.full_name, pr.number, payload.action, pr.head.sha),
-          receivedAt: new Date().toISOString(),
-          event: 'pull_request',
-          action: payload.action,
-          repo: payload.repository.full_name,
-          branch: pr.head.ref,
-          workflow: 'PR Review',
-          runId: pr.number,
-          runAttempt: 1,
-          conclusion: payload.action,
-          status: 'filtered',
-          filterReason: `SHA ${pr.head.sha.slice(0, 7)} already reviewed — no code change since last review`,
-          prNumber: pr.number,
-          prTitle: pr.title,
-          headSha: pr.head.sha,
-          baseBranch: pr.base.ref,
-        })
-        console.log(`[webhook] Smart filter: ${payload.action} for ${payload.repository.full_name}#${pr.number} skipped — SHA ${pr.head.sha.slice(0, 7)} already reviewed`)
-        return {
-          statusCode: 200,
-          body: {
-            accepted: false,
-            eventId,
-            status: 'filtered',
-            filterReason: `SHA ${pr.head.sha.slice(0, 7)} already reviewed — no code change since last review`,
-          },
-        }
-      }
-    }
-
-    // --- Deduplication ---
+    // --- Deduplication (runs before smart filter so redeliveries are caught cheaply) ---
     const idempotencyKey = computePrIdempotencyKey(
       payload.repository.full_name,
       pr.number,
@@ -452,6 +413,45 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     }
 
+    // --- Smart filter: skip if this SHA was already reviewed ---
+    // For actions that don't involve code changes (reopened, ready_for_review),
+    // check the PR cache. If the exact SHA was already reviewed, there's nothing
+    // new to review — save the resources.
+    if (NO_CODE_CHANGE_ACTIONS.includes(payload.action)) {
+      const cache = loadPrCache(payload.repository.full_name, pr.number)
+      if (cache && cache.lastReviewedSha === pr.head.sha) {
+        this.recordEvent({
+          id: eventId,
+          idempotencyKey,
+          receivedAt: new Date().toISOString(),
+          event: 'pull_request',
+          action: payload.action,
+          repo: payload.repository.full_name,
+          branch: pr.head.ref,
+          workflow: 'PR Review',
+          runId: pr.number,
+          runAttempt: 1,
+          conclusion: payload.action,
+          status: 'filtered',
+          filterReason: `SHA ${pr.head.sha.slice(0, 7)} already reviewed — no code change since last review`,
+          prNumber: pr.number,
+          prTitle: pr.title,
+          headSha: pr.head.sha,
+          baseBranch: pr.base.ref,
+        })
+        console.log(`[webhook] Smart filter: ${payload.action} for ${payload.repository.full_name}#${pr.number} skipped — SHA ${pr.head.sha.slice(0, 7)} already reviewed`)
+        return {
+          statusCode: 200,
+          body: {
+            accepted: false,
+            eventId,
+            status: 'filtered',
+            filterReason: `SHA ${pr.head.sha.slice(0, 7)} already reviewed — no code change since last review`,
+          },
+        }
+      }
+    }
+
     // --- Pre-allocate session ID ---
     const sessionId = randomUUID()
     const debounceMs = this.config.prDebounceMs
@@ -480,6 +480,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     if (debounceMs > 0) {
       const webhookEvent = makeEvent('debounced')
       this.recordEvent(webhookEvent)
+      // Record dedup early (before timer fires) so GitHub retries during the
+      // debounce window are caught as duplicates rather than spawning a second timer.
       this.dedup.recordProcessed(eventId, idempotencyKey)
 
       const debounceKey = `${payload.repository.full_name}#${pr.number}`
@@ -930,9 +932,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   }
 
   shutdown(): void {
-    // Cancel all pending debounce timers
+    // Cancel all pending debounce timers and mark events as non-terminal
     for (const [, pending] of this.pendingDebounce) {
       clearTimeout(pending.timer)
+      this.updateEventStatus(pending.event.id, 'superseded', 'Server shutdown')
     }
     this.pendingDebounce.clear()
 

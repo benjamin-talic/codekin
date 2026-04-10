@@ -11,17 +11,18 @@ GitHub sends `pull_request` webhook events to Codekin. The handler filters by ac
 ### Event Flow
 
 1. GitHub sends `pull_request` event (actions: `opened`, `synchronize`, `reopened`, `ready_for_review`, `closed`)
-   _(For `closed` events, steps 2–11 are skipped — see [Closed/Merged Flow](#closedmerged-flow) below)_
+   _(For `closed` events, steps 2–12 are skipped — see [Closed/Merged Flow](#closedmerged-flow) below)_
 2. `webhook-handler.ts` validates signature, filters by action/draft/allowlist
 3. Dedup check (`webhook-dedup.ts`) — rejects already-processed events
-4. Supersede any active session for the same PR (new push kills old review)
-5. Concurrency cap check (configurable, default 3, set to 10 via `~/.codekin/webhook-config.json`)
-6. Record in dedup only after passing all gates (not before — so rejected events can be retried)
-7. Create isolated workspace via `webhook-workspace.ts` (bare mirror + worktree)
-8. Fetch PR context in parallel: diff, changed files, commits, existing review comments, existing reviews, prior review cache, existing Codekin summary comment
-9. Resolve review prompt: repo-level `.codekin/pr-review-prompt.md` > global `~/.codekin/pr-review-prompt.md` > built-in default
-10. Spawn Claude session with model `sonnet` and restricted `allowedTools` (includes `Write` for cache persistence). Cache directory added via `--add-dir` so Claude can write to it inside the sandbox.
-11. Send assembled prompt (PR metadata + diff + existing reviews + prior cache context + comment update/create instructions + cache-writing instructions)
+4. Smart SHA filter — for `reopened`/`ready_for_review`, skips if the exact SHA was already reviewed (no code change)
+5. Record in dedup and enter **debounce** (default 60s, configurable via `prDebounceMs`). Dedup is recorded early so GitHub retries during the debounce window are caught. If another event for the same PR arrives during the window, the older event is superseded and the timer restarts.
+6. _Debounce timer fires_ — supersede any active session for the same PR (new push kills old review)
+7. Concurrency cap check (configurable, default 3, set to 10 via `~/.codekin/webhook-config.json`)
+8. Create isolated workspace via `webhook-workspace.ts` (bare mirror + worktree)
+9. Fetch PR context in parallel: diff, changed files, commits, existing review comments, existing reviews, prior review cache, existing Codekin summary comment
+10. Resolve review prompt: repo-level `.codekin/pr-review-prompt.md` > global `~/.codekin/pr-review-prompt.md` > built-in default
+11. Spawn Claude session with model `sonnet` and restricted `allowedTools` (includes `Write` for cache persistence). Cache directory added via `--add-dir` so Claude can write to it inside the sandbox.
+12. Send assembled prompt (PR metadata + diff + existing reviews + prior cache context + comment update/create instructions + cache-writing instructions)
 
 ### Closed/Merged Flow
 
@@ -175,11 +176,13 @@ To avoid shell escaping issues with review body content, Claude is instructed to
 The original `isDuplicate()` was check-and-record in one call. This meant events rejected by the concurrency cap were still recorded as "seen," making redelivery impossible. Now split into:
 
 - `isDuplicate(deliveryId, idempotencyKey)` — check only, no side effects
-- `recordProcessed(deliveryId, idempotencyKey)` — called after the event passes all gates
+- `recordProcessed(deliveryId, idempotencyKey)` — called after the event passes filters and dedup
+
+**Note:** With debounce enabled, `recordProcessed()` is called when the event enters the debounce queue (before the timer fires). This is intentional — it prevents GitHub from retrying the delivery during the 60s debounce window. A server crash during the window silently drops the event; GitHub's retry mechanism covers this since the webhook delivery will time out and be retried.
 
 ## Testing
 
-- `server/webhook-handler.test.ts` — 57 tests including PR events, superseding, cache/comment integration, closed/merged handling
+- `server/webhook-handler.test.ts` — 97 tests including PR events, debounce, smart SHA filter, superseding, cache/comment integration, closed/merged handling
 - `server/webhook-pr-github.test.ts` — 22 tests for all fetch functions (diff, files, commits, review comments, reviews, existing review comment detection)
 - `server/webhook-pr-prompt.test.ts` — 26 tests including prompt resolution, prior context rendering, cache-writing instructions, comment update/create instructions
 - `server/webhook-pr-cache.test.ts` — 15 tests for cache loading, path generation, validation, error handling, archive, and delete
