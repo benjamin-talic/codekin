@@ -674,6 +674,11 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
       writeFileSync(join(workspacePath, 'opencode.json'), JSON.stringify(opencodeConfig, null, 2))
       console.log(`[webhook] Wrote opencode.json permissions config to ${workspacePath}`)
+      // Auto-approve any permission requests that slip through the config
+      // (e.g. external_directory checks not covered by patterns).
+      // The opencode.json scopes what's allowed; this just ensures automated
+      // sessions don't hang waiting for interactive approval.
+      sessionOptions.permissionMode = 'bypassPermissions'
     }
 
     this.sessions.create(sessionName, workspacePath, sessionOptions)
