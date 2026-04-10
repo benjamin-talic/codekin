@@ -310,7 +310,11 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('IMPORTANT: The `structuredFindings` array must include every finding from your review.')
     lines.push('Use an empty array `[]` if there are no findings. The `verdict` must be exactly one of: approve, request_changes, comment.')
     lines.push('')
-    lines.push('Use the Write tool to save this file. This helps future reviews of this PR be more efficient.')
+    if (ctx.reviewProvider === 'opencode') {
+      lines.push('Save this file using bash: `cat > ' + options.cachePath + ' << \'CACHE_EOF\'` followed by the JSON content and `CACHE_EOF`. This helps future reviews of this PR be more efficient.')
+    } else {
+      lines.push('Use the Write tool to save this file. This helps future reviews of this PR be more efficient.')
+    }
   }
 
   return lines.join('\n')
