@@ -7,13 +7,17 @@
  *
  * Event lifecycle / state machine:
  *   received → (filtered/duplicate/capped)
- *   received → processing  — event accepted, async fetch started
+ *   received → debounced  — PR event accepted, waiting for debounce timer
+ *            → (superseded)  — newer event for same PR arrived during debounce
+ *            → processing  — debounce fired (or debounce disabled), async fetch started
  *            → session_created — workspace ready, session spawned, prompt sent
  *            → completed | error  — Claude exited 0 (success) or non-zero (failure)
  *
- * The 'processing' state bridges the async gap between accepting the webhook
- * (202 response) and the session being created.  A watchdog marks events stuck
- * in 'processing' as 'error' after PROCESSING_TIMEOUT_MS to prevent the
+ * The 'debounced' state coalesces rapid events for the same PR (e.g. quick
+ * successive pushes) so only the latest event triggers a review session.
+ * The 'processing' state bridges the async gap between the debounce firing
+ * (or direct accept) and the session being created.  A watchdog marks events
+ * stuck in 'processing' as 'error' after PROCESSING_TIMEOUT_MS to prevent the
  * concurrency cap from leaking on partial failures.
  */
 
@@ -746,8 +750,12 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       return
     }
 
-    // Transition from debounced → processing
+    // Transition from debounced → processing.
+    // Reset receivedAt so the watchdog timeout counts from processing start,
+    // not from when the webhook originally arrived (which includes debounce time).
     this.updateEventStatus(event.id, 'processing')
+    const liveEvent = this.getEvent(event.id)
+    if (liveEvent) liveEvent.receivedAt = new Date().toISOString()
 
     this.processPullRequestAsync(payload, event, sessionId).catch(err => {
       console.error('[webhook] PR async processing error:', err)
