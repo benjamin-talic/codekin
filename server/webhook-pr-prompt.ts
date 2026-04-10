@@ -26,40 +26,54 @@ export interface PrPromptOptions {
 
 const CUSTOM_PROMPT_FILENAME = 'pr-review-prompt.md'
 
+/** Try to read a prompt file, returning its trimmed contents or undefined. */
+function tryReadPrompt(filePath: string): string | undefined {
+  if (!existsSync(filePath)) return undefined
+  try {
+    const content = readFileSync(filePath, 'utf-8').trim()
+    if (content) {
+      console.log(`[pr-prompt] Using custom prompt: ${filePath}`)
+      return content
+    }
+  } catch (err) {
+    console.warn(`[pr-prompt] Failed to read prompt:`, err)
+  }
+  return undefined
+}
+
 /**
  * Attempt to load a custom review prompt from disk.
- * Returns the file contents if found, or undefined.
+ *
+ * Resolution order (first match wins):
+ *   1. {repo}/.codekin/pr-review-prompt.{provider}.md  (repo-level, provider-specific)
+ *   2. {repo}/.codekin/pr-review-prompt.md              (repo-level, generic)
+ *   3. ~/.codekin/pr-review-prompt.{provider}.md        (global, provider-specific)
+ *   4. ~/.codekin/pr-review-prompt.md                   (global, generic)
+ *
+ * @param provider - 'claude' or 'opencode'; when undefined, provider-specific files are skipped.
  */
-function loadCustomPrompt(workspacePath: string): string | undefined {
-  // 1. Repo-level
-  const repoPromptPath = join(workspacePath, '.codekin', CUSTOM_PROMPT_FILENAME)
-  if (existsSync(repoPromptPath)) {
-    try {
-      const content = readFileSync(repoPromptPath, 'utf-8').trim()
-      if (content) {
-        console.log(`[pr-prompt] Using repo-level custom prompt: ${repoPromptPath}`)
-        return content
-      }
-    } catch (err) {
-      console.warn(`[pr-prompt] Failed to read repo-level prompt:`, err)
-    }
+function loadCustomPrompt(workspacePath: string, provider?: string): string | undefined {
+  const repoDir = join(workspacePath, '.codekin')
+  const globalDir = join(homedir(), '.codekin')
+
+  // 1. Repo-level, provider-specific
+  if (provider) {
+    const result = tryReadPrompt(join(repoDir, `pr-review-prompt.${provider}.md`))
+    if (result) return result
   }
 
-  // 2. Global
-  const globalPromptPath = join(homedir(), '.codekin', CUSTOM_PROMPT_FILENAME)
-  if (existsSync(globalPromptPath)) {
-    try {
-      const content = readFileSync(globalPromptPath, 'utf-8').trim()
-      if (content) {
-        console.log(`[pr-prompt] Using global custom prompt: ${globalPromptPath}`)
-        return content
-      }
-    } catch (err) {
-      console.warn(`[pr-prompt] Failed to read global prompt:`, err)
-    }
+  // 2. Repo-level, generic
+  const repoGeneric = tryReadPrompt(join(repoDir, CUSTOM_PROMPT_FILENAME))
+  if (repoGeneric) return repoGeneric
+
+  // 3. Global, provider-specific
+  if (provider) {
+    const result = tryReadPrompt(join(globalDir, `pr-review-prompt.${provider}.md`))
+    if (result) return result
   }
 
-  return undefined
+  // 4. Global, generic
+  return tryReadPrompt(join(globalDir, CUSTOM_PROMPT_FILENAME))
 }
 
 /**
@@ -200,7 +214,7 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
   lines.push('')
   lines.push('## Instructions')
 
-  const customPrompt = loadCustomPrompt(workspacePath)
+  const customPrompt = loadCustomPrompt(workspacePath, ctx.reviewProvider)
   if (customPrompt) {
     lines.push(customPrompt)
   } else {
