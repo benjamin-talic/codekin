@@ -22,7 +22,8 @@
  */
 
 import { randomUUID } from 'crypto'
-import { dirname } from 'path'
+import { writeFileSync } from 'fs'
+import { dirname, join } from 'path'
 import type { CreateSessionOptions, SessionManager } from './session-manager.js'
 import { verifyHmacSignature } from './crypto-utils.js'
 import type { WsServerMessage } from './types.js'
@@ -657,9 +658,22 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       ]
       sessionOptions.addDirs = [dirname(cachePath)]
     } else {
-      // OpenCode doesn't support allowedTools/addDirs — it uses its own permission system.
-      // Auto-approve permissions for automated webhook sessions to avoid interactive prompts.
-      sessionOptions.permissionMode = 'bypassPermissions'
+      // OpenCode uses opencode.json in the workspace for scoped permissions.
+      // Write a config that mirrors Claude's allowedTools — allow gh/git bash,
+      // file reads/edits, and access to the PR cache directory.
+      const opencodeConfig = {
+        $schema: 'https://opencode.ai/config.json',
+        permission: {
+          bash: { '*': 'deny', 'gh *': 'allow', 'git *': 'allow', 'cat *': 'allow', 'ls *': 'allow', 'head *': 'allow', 'tail *': 'allow', 'wc *': 'allow', 'mkdir *': 'allow', 'codex *': 'allow' },
+          read: 'allow',
+          edit: 'allow',
+          grep: 'allow',
+          webfetch: 'allow',
+          external_directory: { [dirname(cachePath) + '/**']: 'allow' },
+        },
+      }
+      writeFileSync(join(workspacePath, 'opencode.json'), JSON.stringify(opencodeConfig, null, 2))
+      console.log(`[webhook] Wrote opencode.json permissions config to ${workspacePath}`)
     }
 
     this.sessions.create(sessionName, workspacePath, sessionOptions)

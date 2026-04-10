@@ -47,6 +47,11 @@ vi.mock('./webhook-prompt.js', () => ({
   buildPrompt: vi.fn(() => 'test prompt'),
 }))
 
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  return { ...actual, writeFileSync: vi.fn() }
+})
+
 vi.mock('./webhook-workspace.js', () => ({
   createWorkspace: vi.fn(async () => '/tmp/workspace'),
   cleanupWorkspace: vi.fn(),
@@ -75,6 +80,7 @@ vi.mock('./webhook-pr-prompt.js', () => ({
 
 import { WebhookHandler } from './webhook-handler.js'
 import { createWorkspace } from './webhook-workspace.js'
+import { writeFileSync } from 'fs'
 import type { FullWebhookConfig } from './webhook-config.js'
 
 const SECRET = 'test-secret-123'
@@ -806,6 +812,12 @@ describe('WebhookHandler', () => {
         const options = createCall?.[2] as Record<string, unknown>
         expect(options.allowedTools).toBeUndefined()
         expect(options.addDirs).toBeUndefined()
+
+        // Should write opencode.json with scoped permissions instead
+        expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith(
+          '/tmp/workspace/opencode.json',
+          expect.stringContaining('"gh *": "allow"'),
+        )
 
         expect(mockBuildPrReviewPrompt).toHaveBeenCalledWith(
           expect.objectContaining({ reviewProvider: 'opencode', reviewModel: 'openai/gpt-5.4' }),
