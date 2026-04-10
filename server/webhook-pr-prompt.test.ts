@@ -271,7 +271,7 @@ describe('buildPrReviewPrompt', () => {
       })
       expect(prompt).toContain('## Posting Your Review Summary')
       expect(prompt).toContain('comment ID: 12345')
-      expect(prompt).toContain('Update it instead of creating a new comment')
+      expect(prompt).toContain('**Update it** instead of creating a new comment')
       expect(prompt).toContain('PATCH')
       expect(prompt).toContain('-F body=@/tmp/workspace/pr-42-review-body.md')
       expect(prompt).toContain(`issues/comments/12345`)

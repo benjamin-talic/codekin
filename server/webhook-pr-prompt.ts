@@ -213,22 +213,26 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
   if (options?.existingCommentId) {
     lines.push('## Posting Your Review Summary')
     lines.push(`An existing Codekin review comment was found on this PR (comment ID: ${options.existingCommentId}).`)
-    lines.push('Update it instead of creating a new comment. Use a temporary file for the body to avoid shell escaping issues:')
+    lines.push('**Update it** instead of creating a new comment. This comment is the SINGLE source of truth for review findings — put ALL detailed findings here.')
     lines.push('')
-    lines.push(`1. Write your review summary to \`${reviewBodyPath}\``)
+    lines.push(`1. Write your full review to \`${reviewBodyPath}\``)
     lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
     lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/comments/${options.existingCommentId} -X PATCH -F body=@${reviewBodyPath}\``)
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body.`)
+    lines.push('')
+    lines.push('**Do NOT duplicate the full review in the `gh pr review` verdict.** The verdict body should be one sentence only (e.g., "Approved — see Codekin review comment for details."). Verdict reviews stack up and cannot be updated.')
   } else {
     lines.push('## Posting Your Review Summary')
-    lines.push('Post your review summary as a new comment on the PR. Use a temporary file for the body to avoid shell escaping issues:')
+    lines.push('Post your review summary as a **new comment** on the PR. This comment is the SINGLE source of truth for review findings — put ALL detailed findings here.')
     lines.push('')
-    lines.push(`1. Write your review summary to \`${reviewBodyPath}\``)
+    lines.push(`1. Write your full review to \`${reviewBodyPath}\``)
     lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
     lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/${ctx.prNumber}/comments -F body=@${reviewBodyPath}\``)
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body. This marker allows future reviews to update this comment instead of creating a new one.`)
+    lines.push('')
+    lines.push('**Do NOT duplicate the full review in the `gh pr review` verdict.** The verdict body should be one sentence only (e.g., "Approved — see Codekin review comment for details."). Verdict reviews stack up and cannot be updated.')
   }
 
   // --- Cache-writing instructions ---
