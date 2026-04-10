@@ -14,7 +14,7 @@ GitHub sends `pull_request` webhook events to Codekin. The handler filters by ac
    _(For `closed` events, steps 2–12 are skipped — see [Closed/Merged Flow](#closedmerged-flow) below)_
 2. `webhook-handler.ts` validates signature, filters by action/draft/allowlist
 3. Dedup check (`webhook-dedup.ts`) — rejects already-processed events
-4. Smart SHA filter — for `reopened`/`ready_for_review`, skips if the exact SHA was already reviewed (no code change)
+4. Smart SHA filter — skips if the exact SHA was already reviewed. For `reopened`/`ready_for_review` this means no code change; for `opened`/`synchronize` it catches redeliveries after dedup TTL expiry.
 5. Record in dedup and enter **debounce** (default 60s, configurable via `prDebounceMs`). Dedup is recorded early so GitHub retries during the debounce window are caught. If another event for the same PR arrives during the window, the older event is superseded and the timer restarts.
 6. _Debounce timer fires_ — supersede any active session for the same PR (new push kills old review)
 7. Concurrency cap check (configurable, default 3, set to 10 via `~/.codekin/webhook-config.json`)
