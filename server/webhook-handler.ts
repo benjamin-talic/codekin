@@ -664,7 +664,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       const opencodeConfig = {
         $schema: 'https://opencode.ai/config.json',
         permission: {
-          bash: { '*': 'deny', 'gh *': 'allow', 'git *': 'allow', 'cat *': 'allow', 'ls *': 'allow', 'head *': 'allow', 'tail *': 'allow', 'wc *': 'allow', 'mkdir *': 'allow', 'codex *': 'allow' },
+          bash: { '*': 'deny', 'gh *': 'allow', 'git *': 'allow', 'cat *': 'allow', 'ls *': 'allow', 'head *': 'allow', 'tail *': 'allow', 'wc *': 'allow', 'mkdir *': 'allow', 'echo *': 'allow' },
           read: 'allow',
           edit: 'allow',
           grep: 'allow',
