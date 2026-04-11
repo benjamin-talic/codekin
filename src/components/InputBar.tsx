@@ -137,6 +137,58 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
   menuRef: React.RefObject<HTMLDivElement | null>
   onToggle: () => void; onChange: (model: string) => void
 }) {
+  const [query, setQuery] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const RECENTS_KEY = 'codekin.recentModels'
+
+  const getRecents = (): string[] => {
+    try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]') } catch { return [] }
+  }
+
+  const addRecent = (id: string) => {
+    const next = getRecents().filter(m => m !== id)
+    next.unshift(id)
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(next.slice(0, 5)))
+  }
+
+  const recents = getRecents().filter(id => models.some(m => m.id === id))
+
+  const filtered = query
+    ? models.filter(m =>
+        m.id.toLowerCase().includes(query.toLowerCase()) ||
+        m.label.toLowerCase().includes(query.toLowerCase())
+      )
+    : models
+
+  const visibleList = (!query && recents.length > 0
+    ? [...recents.map(id => models.find(m => m.id === id)).filter(Boolean) as ModelOption[], ...filtered]
+    : filtered)
+
+  useEffect(() => {
+    setActiveIndex(0)
+  }, [query, isOpen])
+
+  useEffect(() => {
+    const el = itemRefs.current[activeIndex]
+    if (el) el.scrollIntoView({ block: 'nearest' })
+  }, [activeIndex])
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!visibleList.length) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setActiveIndex(i => Math.min(i + 1, visibleList.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActiveIndex(i => Math.max(i - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const m = visibleList[activeIndex]
+      if (m) { addRecent(m.id); onChange(m.id) }
+    }
+  }
+
   return (
     <div className="relative" ref={menuRef}>
       <button
@@ -148,16 +200,59 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
         <IconChevronDown size={12} stroke={2} />
       </button>
       {isOpen && (
-        <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[160px] max-h-[320px] overflow-y-auto rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
-          {models.map(m => (
-            <button
-              key={m.id}
-              onClick={() => onChange(m.id)}
-              className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-neutral-7 transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
-            >
-              {m.label}
-            </button>
-          ))}
+        <div className="absolute bottom-full mb-1 right-0 z-50 w-[260px] max-h-[360px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg flex flex-col">
+          <div className="p-2 border-b border-neutral-7">
+            <input
+              autoFocus
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Search models..."
+              className="w-full bg-neutral-7 text-[13px] px-2 py-1.5 rounded-md outline-none text-neutral-2 placeholder:text-neutral-5"
+            />
+          </div>
+
+          <div className="overflow-y-auto py-1">
+            {!query && recents.length > 0 && (
+              <div className="mb-1">
+                <div className="px-3 py-1 text-[11px] text-neutral-5">Recent</div>
+                {recents.map((id, idx) => {
+                  const m = models.find(x => x.id === id)
+                  if (!m) return null
+                  const index = idx
+                  return (
+                    <button
+                      key={m.id}
+                      ref={el => { itemRefs.current[index] = el }}
+                      onClick={() => { addRecent(m.id); onChange(m.id) }}
+                      className={`w-full text-left px-3 py-1.5 text-[13px] transition-colors ${index === activeIndex ? 'bg-neutral-7' : 'hover:bg-neutral-7'} ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
+                    >
+                      {m.label}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            <div>
+              {!query && (
+                <div className="px-3 py-1 text-[11px] text-neutral-5">All Models</div>
+              )}
+              {filtered.map((m, idx) => {
+                const baseIndex = (!query && recents.length > 0) ? recents.length : 0
+                const index = baseIndex + idx
+                return (
+                <button
+                  key={m.id}
+                  ref={el => { itemRefs.current[index] = el }}
+                  onClick={() => { addRecent(m.id); onChange(m.id) }}
+                  className={`w-full text-left px-3 py-1.5 text-[13px] transition-colors ${index === activeIndex ? 'bg-neutral-7' : 'hover:bg-neutral-7'} ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
+                >
+                  {m.label}
+                </button>
+              )})}
+            </div>
+          </div>
         </div>
       )}
     </div>
