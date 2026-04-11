@@ -692,7 +692,35 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       const opencodeConfig = {
         $schema: 'https://opencode.ai/config.json',
         permission: {
-          bash: { '*': 'deny', 'gh *': 'allow', 'git *': 'allow', 'cat *': 'allow', 'ls *': 'allow', 'head *': 'allow', 'tail *': 'allow', 'wc *': 'allow', 'mkdir *': 'allow', 'echo *': 'allow' },
+          bash: {
+            '*': 'deny',
+            // gh subcommands needed for PR review (narrowed further in task 22)
+            'gh *': 'allow',
+            // git read-only subcommands only — no checkout/commit/push/reset/rebase/clean
+            'git status': 'allow',
+            'git status *': 'allow',
+            'git diff': 'allow',
+            'git diff *': 'allow',
+            'git log': 'allow',
+            'git log *': 'allow',
+            'git show': 'allow',
+            'git show *': 'allow',
+            'git blame *': 'allow',
+            'git rev-parse *': 'allow',
+            'git ls-files': 'allow',
+            'git ls-files *': 'allow',
+            'git branch': 'allow',
+            'git branch --show-current': 'allow',
+            'git config --get *': 'allow',
+            // read-only filesystem helpers
+            'cat *': 'allow',
+            'ls *': 'allow',
+            'head *': 'allow',
+            'tail *': 'allow',
+            'wc *': 'allow',
+            'mkdir *': 'allow',
+            'echo *': 'allow',
+          },
           read: 'allow',
           edit: 'allow',
           grep: 'allow',
