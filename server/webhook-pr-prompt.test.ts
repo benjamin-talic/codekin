@@ -371,11 +371,10 @@ describe('buildPrReviewPrompt', () => {
   })
 
   describe('intermediate file path overrides', () => {
-    it('includes PR-specific draft and codex review paths', () => {
+    it('forbids intermediate draft files — write review body directly', () => {
       const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
-      expect(prompt).toContain('pr-42-draft-review.md')
-      expect(prompt).toContain('pr-42-codex-review.md')
-      expect(prompt).toContain('/tmp/workspace/pr-42-draft-review.md')
+      expect(prompt).toContain('Do NOT write intermediate draft files')
+      expect(prompt).toContain('Write the review body directly')
     })
 
     it('warns against writing to git-tracked directories', () => {
@@ -383,9 +382,10 @@ describe('buildPrReviewPrompt', () => {
       expect(prompt).toContain('Do NOT write review files to the `docs/` directory')
     })
 
-    it('includes overridden codex command with correct paths', () => {
+    it('does not mention codex cross-review (removed — use split mode instead)', () => {
       const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
-      expect(prompt).toContain('codex exec - --skip-git-repo-check -o /tmp/workspace/pr-42-codex-review.md < /tmp/workspace/pr-42-draft-review.md')
+      expect(prompt).not.toContain('codex exec')
+      expect(prompt).not.toContain('codex-review.md')
     })
   })
 

@@ -248,20 +248,12 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
 
   // Override any hardcoded intermediate review file paths from custom prompts
   // so concurrent reviews don't collide or write into tracked repo files.
-  // Only include Codex paths for Claude — OpenCode doesn't use Codex cross-review.
+  // (Codex cross-review was removed — split mode with Claude + OpenCode gives
+  // independent cross-validation without the extra token cost.)
   lines.push('')
   lines.push('## File Paths for This Review')
-  if (ctx.reviewProvider === 'opencode') {
-    lines.push('Do NOT write intermediate draft files. Write the review body directly to the file specified in "Posting Your Review Summary" below.')
-    lines.push('Do NOT write review files to the `docs/` directory or any other git-tracked location.')
-  } else {
-    lines.push('When writing intermediate files during the review process, use these paths:')
-    lines.push(`- Draft review: \`${workspacePath}/pr-${ctx.prNumber}-draft-review.md\``)
-    lines.push(`- Codex cross-review output: \`${workspacePath}/pr-${ctx.prNumber}-codex-review.md\``)
-    lines.push(`- Codex command: \`codex exec - --skip-git-repo-check -o ${workspacePath}/pr-${ctx.prNumber}-codex-review.md < ${workspacePath}/pr-${ctx.prNumber}-draft-review.md\``)
-    lines.push('These paths override any file paths mentioned in the review instructions above.')
-    lines.push('Do NOT write review files to the `docs/` directory or any other git-tracked location.')
-  }
+  lines.push('Do NOT write intermediate draft files. Write the review body directly to the file specified in "Posting Your Review Summary" below.')
+  lines.push('Do NOT write review files to the `docs/` directory or any other git-tracked location.')
 
   // --- Sandbox tool rules (always injected, tied to actual runtime permissions) ---
   // These override anything in the custom prompt. They reflect the real sandbox
