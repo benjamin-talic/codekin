@@ -936,11 +936,17 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
 
     console.log(`[webhook] Restoring ${records.length} pending debounce(s) from disk`)
     for (const rec of records) {
-      // Re-record the event in the ring buffer (it was lost on shutdown)
-      this.recordEvent(rec.event)
-      // Fire immediately — no more waiting, GitHub has been waiting long enough
-      console.log(`[webhook] Resuming debounced event ${rec.event.id} for ${rec.key}`)
-      this.fireDebouncedPrEvent(rec.payload, rec.event, rec.sessionId)
+      // Per-record try/catch so one malformed entry can't throw through checkHealth()
+      // and become an unhandled promise rejection in ws-server.ts.
+      try {
+        // Re-record the event in the ring buffer (it was lost on shutdown)
+        this.recordEvent(rec.event)
+        // Fire immediately — no more waiting, GitHub has been waiting long enough
+        console.log(`[webhook] Resuming debounced event ${rec.event.id} for ${rec.key}`)
+        this.fireDebouncedPrEvent(rec.payload, rec.event, rec.sessionId)
+      } catch (err) {
+        console.error(`[webhook] Failed to restore debounce record ${rec.key}:`, err)
+      }
     }
   }
 
