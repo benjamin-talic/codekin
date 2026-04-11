@@ -939,6 +939,22 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       // Per-record try/catch so one malformed entry can't throw through checkHealth()
       // and become an unhandled promise rejection in ws-server.ts.
       try {
+        // Skip restore if the PR was reviewed during the downtime window
+        // (e.g. via a manual review or a different Codekin instance).
+        // Mirrors the smart SHA filter in handlePullRequestEvent.
+        if (rec.event.headSha) {
+          const cache = loadPrCache(rec.event.repo, rec.event.runId)
+          if (cache && cache.lastReviewedSha === rec.event.headSha) {
+            console.log(`[webhook] Skipping restored event ${rec.event.id} for ${rec.key} — SHA ${rec.event.headSha.slice(0, 7)} already reviewed`)
+            this.recordEvent({
+              ...rec.event,
+              status: 'filtered',
+              filterReason: `SHA ${rec.event.headSha.slice(0, 7)} already reviewed during downtime`,
+            })
+            continue
+          }
+        }
+
         // Re-record the event in the ring buffer (it was lost on shutdown)
         this.recordEvent(rec.event)
         // Fire immediately — no more waiting, GitHub has been waiting long enough
