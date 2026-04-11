@@ -691,13 +691,18 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         'Bash(git ls-files:*)',
         'Bash(git branch:*)',
         'Bash(git config:*)',
-        // gh review-specific — narrowed to the same patterns as OpenCode's opencode.json.
-        // Claude's Bash(<prefix>:*) matches any bash command starting with <prefix>,
-        // so multi-word prefixes with slashes (e.g. "gh api repos") scope by URL path.
+        // gh review-specific. Codekin's approval hook (prompt-router.ts matchesAllowedTools)
+        // uses literal word-boundary prefix matching (prefix + space OR exact match),
+        // so multi-word prefixes with slashes like "gh api repos/" don't match commands
+        // like "gh api repos/owner/repo/..." (no space after "repos"). We use the broader
+        // `gh api` pattern here and rely on the prompt's sandbox rules + hostile-input
+        // preamble to keep the model from calling `gh api user`, `gh api /orgs/*`, etc.
+        // OpenCode's opencode.json gets proper glob-by-path scoping since its permission
+        // engine handles glob patterns natively.
         'Bash(gh pr view:*)',
         'Bash(gh pr diff:*)',
         'Bash(gh pr review:*)',
-        'Bash(gh api repos:*)', // matches `gh api repos/<owner>/<repo>/...` — blocks gh api user, gh api /orgs, etc.
+        'Bash(gh api:*)',
         // file/cache write
         'Write',
         // library docs lookup
