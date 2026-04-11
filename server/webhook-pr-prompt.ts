@@ -238,6 +238,41 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('Do NOT write review files to the `docs/` directory or any other git-tracked location.')
   }
 
+  // --- Sandbox tool rules (always injected, tied to actual runtime permissions) ---
+  // These override anything in the custom prompt. They reflect the real sandbox
+  // enforced by code (Claude allowedTools or OpenCode opencode.json), so keeping
+  // them in the injected prompt ensures they never drift out of sync.
+  lines.push('')
+  lines.push('## Sandbox Tool Rules (enforced)')
+  if (ctx.reviewProvider === 'opencode') {
+    lines.push('Your session runs inside an OpenCode sandbox with scoped permissions. The following rules are enforced by `opencode.json` in the workspace:')
+    lines.push('')
+    lines.push('**Use built-in tools for file operations — NOT bash equivalents:**')
+    lines.push('- Use the **read** tool to read files (not `cat`, `head`, `tail`)')
+    lines.push('- Use the **grep** tool to search file contents (not bash `grep`, `rg`, `awk`)')
+    lines.push('- Use the **edit** or **write** tool to create/modify files (not `echo >` or heredocs)')
+    lines.push('')
+    lines.push('Built-in tools are pre-authorized and path-scoped to the workspace. Bash `grep`/`rg`/`find`/`sed`/`awk` are DENIED and will fail.')
+    lines.push('')
+    lines.push('**Bash is restricted to:** `git` subcommands (`status`, `diff`, `log`, `show`, `blame`), `gh` subcommands for PR interaction, and a small set of read-only helpers (`cat`, `ls`, `head`, `tail`, `wc`, `mkdir`, `echo`).')
+    lines.push('')
+    lines.push('**Stay within the workspace.** Access to files outside the cloned repo is blocked by `external_directory: deny`. The only exception is the PR cache directory, which is allow-listed.')
+  } else {
+    // Claude
+    lines.push('Your session runs with Claude `--allowedTools` restricting which tools are available.')
+    lines.push('')
+    lines.push('**Use built-in tools for codebase exploration — NOT bash equivalents:**')
+    lines.push('- Use **Read** to read files (not `cat`, `head`, `tail`)')
+    lines.push('- Use **Grep** to search file contents (not bash `grep`, `rg`, `awk`)')
+    lines.push('- Use **Glob** to find files by pattern (not `find`, `ls`)')
+    lines.push('')
+    lines.push('These tools are pre-approved and work without permission prompts. Bash commands for file reading will be blocked.')
+    lines.push('')
+    lines.push('**Only use Bash for:** `git` commands and `gh` commands.')
+    lines.push('')
+    lines.push('**Stay within the workspace directory.** Do not access files outside the cloned repo.')
+  }
+
   // --- Comment posting instructions ---
   lines.push('')
   if (options?.existingCommentId) {
