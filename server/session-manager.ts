@@ -84,6 +84,12 @@ export interface CreateSessionOptions {
   addDirs?: string[]
   /** AI provider to use for this session. Defaults to 'claude'. */
   provider?: import('./coding-process.js').CodingProvider
+  /**
+   * When true, do NOT prepend the default `Bash(git:*)` to the Claude process
+   * allowedTools. Used for sandboxed webhook review sessions that narrow git
+   * to read-only subcommands. Ignored for OpenCode sessions.
+   */
+  skipDefaultBashGit?: boolean
 }
 
 
@@ -281,6 +287,7 @@ export class SessionManager {
       permissionMode: options?.permissionMode,
       allowedTools: options?.allowedTools,
       addDirs: options?.addDirs,
+      skipDefaultBashGit: options?.skipDefaultBashGit,
       claudeProcess: null,
       clients: new Set(),
       outputHistory: [],

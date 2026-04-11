@@ -301,11 +301,16 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('')
     lines.push('These tools are pre-approved and work without permission prompts. Bash commands for file reading will be blocked.')
     lines.push('')
-    lines.push('**Only use Bash for:** `git` commands and `gh` commands.')
+    lines.push('**Bash is restricted to:**')
+    lines.push('- Read-only git subcommands: `git status`, `git diff`, `git log`, `git show`, `git blame`, `git rev-parse`, `git ls-files`, `git branch`, `git config`. Write operations like `git commit`, `git push`, `git checkout`, `git reset`, `git rebase`, `git clean` are DENIED.')
+    lines.push('- PR-specific `gh` subcommands: `gh pr view`, `gh pr diff`, `gh pr review`, and `gh api repos/*/...` (scoped to repos endpoints).')
+    lines.push('- `gh auth *`, `gh repo *`, `gh secret *`, `gh workflow *`, `gh api user`, `gh api /orgs/*` are DENIED.')
     lines.push('')
     lines.push('**Stay within the workspace directory.** Do not access files outside the cloned repo.')
     lines.push('')
     lines.push('**No web access.** `WebFetch` and `WebSearch` are not in your allowedTools. For library documentation, use the `context7` MCP tools (`resolve-library-id`, `query-docs`) which are the only network calls authorized. Do not attempt to fetch arbitrary URLs.')
+    lines.push('')
+    lines.push('**Do not use bash command substitution `$(...)` or variable assignment in the same line as a restricted command** — the pattern matcher evaluates the literal command string and may reject compound forms.')
   }
 
   // --- Comment posting instructions ---

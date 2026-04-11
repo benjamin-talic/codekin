@@ -63,6 +63,12 @@ export interface Session {
   allowedTools?: string[]
   /** Extra directories to grant Claude access to via --add-dir. */
   addDirs?: string[]
+  /**
+   * When true, do NOT prepend the default `Bash(git:*)` to `allowedTools` in the
+   * Claude process. Used for sandboxed webhook review sessions that want to narrow
+   * git access to read-only subcommands. Ignored for OpenCode sessions.
+   */
+  skipDefaultBashGit?: boolean
   /** Number of auto-restarts since last cooldown reset. */
   restartCount: number
   lastRestartAt: number | null

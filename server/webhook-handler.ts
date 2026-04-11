@@ -670,13 +670,37 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     }
 
     if (reviewProvider === 'claude') {
-      // Claude uses allowedTools and addDirs for sandboxed tool access.
-      // No WebFetch/WebSearch — review should rely on PR context and cached
-      // library docs (context7 MCP) only. General web access is an exfil vector
-      // for prompt-injection attacks embedded in PR content.
+      // Narrowed Claude allowedTools mirroring the OpenCode sandbox:
+      //   - git: read-only subcommands only (no commit/push/reset/rebase/clean)
+      //   - gh: specific PR/review API endpoints only (no auth/repo/secret/workflow)
+      //   - Write: needed to write the review body file and PR cache JSON
+      //   - context7 MCP: the only allowed network lookup (library docs)
+      //   - no WebFetch / WebSearch — general web access is an exfil vector
+      //
+      // We pass skipDefaultBashGit to prevent claude-process from prepending
+      // the default broad Bash(git:*), which would defeat the narrowing below.
+      sessionOptions.skipDefaultBashGit = true
       sessionOptions.allowedTools = [
-        'Bash(gh:*)',
+        // git read-only
+        'Bash(git status:*)',
+        'Bash(git diff:*)',
+        'Bash(git log:*)',
+        'Bash(git show:*)',
+        'Bash(git blame:*)',
+        'Bash(git rev-parse:*)',
+        'Bash(git ls-files:*)',
+        'Bash(git branch:*)',
+        'Bash(git config:*)',
+        // gh review-specific — narrowed to the same patterns as OpenCode's opencode.json.
+        // Claude's Bash(<prefix>:*) matches any bash command starting with <prefix>,
+        // so multi-word prefixes with slashes (e.g. "gh api repos") scope by URL path.
+        'Bash(gh pr view:*)',
+        'Bash(gh pr diff:*)',
+        'Bash(gh pr review:*)',
+        'Bash(gh api repos:*)', // matches `gh api repos/<owner>/<repo>/...` — blocks gh api user, gh api /orgs, etc.
+        // file/cache write
         'Write',
+        // library docs lookup
         'mcp__plugin_context7_context7__resolve-library-id',
         'mcp__plugin_context7_context7__query-docs',
       ]
