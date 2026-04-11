@@ -82,7 +82,7 @@ describe('buildPrReviewPrompt', () => {
       makeContext({ reviewProvider: 'opencode', reviewModel: 'openai/gpt-5.4' }),
       '/tmp/workspace',
     )
-    expect(prompt).toContain('*Reviewed by OpenCode (openai/gpt-5.4) via')
+    expect(prompt).toContain('*Reviewed by OpenCode (openai/gpt-5.4)*')
   })
 
   it('omits reviewer attribution footer when fields are absent', () => {

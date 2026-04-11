@@ -249,7 +249,7 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
     lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/comments/${options.existingCommentId} -X PATCH -F body=@${reviewBodyPath}\``)
     if (reviewerDisplay) {
-      lines.push(`4. Include this footer at the end of the review body: \`*Reviewed by ${reviewerDisplay} via [Codekin](https://github.com/Multiplier-Labs/codekin)*\``)
+      lines.push(`4. Include this footer at the end of the review body: \`*Reviewed by ${reviewerDisplay}*\``)
     }
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body.`)
@@ -263,7 +263,7 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
     lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/${ctx.prNumber}/comments -F body=@${reviewBodyPath}\``)
     if (reviewerDisplay) {
-      lines.push(`4. Include this footer at the end of the review body: \`*Reviewed by ${reviewerDisplay} via [Codekin](https://github.com/Multiplier-Labs/codekin)*\``)
+      lines.push(`4. Include this footer at the end of the review body: \`*Reviewed by ${reviewerDisplay}*\``)
     }
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body. This marker allows future reviews to update this comment instead of creating a new one.`)
