@@ -1,6 +1,6 @@
 /** Tests for PR-specific GitHub API helpers — verifies diff/files/commits fetching and graceful degradation. */
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews, fetchExistingReviewComment, REVIEW_COMMENT_MARKER, _setGhRunner, _resetGhRunner } from './webhook-pr-github.js'
+import { fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews, fetchExistingReviewComment, fetchPrState, postProviderUnavailableComment, REVIEW_COMMENT_MARKER, _setGhRunner, _resetGhRunner } from './webhook-pr-github.js'
 
 describe('fetchPrDiff', () => {
   afterEach(() => {
@@ -209,5 +209,193 @@ describe('fetchExistingReviewComment', () => {
     _setGhRunner(async () => '[]')
     const result = await fetchExistingReviewComment('owner/repo', 42)
     expect(result).toBeUndefined()
+  })
+})
+
+describe('fetchPrState', () => {
+  afterEach(() => {
+    _resetGhRunner()
+  })
+
+  it('returns "open" for an open PR', async () => {
+    _setGhRunner(async () => 'open\n')
+    const result = await fetchPrState('owner/repo', 42)
+    expect(result).toBe('open')
+  })
+
+  it('returns "closed" for a closed PR', async () => {
+    _setGhRunner(async () => 'closed\n')
+    const result = await fetchPrState('owner/repo', 42)
+    expect(result).toBe('closed')
+  })
+
+  it('returns undefined for unknown state value', async () => {
+    _setGhRunner(async () => 'draft\n')
+    const result = await fetchPrState('owner/repo', 42)
+    expect(result).toBeUndefined()
+  })
+
+  it('returns undefined on error', async () => {
+    _setGhRunner(async () => { throw new Error('api error') })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const result = await fetchPrState('owner/repo', 42)
+    expect(result).toBeUndefined()
+    warnSpy.mockRestore()
+  })
+
+  it('passes correct API path and --jq flag', async () => {
+    let capturedArgs: string[] = []
+    _setGhRunner(async (args) => { capturedArgs = args; return 'open' })
+    await fetchPrState('owner/repo', 7)
+    expect(capturedArgs).toContain('/repos/owner/repo/pulls/7')
+    expect(capturedArgs).toContain('--jq')
+    expect(capturedArgs).toContain('.state')
+  })
+})
+
+describe('postProviderUnavailableComment', () => {
+  afterEach(() => {
+    _resetGhRunner()
+  })
+
+  it('creates a new comment when no existing marker found', async () => {
+    const calls: Array<string[]> = []
+    _setGhRunner(async (args) => {
+      calls.push(args)
+      // First call: fetchExistingReviewComment → no marker
+      if (args.includes('--paginate')) return '[]'
+      // Second call: POST to /issues/<pr>/comments
+      return '{"id":123}'
+    })
+
+    await postProviderUnavailableComment({
+      repo: 'owner/repo',
+      prNumber: 42,
+      reason: 'rate_limit',
+      providerDisplay: 'Claude (sonnet)',
+      errorText: 'API Error: 429 rate limited',
+      retryAfter: '2026-04-12T11:00:00Z',
+    })
+
+    // Second call should be the POST
+    const postCall = calls[1]
+    expect(postCall).toContain('/repos/owner/repo/issues/42/comments')
+    const bodyArg = postCall.find(a => a.startsWith('body='))
+    expect(bodyArg).toBeDefined()
+    expect(bodyArg).toContain(REVIEW_COMMENT_MARKER)
+    expect(bodyArg).toContain('⏳')
+    expect(bodyArg).toContain('Claude (sonnet)')
+    expect(bodyArg).toContain('2026-04-12T11:00:00Z')
+    expect(bodyArg).toContain('Rate limit / usage limit hit')
+  })
+
+  it('updates existing comment when marker is found', async () => {
+    const calls: Array<string[]> = []
+    _setGhRunner(async (args) => {
+      calls.push(args)
+      if (args.includes('--paginate')) {
+        return JSON.stringify([{ id: 200, body: `${REVIEW_COMMENT_MARKER}\n## prior review` }])
+      }
+      return '{"id":200}'
+    })
+
+    await postProviderUnavailableComment({
+      repo: 'owner/repo',
+      prNumber: 42,
+      reason: 'auth_failure',
+      providerDisplay: 'OpenCode (openai/gpt-5.4)',
+      errorText: '401 Unauthorized',
+      retryAfter: '2026-04-12T11:00:00Z',
+    })
+
+    // Second call should be the PATCH
+    const patchCall = calls[1]
+    expect(patchCall).toContain('/repos/owner/repo/issues/comments/200')
+    expect(patchCall).toContain('PATCH')
+    const bodyArg = patchCall.find(a => a.startsWith('body='))
+    expect(bodyArg).toContain('🔑')
+    expect(bodyArg).toContain('OpenCode (openai/gpt-5.4)')
+    expect(bodyArg).toContain('Authentication failure')
+  })
+
+  it('uses rate_limit guidance text for rate limits', async () => {
+    const calls: Array<string[]> = []
+    _setGhRunner(async (args) => {
+      calls.push(args)
+      if (args.includes('--paginate')) return '[]'
+      return '{"id":1}'
+    })
+
+    await postProviderUnavailableComment({
+      repo: 'owner/repo',
+      prNumber: 42,
+      reason: 'rate_limit',
+      providerDisplay: 'Claude (sonnet)',
+      errorText: 'quota exceeded',
+      retryAfter: '2026-04-12T11:00:00Z',
+    })
+
+    const bodyArg = calls[1].find(a => a.startsWith('body='))
+    expect(bodyArg).toContain('automatically retry')
+  })
+
+  it('uses auth_failure guidance text for auth failures', async () => {
+    const calls: Array<string[]> = []
+    _setGhRunner(async (args) => {
+      calls.push(args)
+      if (args.includes('--paginate')) return '[]'
+      return '{"id":1}'
+    })
+
+    await postProviderUnavailableComment({
+      repo: 'owner/repo',
+      prNumber: 42,
+      reason: 'auth_failure',
+      providerDisplay: 'OpenCode (openai/gpt-5.4)',
+      errorText: '401 Unauthorized',
+      retryAfter: '2026-04-12T11:00:00Z',
+    })
+
+    const bodyArg = calls[1].find(a => a.startsWith('body='))
+    expect(bodyArg).toContain('Check provider credentials')
+  })
+
+  it('sanitizes backticks in error text', async () => {
+    const calls: Array<string[]> = []
+    _setGhRunner(async (args) => {
+      calls.push(args)
+      if (args.includes('--paginate')) return '[]'
+      return '{"id":1}'
+    })
+
+    await postProviderUnavailableComment({
+      repo: 'owner/repo',
+      prNumber: 42,
+      reason: 'rate_limit',
+      providerDisplay: 'Claude (sonnet)',
+      errorText: 'error with `backticks` that would break markdown',
+      retryAfter: '2026-04-12T11:00:00Z',
+    })
+
+    const bodyArg = calls[1].find(a => a.startsWith('body='))
+    expect(bodyArg).not.toContain('`backticks`')
+    expect(bodyArg).toContain("'backticks'")
+  })
+
+  it('does not throw on gh API failure', async () => {
+    _setGhRunner(async () => { throw new Error('api down') })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await expect(postProviderUnavailableComment({
+      repo: 'owner/repo',
+      prNumber: 42,
+      reason: 'rate_limit',
+      providerDisplay: 'Claude (sonnet)',
+      errorText: 'error',
+      retryAfter: '2026-04-12T11:00:00Z',
+    })).resolves.toBeUndefined()
+
+    expect(warnSpy).toHaveBeenCalled()
+    warnSpy.mockRestore()
   })
 })
