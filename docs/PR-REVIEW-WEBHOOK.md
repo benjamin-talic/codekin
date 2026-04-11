@@ -1,6 +1,6 @@
 # PR Review Webhook
 
-Automated pull request code review via GitHub webhooks. When a PR is opened, updated, reopened, or marked ready for review, Codekin spawns a Claude session that reviews the changes and posts findings directly to GitHub. When a PR is closed or merged, Codekin cleans up active sessions and manages the review cache.
+Automated pull request code review via GitHub webhooks. When a PR is opened, updated, reopened, or marked ready for review, Codekin spawns a review session (Claude or OpenCode, configurable) that reviews the changes and posts findings directly to GitHub. When a PR is closed or merged, Codekin cleans up active sessions and manages the review cache.
 
 ## Overview
 
@@ -21,8 +21,28 @@ GitHub sends `pull_request` webhook events to Codekin. The handler filters by ac
 8. Create isolated workspace via `webhook-workspace.ts` (bare mirror + worktree)
 9. Fetch PR context in parallel: diff, changed files, commits, existing review comments, existing reviews, prior review cache, existing Codekin summary comment
 10. Resolve review prompt: repo-level `.codekin/pr-review-prompt.md` > global `~/.codekin/pr-review-prompt.md` > built-in default
-11. Spawn Claude session with model `sonnet` and restricted `allowedTools` (includes `Write` for cache persistence). Cache directory added via `--add-dir` so Claude can write to it inside the sandbox.
+11. Spawn review session using the configured provider (Claude or OpenCode — see [Provider Selection](#provider-selection) below). Claude sessions use `allowedTools` and `--add-dir` for sandboxed tool access. OpenCode sessions get a workspace-local `opencode.json` with scoped permissions and `bypassPermissions` to auto-approve the remaining `ask`-default permissions.
 12. Send assembled prompt (PR metadata + diff + existing reviews + prior cache context + comment update/create instructions + cache-writing instructions)
+
+### Provider Selection
+
+Reviews can be performed by Claude Code or OpenCode, configured via `GITHUB_WEBHOOK_PR_REVIEW_PROVIDER`:
+
+| Value | Behavior |
+|-------|----------|
+| `claude` (default) | All reviews use Claude |
+| `opencode` | All reviews use OpenCode |
+| `split` | **Random A/B sampling**: each review independently flips a 50/50 coin between Claude and OpenCode. Two consecutive reviews may land on the same provider — this is not alternation. The intent is unbiased sampling over many reviews to compare output quality between models. |
+
+Per-provider model selection:
+- `GITHUB_WEBHOOK_PR_REVIEW_CLAUDE_MODEL` (default: `sonnet`)
+- `GITHUB_WEBHOOK_PR_REVIEW_OPENCODE_MODEL` (default: `openai/gpt-5.4`)
+
+When `split` is active, the review comment footer (`*Reviewed by Claude (sonnet)*` or `*Reviewed by OpenCode (openai/gpt-5.4)*`) makes it obvious which provider ran that specific review.
+
+### Debounce Persistence
+
+Pending debounced events (accepted webhooks still waiting for their 60s timer) are persisted to `~/.codekin/webhook-pending-debounce.json` on shutdown and restored + fired immediately on the next startup. This prevents losing webhook events when Codekin restarts during the debounce window — since the events have already been 202'd to GitHub, GitHub will not retry.
 
 ### Closed/Merged Flow
 

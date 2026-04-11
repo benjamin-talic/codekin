@@ -49,7 +49,15 @@ vi.mock('./webhook-prompt.js', () => ({
 
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>()
-  return { ...actual, writeFileSync: vi.fn() }
+  return {
+    ...actual,
+    writeFileSync: vi.fn(),
+    existsSync: vi.fn(() => false),
+    readFileSync: vi.fn(() => '{}'),
+    mkdirSync: vi.fn(),
+    renameSync: vi.fn(),
+    unlinkSync: vi.fn(),
+  }
 })
 
 vi.mock('./webhook-workspace.js', () => ({
@@ -80,7 +88,7 @@ vi.mock('./webhook-pr-prompt.js', () => ({
 
 import { WebhookHandler } from './webhook-handler.js'
 import { createWorkspace } from './webhook-workspace.js'
-import { writeFileSync } from 'fs'
+import { writeFileSync, existsSync, readFileSync } from 'fs'
 import type { FullWebhookConfig } from './webhook-config.js'
 
 const SECRET = 'test-secret-123'
@@ -1281,6 +1289,111 @@ describe('WebhookHandler', () => {
         // Advance past debounce — no session should be created
         await vi.advanceTimersByTimeAsync(60_100)
         expect(sessions.create).not.toHaveBeenCalled()
+      })
+    })
+
+    describe('debounce persistence across restart', () => {
+      it('persists pending debounces to disk on shutdown', async () => {
+        await handler.checkHealth()
+
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+        expect(result.body.status).toBe('debounced')
+
+        // Shut down while event is still debounced
+        handler.shutdown()
+
+        // writeFileSync should have been called with the pending debounces
+        const calls = vi.mocked(writeFileSync).mock.calls
+        const persistCall = calls.find(c => String(c[0]).includes('webhook-pending-debounce'))
+        expect(persistCall).toBeDefined()
+        const persisted = JSON.parse(String(persistCall?.[1])) as { records: Array<{ key: string; event: { id: string } }> }
+        expect(persisted.records).toHaveLength(1)
+        expect(persisted.records[0].key).toBe('owner/repo#42')
+        expect(persisted.records[0].event.id).toBe(result.body.eventId)
+
+        // Re-initialize handler (checkHealth will no-op on shutdown since we lose state)
+        handler = new WebhookHandler(makeConfig(), sessions)
+      })
+
+      it('deletes persist file on shutdown when no debounces pending', async () => {
+        // Simulate a stale file existing before shutdown
+        vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
+          String(p).includes('webhook-pending-debounce'),
+        )
+
+        handler.shutdown()
+
+        // Should NOT have written anything (nothing pending), but should have tried to unlink the stale file
+        const { unlinkSync } = await import('fs')
+        expect(vi.mocked(unlinkSync)).toHaveBeenCalledWith(expect.stringContaining('webhook-pending-debounce'))
+      })
+
+      it('restores pending debounces from disk on checkHealth and fires them immediately', async () => {
+        const persistedPayload = makePrPayload()
+        const persistedEvent = {
+          id: 'restored-event-id',
+          idempotencyKey: 'restored-key',
+          receivedAt: new Date().toISOString(),
+          event: 'pull_request',
+          action: 'opened',
+          repo: 'owner/repo',
+          branch: 'fix-auth',
+          workflow: 'PR Review',
+          runId: 42,
+          runAttempt: 1,
+          conclusion: 'opened',
+          status: 'debounced',
+          sessionId: 'restored-session-id',
+          prNumber: 42,
+          prTitle: 'Fix auth bug',
+          headSha: 'deadbeef1234567890abcdef1234567890abcdef',
+          baseBranch: 'main',
+        }
+
+        // Simulate persisted file existing with one record
+        vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
+          String(p).includes('webhook-pending-debounce'),
+        )
+        vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
+          records: [{
+            key: 'owner/repo#42',
+            payload: persistedPayload,
+            event: persistedEvent,
+            sessionId: 'restored-session-id',
+          }],
+        }))
+
+        // Re-initialize handler — checkHealth should restore and fire
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig(), sessions)
+        await handler.checkHealth()
+
+        // Fire is synchronous but async processing starts — give it a tick
+        await vi.advanceTimersByTimeAsync(100)
+
+        // The event should be in the ring buffer
+        const event = handler.getEvent('restored-event-id')
+        expect(event).toBeDefined()
+
+        // sessions.create should have been called (the debounce fired)
+        expect(sessions.create).toHaveBeenCalled()
+      })
+
+      it('does not restore if file is missing', async () => {
+        vi.mocked(readFileSync).mockClear()
+        vi.mocked(existsSync).mockReturnValue(false)
+
+        // Fresh handler so prior tests don't leak state
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig(), sessions)
+        await handler.checkHealth()
+
+        // readFileSync should not be called for the persist file
+        const readCalls = vi.mocked(readFileSync).mock.calls
+        const persistRead = readCalls.find(c => String(c[0]).includes('webhook-pending-debounce'))
+        expect(persistRead).toBeUndefined()
       })
     })
 

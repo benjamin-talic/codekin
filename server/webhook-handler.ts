@@ -22,7 +22,8 @@
  */
 
 import { randomUUID } from 'crypto'
-import { writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
+import { homedir } from 'os'
 import { dirname, join } from 'path'
 import type { CreateSessionOptions, SessionManager } from './session-manager.js'
 import { verifyHmacSignature } from './crypto-utils.js'
@@ -58,6 +59,17 @@ interface PendingDebounce {
   sessionId: string
   timer: ReturnType<typeof setTimeout>
 }
+
+/** Serializable form of a pending debounce entry (no timer, for disk persistence). */
+interface PendingDebounceRecord {
+  key: string
+  payload: PullRequestPayload
+  event: WebhookEvent
+  sessionId: string
+}
+
+/** On-disk location for persisted pending debounces. */
+const PENDING_DEBOUNCE_FILE = join(homedir(), '.codekin', 'webhook-pending-debounce.json')
 
 export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEventStatus> {
   private config: FullWebhookConfig
@@ -126,6 +138,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       console.warn('[webhook] Webhook processing disabled — manual sessions still work')
     } else {
       console.log('[webhook] gh CLI health check passed')
+      // Resume any debounced events that were pending when the server last shut down.
+      // These were already acknowledged to GitHub (202), so if we don't fire them now
+      // they are lost forever — GitHub won't retry.
+      this.restorePendingDebounces()
     }
     return this.ghHealthy
   }
@@ -715,13 +731,20 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
 
   /**
    * Resolve the provider and model for a PR review session based on config.
-   * For 'split' mode, performs a random coin flip per event.
+   *
+   * `split` mode is **random A/B selection**: each review independently flips a
+   * 50/50 coin between Claude and OpenCode. This is intentionally NOT alternation —
+   * two consecutive reviews may land on the same provider. The goal is unbiased
+   * sampling over many reviews to compare output quality between models, not
+   * guaranteed interleaving. If you need strict alternation, use `claude` or
+   * `opencode` explicitly and toggle by config.
    */
   private resolvePrReviewProvider(): { provider: 'claude' | 'opencode'; model: string } {
     if (this.config.prReviewProvider === 'opencode') {
       return { provider: 'opencode', model: this.config.prReviewOpencodeModel }
     }
     if (this.config.prReviewProvider === 'split') {
+      // Random A/B sampling — see JSDoc above for rationale.
       return Math.random() < 0.5
         ? { provider: 'claude', model: this.config.prReviewClaudeModel }
         : { provider: 'opencode', model: this.config.prReviewOpencodeModel }
@@ -835,6 +858,76 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       this.updateEventStatus(pending.event.id, 'superseded', reason)
       this.pendingDebounce.delete(key)
       console.log(`[webhook] Cancelled pending debounce for ${key}: ${reason}`)
+    }
+  }
+
+  /**
+   * Persist all currently-pending debounced events to disk so they survive a restart.
+   * Called from shutdown(). GitHub already received a 202 for these, so we must not
+   * lose them — they will be restored and fired on next startup.
+   */
+  private savePendingDebounces(): void {
+    if (this.pendingDebounce.size === 0) {
+      // Clean up any stale file from previous runs
+      if (existsSync(PENDING_DEBOUNCE_FILE)) {
+        try { unlinkSync(PENDING_DEBOUNCE_FILE) } catch { /* best effort */ }
+      }
+      return
+    }
+
+    const records: PendingDebounceRecord[] = []
+    for (const [key, pending] of this.pendingDebounce) {
+      records.push({
+        key,
+        payload: pending.payload,
+        event: pending.event,
+        sessionId: pending.sessionId,
+      })
+    }
+
+    try {
+      mkdirSync(dirname(PENDING_DEBOUNCE_FILE), { recursive: true })
+      const tmp = PENDING_DEBOUNCE_FILE + '.tmp'
+      writeFileSync(tmp, JSON.stringify({ records }, null, 2), { mode: 0o600 })
+      renameSync(tmp, PENDING_DEBOUNCE_FILE)
+      console.log(`[webhook] Saved ${records.length} pending debounce(s) to disk for recovery`)
+    } catch (err) {
+      console.error('[webhook] Failed to persist pending debounces:', err)
+    }
+  }
+
+  /**
+   * Restore pending debounced events from disk and fire them immediately.
+   * Called from checkHealth() after gh is confirmed available. The events were
+   * already 202'd to GitHub, so any delay risks further lag — fire now rather
+   * than re-arming the debounce timer.
+   */
+  private restorePendingDebounces(): void {
+    if (!existsSync(PENDING_DEBOUNCE_FILE)) return
+
+    let records: PendingDebounceRecord[] = []
+    try {
+      const raw = readFileSync(PENDING_DEBOUNCE_FILE, 'utf-8')
+      const data = JSON.parse(raw) as { records?: PendingDebounceRecord[] }
+      if (Array.isArray(data.records)) records = data.records
+    } catch (err) {
+      console.error('[webhook] Failed to load pending debounces:', err)
+      return
+    }
+
+    // Delete the file now — we're about to process these entries, and if
+    // processing fails we don't want to retry-loop on the next startup.
+    try { unlinkSync(PENDING_DEBOUNCE_FILE) } catch { /* best effort */ }
+
+    if (records.length === 0) return
+
+    console.log(`[webhook] Restoring ${records.length} pending debounce(s) from disk`)
+    for (const rec of records) {
+      // Re-record the event in the ring buffer (it was lost on shutdown)
+      this.recordEvent(rec.event)
+      // Fire immediately — no more waiting, GitHub has been waiting long enough
+      console.log(`[webhook] Resuming debounced event ${rec.event.id} for ${rec.key}`)
+      this.fireDebouncedPrEvent(rec.payload, rec.event, rec.sessionId)
     }
   }
 
@@ -1001,10 +1094,13 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   }
 
   shutdown(): void {
-    // Cancel all pending debounce timers and mark events as non-terminal
+    // Persist pending debounces to disk BEFORE clearing timers — they were already
+    // 202'd to GitHub, so losing them would drop the webhook silently.
+    this.savePendingDebounces()
+
+    // Cancel all pending debounce timers (state was saved above, so this is safe)
     for (const [, pending] of this.pendingDebounce) {
       clearTimeout(pending.timer)
-      this.updateEventStatus(pending.event.id, 'superseded', 'Server shutdown')
     }
     this.pendingDebounce.clear()
 
