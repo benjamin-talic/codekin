@@ -1317,16 +1317,21 @@ describe('WebhookHandler', () => {
         handler = new WebhookHandler(makeConfig(), sessions)
       })
 
-      it('deletes persist file on shutdown when no debounces pending', async () => {
-        // Simulate a stale file existing before shutdown
+      it('deletes persist file on shutdown when restore ran and no debounces pending', async () => {
+        // checkHealth must run first so restorePendingDebounces sets debounceFileConsumed.
+        // Without that, the stale-file deletion is (correctly) skipped — see regression test below.
+        await handler.checkHealth()
+
+        // Now simulate a stale file appearing after checkHealth (e.g. written by a prior process)
         vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
           String(p).includes('webhook-pending-debounce'),
         )
 
+        const { unlinkSync } = await import('fs')
+        vi.mocked(unlinkSync).mockClear()
         handler.shutdown()
 
-        // Should NOT have written anything (nothing pending), but should have tried to unlink the stale file
-        const { unlinkSync } = await import('fs')
+        // Should try to unlink the stale file
         expect(vi.mocked(unlinkSync)).toHaveBeenCalledWith(expect.stringContaining('webhook-pending-debounce'))
       })
 
@@ -1394,6 +1399,43 @@ describe('WebhookHandler', () => {
         const readCalls = vi.mocked(readFileSync).mock.calls
         const persistRead = readCalls.find(c => String(c[0]).includes('webhook-pending-debounce'))
         expect(persistRead).toBeUndefined()
+      })
+
+      it('does NOT delete persist file on shutdown when restore never ran (unhealthy startup)', async () => {
+        // Scenario: prior run saved events to disk. Current run has unhealthy gh,
+        // so checkHealth() never calls restorePendingDebounces(). On shutdown,
+        // savePendingDebounces() must NOT delete the file — otherwise events from
+        // the prior run would be lost forever (GitHub won't retry after 202).
+
+        // Reset mocks and create a fresh handler
+        vi.mocked(existsSync).mockClear()
+        const { unlinkSync } = await import('fs')
+        vi.mocked(unlinkSync).mockClear()
+
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig(), sessions)
+
+        // Simulate unhealthy gh — skip checkHealth entirely (or mock it to fail).
+        // Either way, restorePendingDebounces() must not run.
+
+        // Simulate the persist file existing on disk (left by a prior healthy run)
+        vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
+          String(p).includes('webhook-pending-debounce'),
+        )
+
+        // Shut down without calling checkHealth — debounceFileConsumed stays false
+        handler.shutdown()
+
+        // The stale file should NOT have been deleted
+        const unlinkCalls = vi.mocked(unlinkSync).mock.calls
+        const persistUnlink = unlinkCalls.find(c => String(c[0]).includes('webhook-pending-debounce'))
+        expect(persistUnlink).toBeUndefined()
+
+        // Reset existsSync so it doesn't leak to the next test
+        vi.mocked(existsSync).mockReturnValue(false)
+
+        // Re-initialize handler so subsequent tests start clean
+        handler = new WebhookHandler(makeConfig(), sessions)
       })
     })
 

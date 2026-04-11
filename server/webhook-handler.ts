@@ -78,6 +78,13 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   private ghHealthy = false
   /** Pending debounce timers keyed by `repo#prNumber`. */
   private pendingDebounce = new Map<string, PendingDebounce>()
+  /**
+   * Whether `restorePendingDebounces()` actually ran during this process lifecycle.
+   * Guards `savePendingDebounces()` from deleting a stale file when the map is empty
+   * but restore never ran (e.g. unhealthy `gh` on startup) — otherwise events from a
+   * prior run would be permanently lost.
+   */
+  private debounceFileConsumed = false
 
   constructor(config: FullWebhookConfig, sessions: SessionManager) {
     super('webhook', PROCESSING_TIMEOUT_MS)
@@ -868,8 +875,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
    */
   private savePendingDebounces(): void {
     if (this.pendingDebounce.size === 0) {
-      // Clean up any stale file from previous runs
-      if (existsSync(PENDING_DEBOUNCE_FILE)) {
+      // Only delete a stale file if restore actually ran this lifecycle.
+      // Otherwise an unhealthy-startup path (e.g. `gh` unavailable) would silently
+      // drop events persisted by a prior healthy run — GitHub won't retry them.
+      if (this.debounceFileConsumed && existsSync(PENDING_DEBOUNCE_FILE)) {
         try { unlinkSync(PENDING_DEBOUNCE_FILE) } catch { /* best effort */ }
       }
       return
@@ -903,6 +912,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
    * than re-arming the debounce timer.
    */
   private restorePendingDebounces(): void {
+    // Mark that restore has run this lifecycle, even if the file doesn't exist.
+    // This lets savePendingDebounces() safely delete stale files later.
+    this.debounceFileConsumed = true
+
     if (!existsSync(PENDING_DEBOUNCE_FILE)) return
 
     let records: PendingDebounceRecord[] = []
