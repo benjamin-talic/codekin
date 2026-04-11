@@ -112,6 +112,60 @@ export interface DedupEntry {
 /** Provider mode for automated PR reviews. */
 export type PrReviewProviderMode = 'claude' | 'opencode' | 'split'
 
+/**
+ * Category for a provider failure — used by the webhook error classifier and
+ * by the backlog / health subsystems to decide how to react.
+ * See `server/webhook-error-classifier.ts` for the detection logic.
+ */
+export type ProviderUnhealthyReason = 'rate_limit' | 'auth_failure'
+
+/** Current health snapshot for a single provider. Persisted to disk. */
+export interface ProviderHealth {
+  /** Last observed status for this provider. */
+  status: 'healthy' | 'unhealthy'
+  /** Why the provider is unhealthy. Unset when status='healthy'. */
+  reason?: ProviderUnhealthyReason
+  /** ISO timestamp when the unhealthy state was detected. Unset when healthy. */
+  detectedAt?: string
+  /** Truncated error text from the failing session. Unset when healthy. */
+  lastError?: string
+  /** ISO timestamp of the last successful review with this provider. */
+  lastSuccessAt?: string
+}
+
+/** On-disk shape of `~/.codekin/provider-health.json`. */
+export interface ProviderHealthFile {
+  claude: ProviderHealth
+  opencode: ProviderHealth
+}
+
+/**
+ * A webhook event that failed due to provider unhealthy state and is queued
+ * for retry. Persisted to `~/.codekin/webhook-backlog.json`.
+ */
+export interface BacklogEntry {
+  /** UUID — used to remove entries after retry. */
+  id: string
+  /** GitHub repo in `owner/name` format. */
+  repo: string
+  /** PR number. */
+  prNumber: number
+  /** Head SHA at the time the event was enqueued. */
+  headSha: string
+  /** Full GitHub webhook payload — needed to re-fire the event later. */
+  payload: PullRequestPayload
+  /** Why this event was backlogged. */
+  reason: ProviderUnhealthyReason
+  /** Which provider(s) failed. `both` means split-mode failed twice. */
+  failedProvider: 'claude' | 'opencode' | 'both'
+  /** ISO timestamp when the entry was queued. */
+  queuedAt: string
+  /** ISO timestamp after which the retry worker should re-attempt. */
+  retryAfter: string
+  /** How many times this entry has been retried. */
+  retryCount: number
+}
+
 // --- Webhook configuration (Phase 1 subset) ---
 export interface WebhookConfig {
   enabled: boolean
