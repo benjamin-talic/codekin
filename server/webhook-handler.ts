@@ -661,6 +661,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       // OpenCode uses opencode.json in the workspace for scoped permissions.
       // Write a config that mirrors Claude's allowedTools — allow gh/git bash,
       // file reads/edits, and access to the PR cache directory.
+      // Note: OpenCode's pattern matching evaluates rules in order, last match wins.
+      // The catch-all "*": "deny" MUST come first so specific allows override it.
+      // external_directory and doom_loop default to "ask" — we explicitly deny them
+      // by default to prevent bypassPermissions from auto-approving arbitrary access.
       const opencodeConfig = {
         $schema: 'https://opencode.ai/config.json',
         permission: {
@@ -669,15 +673,19 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
           edit: 'allow',
           grep: 'allow',
           webfetch: 'allow',
-          external_directory: { [dirname(cachePath) + '/**']: 'allow' },
+          external_directory: { '*': 'deny', [dirname(cachePath) + '/**']: 'allow' },
+          doom_loop: 'deny',
         },
       }
       writeFileSync(join(workspacePath, 'opencode.json'), JSON.stringify(opencodeConfig, null, 2))
       console.log(`[webhook] Wrote opencode.json permissions config to ${workspacePath}`)
-      // Auto-approve any permission requests that slip through the config
-      // (e.g. external_directory checks not covered by patterns).
-      // The opencode.json scopes what's allowed; this just ensures automated
-      // sessions don't hang waiting for interactive approval.
+      // bypassPermissions auto-approves permission.asked SSE events — but only
+      // for permissions set to "ask" (the default for external_directory, etc.).
+      // OpenCode enforces "deny" rules server-side BEFORE emitting permission.asked,
+      // so bypassPermissions cannot override the deny rules in opencode.json above.
+      // See: https://opencode.ai/docs/permissions/
+      // This ensures automated sessions don't hang on "ask" prompts while the
+      // opencode.json deny rules still block unauthorized bash commands.
       sessionOptions.permissionMode = 'bypassPermissions'
     }
 
