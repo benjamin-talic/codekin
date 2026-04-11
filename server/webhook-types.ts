@@ -3,6 +3,7 @@ export type WebhookEventStatus =
   | 'received'
   | 'filtered'
   | 'duplicate'
+  | 'debounced'
   | 'processing'
   | 'session_created'
   | 'completed'
@@ -108,12 +109,19 @@ export interface DedupEntry {
   eventId: string
 }
 
+/** Provider mode for automated PR reviews. */
+export type PrReviewProviderMode = 'claude' | 'opencode' | 'split'
+
 // --- Webhook configuration (Phase 1 subset) ---
 export interface WebhookConfig {
   enabled: boolean
   maxConcurrentSessions: number
   logLinesToInclude: number
   actorAllowlist: string[]
+  prDebounceMs: number            // delay before processing PR events (coalesces rapid events)
+  prReviewProvider: PrReviewProviderMode
+  prReviewClaudeModel: string
+  prReviewOpencodeModel: string
 }
 
 // --- GitHub payload subset (pull_request) ---
@@ -174,4 +182,6 @@ export interface PullRequestContext {
   commitMessages: string          // formatted commit messages
   reviewComments: string          // existing inline review comments
   reviews: string                 // existing review summaries
+  reviewProvider?: 'claude' | 'opencode'  // which engine is performing the review
+  reviewModel?: string                     // model ID (e.g. 'sonnet' or 'openai/gpt-5.4')
 }

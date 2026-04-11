@@ -147,7 +147,8 @@ export class SessionLifecycle {
     let cp: CodingProcess
     if (session.provider === 'opencode') {
       // Note: addDirs and allowedTools are not passed to OpenCode — it uses
-      // its own permission config in .opencode/config.jsonc. The x-opencode-directory
+      // opencode.json in the project root for permission config
+      // (see https://opencode.ai/docs/config/). The x-opencode-directory
       // header handles per-session working directory routing on the shared server.
       cp = new OpenCodeProcess(session.workingDir, {
         sessionId: sessionId,

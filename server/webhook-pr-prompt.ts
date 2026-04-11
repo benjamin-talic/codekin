@@ -26,40 +26,54 @@ export interface PrPromptOptions {
 
 const CUSTOM_PROMPT_FILENAME = 'pr-review-prompt.md'
 
+/** Try to read a prompt file, returning its trimmed contents or undefined. */
+function tryReadPrompt(filePath: string): string | undefined {
+  if (!existsSync(filePath)) return undefined
+  try {
+    const content = readFileSync(filePath, 'utf-8').trim()
+    if (content) {
+      console.log(`[pr-prompt] Using custom prompt: ${filePath}`)
+      return content
+    }
+  } catch (err) {
+    console.warn(`[pr-prompt] Failed to read prompt:`, err)
+  }
+  return undefined
+}
+
 /**
  * Attempt to load a custom review prompt from disk.
- * Returns the file contents if found, or undefined.
+ *
+ * Resolution order (first match wins):
+ *   1. {repo}/.codekin/pr-review-prompt.{provider}.md  (repo-level, provider-specific)
+ *   2. {repo}/.codekin/pr-review-prompt.md              (repo-level, generic)
+ *   3. ~/.codekin/pr-review-prompt.{provider}.md        (global, provider-specific)
+ *   4. ~/.codekin/pr-review-prompt.md                   (global, generic)
+ *
+ * @param provider - 'claude' or 'opencode'; when undefined, provider-specific files are skipped.
  */
-function loadCustomPrompt(workspacePath: string): string | undefined {
-  // 1. Repo-level
-  const repoPromptPath = join(workspacePath, '.codekin', CUSTOM_PROMPT_FILENAME)
-  if (existsSync(repoPromptPath)) {
-    try {
-      const content = readFileSync(repoPromptPath, 'utf-8').trim()
-      if (content) {
-        console.log(`[pr-prompt] Using repo-level custom prompt: ${repoPromptPath}`)
-        return content
-      }
-    } catch (err) {
-      console.warn(`[pr-prompt] Failed to read repo-level prompt:`, err)
-    }
+function loadCustomPrompt(workspacePath: string, provider?: string): string | undefined {
+  const repoDir = join(workspacePath, '.codekin')
+  const globalDir = join(homedir(), '.codekin')
+
+  // 1. Repo-level, provider-specific
+  if (provider) {
+    const result = tryReadPrompt(join(repoDir, `pr-review-prompt.${provider}.md`))
+    if (result) return result
   }
 
-  // 2. Global
-  const globalPromptPath = join(homedir(), '.codekin', CUSTOM_PROMPT_FILENAME)
-  if (existsSync(globalPromptPath)) {
-    try {
-      const content = readFileSync(globalPromptPath, 'utf-8').trim()
-      if (content) {
-        console.log(`[pr-prompt] Using global custom prompt: ${globalPromptPath}`)
-        return content
-      }
-    } catch (err) {
-      console.warn(`[pr-prompt] Failed to read global prompt:`, err)
-    }
+  // 2. Repo-level, generic
+  const repoGeneric = tryReadPrompt(join(repoDir, CUSTOM_PROMPT_FILENAME))
+  if (repoGeneric) return repoGeneric
+
+  // 3. Global, provider-specific
+  if (provider) {
+    const result = tryReadPrompt(join(globalDir, `pr-review-prompt.${provider}.md`))
+    if (result) return result
   }
 
-  return undefined
+  // 4. Global, generic
+  return tryReadPrompt(join(globalDir, CUSTOM_PROMPT_FILENAME))
 }
 
 /**
@@ -93,6 +107,10 @@ function buildDefaultInstructions(ctx: PullRequestContext): string {
   return lines.join('\n')
 }
 
+function formatReviewerDisplay(provider: 'claude' | 'opencode', model: string): string {
+  return provider === 'opencode' ? `OpenCode (${model})` : `Claude (${model})`
+}
+
 /**
  * Builds the full prompt for PR review, combining PR context with review instructions.
  *
@@ -103,6 +121,9 @@ function buildDefaultInstructions(ctx: PullRequestContext): string {
 export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: string, options?: PrPromptOptions): string {
   const lines: string[] = []
   const reviewBodyPath = `${workspacePath}/pr-${ctx.prNumber}-review-body.md`
+  const reviewerDisplay = (ctx.reviewProvider && ctx.reviewModel)
+    ? formatReviewerDisplay(ctx.reviewProvider, ctx.reviewModel)
+    : undefined
 
   // --- PR metadata (always included) ---
   lines.push('A pull request needs code review.')
@@ -116,6 +137,9 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
 
   const shortHead = ctx.headSha.slice(0, 7)
   lines.push(`- **Head**: ${shortHead}`)
+  if (reviewerDisplay) {
+    lines.push(`- **Reviewer**: ${reviewerDisplay}`)
+  }
 
   if (ctx.prUrl) {
     lines.push(`- **URL**: ${ctx.prUrl}`)
@@ -190,7 +214,7 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
   lines.push('')
   lines.push('## Instructions')
 
-  const customPrompt = loadCustomPrompt(workspacePath)
+  const customPrompt = loadCustomPrompt(workspacePath, ctx.reviewProvider)
   if (customPrompt) {
     lines.push(customPrompt)
   } else {
@@ -199,36 +223,89 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
 
   // Override any hardcoded intermediate review file paths from custom prompts
   // so concurrent reviews don't collide or write into tracked repo files.
+  // Only include Codex paths for Claude — OpenCode doesn't use Codex cross-review.
   lines.push('')
   lines.push('## File Paths for This Review')
-  lines.push('When writing intermediate files during the review process, use these paths:')
-  lines.push(`- Draft review: \`${workspacePath}/pr-${ctx.prNumber}-draft-review.md\``)
-  lines.push(`- Codex cross-review output: \`${workspacePath}/pr-${ctx.prNumber}-codex-review.md\``)
-  lines.push(`- Codex command: \`codex exec - --skip-git-repo-check -o ${workspacePath}/pr-${ctx.prNumber}-codex-review.md < ${workspacePath}/pr-${ctx.prNumber}-draft-review.md\``)
-  lines.push('These paths override any file paths mentioned in the review instructions above.')
-  lines.push('Do NOT write review files to the `docs/` directory or any other git-tracked location.')
+  if (ctx.reviewProvider === 'opencode') {
+    lines.push('Do NOT write intermediate draft files. Write the review body directly to the file specified in "Posting Your Review Summary" below.')
+    lines.push('Do NOT write review files to the `docs/` directory or any other git-tracked location.')
+  } else {
+    lines.push('When writing intermediate files during the review process, use these paths:')
+    lines.push(`- Draft review: \`${workspacePath}/pr-${ctx.prNumber}-draft-review.md\``)
+    lines.push(`- Codex cross-review output: \`${workspacePath}/pr-${ctx.prNumber}-codex-review.md\``)
+    lines.push(`- Codex command: \`codex exec - --skip-git-repo-check -o ${workspacePath}/pr-${ctx.prNumber}-codex-review.md < ${workspacePath}/pr-${ctx.prNumber}-draft-review.md\``)
+    lines.push('These paths override any file paths mentioned in the review instructions above.')
+    lines.push('Do NOT write review files to the `docs/` directory or any other git-tracked location.')
+  }
+
+  // --- Sandbox tool rules (always injected, tied to actual runtime permissions) ---
+  // These override anything in the custom prompt. They reflect the real sandbox
+  // enforced by code (Claude allowedTools or OpenCode opencode.json), so keeping
+  // them in the injected prompt ensures they never drift out of sync.
+  lines.push('')
+  lines.push('## Sandbox Tool Rules (enforced)')
+  if (ctx.reviewProvider === 'opencode') {
+    lines.push('Your session runs inside an OpenCode sandbox with scoped permissions. The following rules are enforced by `opencode.json` in the workspace:')
+    lines.push('')
+    lines.push('**Use built-in tools for file operations — NOT bash equivalents:**')
+    lines.push('- Use the **read** tool to read files (not `cat`, `head`, `tail`)')
+    lines.push('- Use the **grep** tool to search file contents (not bash `grep`, `rg`, `awk`)')
+    lines.push('- Use the **edit** or **write** tool to create/modify files (not `echo >` or heredocs)')
+    lines.push('')
+    lines.push('Built-in tools are pre-authorized and path-scoped to the workspace. Bash `grep`/`rg`/`find`/`sed`/`awk` are DENIED and will fail.')
+    lines.push('')
+    lines.push('**Exception**: the structured JSON cache file (see "Post-Review: Save Context" below) should be written via bash heredoc — this avoids escape issues with arbitrary JSON content. All OTHER file operations should use the built-in tools.')
+    lines.push('')
+    lines.push('**Bash is restricted to:** `git` commands, `gh` commands for PR interaction, and a small set of read-only helpers (`cat`, `ls`, `head`, `tail`, `wc`, `mkdir`, `echo`). All other bash commands (including `grep`, `rg`, `find`, `sed`, `awk`) are denied.')
+    lines.push('')
+    lines.push('**Stay within the workspace.** Access to files outside the cloned repo is blocked by `external_directory: deny`. The only exception is the PR cache directory, which is allow-listed.')
+  } else {
+    // Claude
+    lines.push('Your session runs with Claude `--allowedTools` restricting which tools are available.')
+    lines.push('')
+    lines.push('**Use built-in tools for codebase exploration — NOT bash equivalents:**')
+    lines.push('- Use **Read** to read files (not `cat`, `head`, `tail`)')
+    lines.push('- Use **Grep** to search file contents (not bash `grep`, `rg`, `awk`)')
+    lines.push('- Use **Glob** to find files by pattern (not `find`, `ls`)')
+    lines.push('')
+    lines.push('These tools are pre-approved and work without permission prompts. Bash commands for file reading will be blocked.')
+    lines.push('')
+    lines.push('**Only use Bash for:** `git` commands and `gh` commands.')
+    lines.push('')
+    lines.push('**Stay within the workspace directory.** Do not access files outside the cloned repo.')
+  }
 
   // --- Comment posting instructions ---
   lines.push('')
   if (options?.existingCommentId) {
     lines.push('## Posting Your Review Summary')
     lines.push(`An existing Codekin review comment was found on this PR (comment ID: ${options.existingCommentId}).`)
-    lines.push('Update it instead of creating a new comment. Use a temporary file for the body to avoid shell escaping issues:')
+    lines.push('**Update it** instead of creating a new comment. This comment is the SINGLE source of truth for review findings — put ALL detailed findings here.')
     lines.push('')
-    lines.push(`1. Write your review summary to \`${reviewBodyPath}\``)
+    lines.push(`1. Write your full review to \`${reviewBodyPath}\``)
     lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
     lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/comments/${options.existingCommentId} -X PATCH -F body=@${reviewBodyPath}\``)
+    if (reviewerDisplay) {
+      lines.push(`4. Include this footer at the end of the review body: \`*Reviewed by ${reviewerDisplay}*\``)
+    }
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body.`)
+    lines.push('')
+    lines.push('**Do NOT duplicate the full review in the `gh pr review` verdict.** The verdict body should be one sentence only (e.g., "Approved — see Codekin review comment for details."). Verdict reviews stack up and cannot be updated.')
   } else {
     lines.push('## Posting Your Review Summary')
-    lines.push('Post your review summary as a new comment on the PR. Use a temporary file for the body to avoid shell escaping issues:')
+    lines.push('Post your review summary as a **new comment** on the PR. This comment is the SINGLE source of truth for review findings — put ALL detailed findings here.')
     lines.push('')
-    lines.push(`1. Write your review summary to \`${reviewBodyPath}\``)
+    lines.push(`1. Write your full review to \`${reviewBodyPath}\``)
     lines.push(`2. Ensure the file starts with \`${REVIEW_COMMENT_MARKER}\` on its own line`)
     lines.push(`3. Run: \`gh api repos/${ctx.repo}/issues/${ctx.prNumber}/comments -F body=@${reviewBodyPath}\``)
+    if (reviewerDisplay) {
+      lines.push(`4. Include this footer at the end of the review body: \`*Reviewed by ${reviewerDisplay}*\``)
+    }
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body. This marker allows future reviews to update this comment instead of creating a new one.`)
+    lines.push('')
+    lines.push('**Do NOT duplicate the full review in the `gh pr review` verdict.** The verdict body should be one sentence only (e.g., "Approved — see Codekin review comment for details."). Verdict reviews stack up and cannot be updated.')
   }
 
   // --- Cache-writing instructions ---
@@ -270,7 +347,11 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('IMPORTANT: The `structuredFindings` array must include every finding from your review.')
     lines.push('Use an empty array `[]` if there are no findings. The `verdict` must be exactly one of: approve, request_changes, comment.')
     lines.push('')
-    lines.push('Use the Write tool to save this file. This helps future reviews of this PR be more efficient.')
+    if (ctx.reviewProvider === 'opencode') {
+      lines.push('Save this file using bash: `cat > ' + options.cachePath + ' << \'CACHE_EOF\'` followed by the JSON content and `CACHE_EOF`. This helps future reviews of this PR be more efficient.')
+    } else {
+      lines.push('Use the Write tool to save this file. This helps future reviews of this PR be more efficient.')
+    }
   }
 
   return lines.join('\n')

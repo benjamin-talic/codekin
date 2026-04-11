@@ -1,6 +1,6 @@
 # PR Review Webhook
 
-Automated pull request code review via GitHub webhooks. When a PR is opened, updated, reopened, or marked ready for review, Codekin spawns a Claude session that reviews the changes and posts findings directly to GitHub. When a PR is closed or merged, Codekin cleans up active sessions and manages the review cache.
+Automated pull request code review via GitHub webhooks. When a PR is opened, updated, reopened, or marked ready for review, Codekin spawns a review session (Claude or OpenCode, configurable) that reviews the changes and posts findings directly to GitHub. When a PR is closed or merged, Codekin cleans up active sessions and manages the review cache.
 
 ## Overview
 
@@ -11,17 +11,38 @@ GitHub sends `pull_request` webhook events to Codekin. The handler filters by ac
 ### Event Flow
 
 1. GitHub sends `pull_request` event (actions: `opened`, `synchronize`, `reopened`, `ready_for_review`, `closed`)
-   _(For `closed` events, steps 2–11 are skipped — see [Closed/Merged Flow](#closedmerged-flow) below)_
+   _(For `closed` events, steps 2–12 are skipped — see [Closed/Merged Flow](#closedmerged-flow) below)_
 2. `webhook-handler.ts` validates signature, filters by action/draft/allowlist
 3. Dedup check (`webhook-dedup.ts`) — rejects already-processed events
-4. Supersede any active session for the same PR (new push kills old review)
-5. Concurrency cap check (configurable, default 3, set to 10 via `~/.codekin/webhook-config.json`)
-6. Record in dedup only after passing all gates (not before — so rejected events can be retried)
-7. Create isolated workspace via `webhook-workspace.ts` (bare mirror + worktree)
-8. Fetch PR context in parallel: diff, changed files, commits, existing review comments, existing reviews, prior review cache, existing Codekin summary comment
-9. Resolve review prompt: repo-level `.codekin/pr-review-prompt.md` > global `~/.codekin/pr-review-prompt.md` > built-in default
-10. Spawn Claude session with model `sonnet` and restricted `allowedTools` (includes `Write` for cache persistence). Cache directory added via `--add-dir` so Claude can write to it inside the sandbox.
-11. Send assembled prompt (PR metadata + diff + existing reviews + prior cache context + comment update/create instructions + cache-writing instructions)
+4. Smart SHA filter — skips if the exact SHA was already reviewed. For `reopened`/`ready_for_review` this means no code change; for `opened`/`synchronize` it catches redeliveries after dedup TTL expiry.
+5. Record in dedup and enter **debounce** (default 60s, configurable via `prDebounceMs`). Dedup is recorded early so GitHub retries during the debounce window are caught. If another event for the same PR arrives during the window, the older event is superseded and the timer restarts.
+6. _Debounce timer fires_ — supersede any active session for the same PR (new push kills old review)
+7. Concurrency cap check (configurable, default 3, set to 10 via `~/.codekin/webhook-config.json`)
+8. Create isolated workspace via `webhook-workspace.ts` (bare mirror + worktree)
+9. Fetch PR context in parallel: diff, changed files, commits, existing review comments, existing reviews, prior review cache, existing Codekin summary comment
+10. Resolve review prompt: repo-level `.codekin/pr-review-prompt.md` > global `~/.codekin/pr-review-prompt.md` > built-in default
+11. Spawn review session using the configured provider (Claude or OpenCode — see [Provider Selection](#provider-selection) below). Claude sessions use `allowedTools` and `--add-dir` for sandboxed tool access. OpenCode sessions get a workspace-local `opencode.json` with scoped permissions and `bypassPermissions` to auto-approve the remaining `ask`-default permissions.
+12. Send assembled prompt (PR metadata + diff + existing reviews + prior cache context + comment update/create instructions + cache-writing instructions)
+
+### Provider Selection
+
+Reviews can be performed by Claude Code or OpenCode, configured via `GITHUB_WEBHOOK_PR_REVIEW_PROVIDER`:
+
+| Value | Behavior |
+|-------|----------|
+| `claude` (default) | All reviews use Claude |
+| `opencode` | All reviews use OpenCode |
+| `split` | **Random A/B sampling**: each review independently flips a 50/50 coin between Claude and OpenCode. Two consecutive reviews may land on the same provider — this is not alternation. The intent is unbiased sampling over many reviews to compare output quality between models. |
+
+Per-provider model selection:
+- `GITHUB_WEBHOOK_PR_REVIEW_CLAUDE_MODEL` (default: `sonnet`)
+- `GITHUB_WEBHOOK_PR_REVIEW_OPENCODE_MODEL` (default: `openai/gpt-5.4`)
+
+When `split` is active, the review comment footer (`*Reviewed by Claude (sonnet)*` or `*Reviewed by OpenCode (openai/gpt-5.4)*`) makes it obvious which provider ran that specific review.
+
+### Debounce Persistence
+
+Pending debounced events (accepted webhooks still waiting for their 60s timer) are persisted to `~/.codekin/webhook-pending-debounce.json` on shutdown and restored + fired immediately on the next startup. This prevents losing webhook events when Codekin restarts during the debounce window — since the events have already been 202'd to GitHub, GitHub will not retry.
 
 ### Closed/Merged Flow
 
@@ -175,13 +196,15 @@ To avoid shell escaping issues with review body content, Claude is instructed to
 The original `isDuplicate()` was check-and-record in one call. This meant events rejected by the concurrency cap were still recorded as "seen," making redelivery impossible. Now split into:
 
 - `isDuplicate(deliveryId, idempotencyKey)` — check only, no side effects
-- `recordProcessed(deliveryId, idempotencyKey)` — called after the event passes all gates
+- `recordProcessed(deliveryId, idempotencyKey)` — called after the event passes filters and dedup
+
+**Note:** With debounce enabled, `recordProcessed()` is called when the event enters the debounce queue (before the timer fires). This prevents GitHub from retrying the delivery during the 60s debounce window. Server restarts during the window are handled by [Debounce Persistence](#debounce-persistence) — pending entries are written to disk on shutdown and restored on the next startup — so no events are dropped on a graceful restart.
 
 ## Testing
 
-- `server/webhook-handler.test.ts` — 57 tests including PR events, superseding, cache/comment integration, closed/merged handling
+- `server/webhook-handler.test.ts` — 79 tests including PR events, debounce, debounce persistence across restarts, smart SHA filter, provider selection (claude/opencode/split), superseding, cache/comment integration, closed/merged handling
 - `server/webhook-pr-github.test.ts` — 22 tests for all fetch functions (diff, files, commits, review comments, reviews, existing review comment detection)
-- `server/webhook-pr-prompt.test.ts` — 26 tests including prompt resolution, prior context rendering, cache-writing instructions, comment update/create instructions
+- `server/webhook-pr-prompt.test.ts` — 38 tests including prompt resolution (4-tier provider-specific + generic fallback), prior context rendering, cache-writing instructions, comment update/create instructions, reviewer attribution footer
 - `server/webhook-pr-cache.test.ts` — 15 tests for cache loading, path generation, validation, error handling, archive, and delete
 - `server/webhook-dedup.test.ts` — 26 tests for dedup check/record split, TTL eviction, max entries, disk persistence
 

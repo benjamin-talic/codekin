@@ -7,19 +7,25 @@
  *
  * Event lifecycle / state machine:
  *   received → (filtered/duplicate/capped)
- *   received → processing  — event accepted, async fetch started
+ *   received → debounced  — PR event accepted, waiting for debounce timer
+ *            → (superseded)  — newer event for same PR arrived during debounce
+ *            → processing  — debounce fired (or debounce disabled), async fetch started
  *            → session_created — workspace ready, session spawned, prompt sent
  *            → completed | error  — Claude exited 0 (success) or non-zero (failure)
  *
- * The 'processing' state bridges the async gap between accepting the webhook
- * (202 response) and the session being created.  A watchdog marks events stuck
- * in 'processing' as 'error' after PROCESSING_TIMEOUT_MS to prevent the
+ * The 'debounced' state coalesces rapid events for the same PR (e.g. quick
+ * successive pushes) so only the latest event triggers a review session.
+ * The 'processing' state bridges the async gap between the debounce firing
+ * (or direct accept) and the session being created.  A watchdog marks events
+ * stuck in 'processing' as 'error' after PROCESSING_TIMEOUT_MS to prevent the
  * concurrency cap from leaking on partial failures.
  */
 
 import { randomUUID } from 'crypto'
-import { dirname } from 'path'
-import type { SessionManager } from './session-manager.js'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
+import { homedir } from 'os'
+import { dirname, join } from 'path'
+import type { CreateSessionOptions, SessionManager } from './session-manager.js'
 import { verifyHmacSignature } from './crypto-utils.js'
 import type { WsServerMessage } from './types.js'
 import type { WebhookConfig, WebhookEvent, WebhookEventStatus, WorkflowRunPayload, FailureContext, PullRequestPayload, PullRequestContext } from './webhook-types.js'
@@ -40,11 +46,45 @@ const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000
 /** Supported pull_request actions for code review. */
 const PR_REVIEW_ACTIONS = ['opened', 'synchronize', 'reopened', 'ready_for_review'] as const
 
+/**
+ * Actions that don't involve code changes — if the PR was already reviewed
+ * at this SHA, skip the review to avoid wasting resources.
+ */
+const NO_CODE_CHANGE_ACTIONS: readonly string[] = ['reopened', 'ready_for_review']
+
+/** Pending debounce entry for a PR event waiting to fire. */
+interface PendingDebounce {
+  payload: PullRequestPayload
+  event: WebhookEvent
+  sessionId: string
+  timer: ReturnType<typeof setTimeout>
+}
+
+/** Serializable form of a pending debounce entry (no timer, for disk persistence). */
+interface PendingDebounceRecord {
+  key: string
+  payload: PullRequestPayload
+  event: WebhookEvent
+  sessionId: string
+}
+
+/** On-disk location for persisted pending debounces. */
+const PENDING_DEBOUNCE_FILE = join(homedir(), '.codekin', 'webhook-pending-debounce.json')
+
 export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEventStatus> {
   private config: FullWebhookConfig
   private sessions: SessionManager
   private dedup: WebhookDedup
   private ghHealthy = false
+  /** Pending debounce timers keyed by `repo#prNumber`. */
+  private pendingDebounce = new Map<string, PendingDebounce>()
+  /**
+   * Whether `restorePendingDebounces()` actually ran during this process lifecycle.
+   * Guards `savePendingDebounces()` from deleting a stale file when the map is empty
+   * but restore never ran (e.g. unhealthy `gh` on startup) — otherwise events from a
+   * prior run would be permanently lost.
+   */
+  private debounceFileConsumed = false
 
   constructor(config: FullWebhookConfig, sessions: SessionManager) {
     super('webhook', PROCESSING_TIMEOUT_MS)
@@ -99,11 +139,16 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   async checkHealth(): Promise<boolean> {
     const result = await checkGhHealth()
     this.ghHealthy = result.available
+    console.log(`[webhook] PR review config: provider=${this.config.prReviewProvider}, claudeModel=${this.config.prReviewClaudeModel}, opencodeModel=${this.config.prReviewOpencodeModel}`)
     if (!result.available) {
       console.warn(`[webhook] gh health check failed: ${result.reason}`)
       console.warn('[webhook] Webhook processing disabled — manual sessions still work')
     } else {
       console.log('[webhook] gh CLI health check passed')
+      // Resume any debounced events that were pending when the server last shut down.
+      // These were already acknowledged to GitHub (202), so if we don't fire them now
+      // they are lost forever — GitHub won't retry.
+      this.restorePendingDebounces()
     }
     return this.ghHealthy
   }
@@ -364,7 +409,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     }
 
-    // --- Deduplication ---
+    // --- Deduplication (runs before smart filter so redeliveries are caught cheaply) ---
     const idempotencyKey = computePrIdempotencyKey(
       payload.repository.full_name,
       pr.number,
@@ -397,11 +442,17 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     }
 
-    // --- Supersede any active session for this PR ---
-    this.supersedePrSessions(payload.repository.full_name, pr.number)
-
-    // --- Session cap check ---
-    if (this.isAtSessionCap()) {
+    // --- Smart filter: skip if this SHA was already reviewed ---
+    // Two layers:
+    //   1. NO_CODE_CHANGE_ACTIONS (reopened, ready_for_review) — these actions
+    //      inherently don't change code, so skip if SHA was already reviewed.
+    //   2. All actions — catches redelivered events (e.g. GitHub retry after
+    //      dedup TTL expires) where the SHA was already reviewed.
+    const prCache = loadPrCache(payload.repository.full_name, pr.number)
+    if (prCache && prCache.lastReviewedSha === pr.head.sha) {
+      const reason = NO_CODE_CHANGE_ACTIONS.includes(payload.action)
+        ? `SHA ${pr.head.sha.slice(0, 7)} already reviewed — no code change since last review`
+        : `SHA ${pr.head.sha.slice(0, 7)} already reviewed — possible redeliver`
       this.recordEvent({
         id: eventId,
         idempotencyKey,
@@ -414,22 +465,25 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         runId: pr.number,
         runAttempt: 1,
         conclusion: payload.action,
-        status: 'error',
-        error: `Max concurrent webhook sessions reached (${this.config.maxConcurrentSessions})`,
+        status: 'filtered',
+        filterReason: reason,
         prNumber: pr.number,
         prTitle: pr.title,
         headSha: pr.head.sha,
         baseBranch: pr.base.ref,
       })
+      console.log(`[webhook] Smart filter: ${payload.action} for ${payload.repository.full_name}#${pr.number} skipped — ${reason}`)
       return {
-        statusCode: 429,
-        body: { error: 'Max concurrent webhook sessions reached', max: this.config.maxConcurrentSessions },
+        statusCode: 200,
+        body: { accepted: false, eventId, status: 'filtered', filterReason: reason },
       }
     }
 
-    // --- Pre-allocate session ID and respond 202 ---
+    // --- Pre-allocate session ID ---
     const sessionId = randomUUID()
-    const webhookEvent: WebhookEvent = {
+    const debounceMs = this.config.prDebounceMs
+
+    const makeEvent = (status: WebhookEventStatus): WebhookEvent => ({
       id: eventId,
       idempotencyKey,
       receivedAt: new Date().toISOString(),
@@ -441,20 +495,65 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       runId: pr.number,
       runAttempt: 1,
       conclusion: payload.action,
-      status: 'processing',
+      status,
       sessionId,
       prNumber: pr.number,
       prTitle: pr.title,
       headSha: pr.head.sha,
       baseBranch: pr.base.ref,
+    })
+
+    // --- Debounce: wait before processing to coalesce rapid events ---
+    if (debounceMs > 0) {
+      const webhookEvent = makeEvent('debounced')
+      this.recordEvent(webhookEvent)
+      // Record dedup early (before timer fires) so GitHub retries during the
+      // debounce window are caught as duplicates rather than spawning a second timer.
+      this.dedup.recordProcessed(eventId, idempotencyKey)
+
+      const debounceKey = `${payload.repository.full_name}#${pr.number}`
+      const existing = this.pendingDebounce.get(debounceKey)
+      if (existing) {
+        clearTimeout(existing.timer)
+        this.updateEventStatus(existing.event.id, 'superseded', 'Superseded by newer event during debounce')
+        console.log(`[webhook] Debounce: replacing pending event ${existing.event.id} with ${eventId} for PR ${debounceKey}`)
+      }
+
+      const timer = setTimeout(() => {
+        this.pendingDebounce.delete(debounceKey)
+        this.fireDebouncedPrEvent(payload, webhookEvent, sessionId)
+      }, debounceMs)
+      if (timer.unref) timer.unref()
+
+      this.pendingDebounce.set(debounceKey, { payload, event: webhookEvent, sessionId, timer })
+
+      console.log(`[webhook] PR ${debounceKey} debounced for ${debounceMs}ms (event ${eventId})`)
+      return {
+        statusCode: 202,
+        body: { accepted: true, eventId, status: 'debounced', sessionId },
+      }
     }
+
+    // --- No debounce: process immediately (prDebounceMs = 0) ---
+    // Supersede BEFORE recording the new event so we don't supersede ourselves.
+    this.supersedePrSessions(payload.repository.full_name, pr.number)
+
+    if (this.isAtSessionCap()) {
+      this.recordEvent(makeEvent('error'))
+      this.updateEventStatus(eventId, 'error', `Max concurrent webhook sessions reached (${this.config.maxConcurrentSessions})`)
+      // Don't record in dedup — let GitHub retry when capacity frees up
+      return {
+        statusCode: 429,
+        body: { error: 'Max concurrent webhook sessions reached', max: this.config.maxConcurrentSessions },
+      }
+    }
+
+    const webhookEvent = makeEvent('processing')
     this.recordEvent(webhookEvent)
     this.dedup.recordProcessed(eventId, idempotencyKey)
 
-    // Process asynchronously — don't block the 202 response
     this.processPullRequestAsync(payload, webhookEvent, sessionId).catch(err => {
       console.error('[webhook] PR async processing error:', err)
-      // Don't overwrite 'superseded' status if a newer event already took over
       if (this.getEvent(eventId)?.status !== 'superseded') {
         this.updateEventStatus(eventId, 'error', String(err))
       }
@@ -479,7 +578,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     const repo = payload.repository.full_name
     const repoName = payload.repository.name
 
-    console.log(`[webhook] Processing PR: ${repo} #${pr.number} "${pr.title}" (${payload.action})`)
+    const { provider: reviewProvider, model: reviewModel } = this.resolvePrReviewProvider()
+    console.log(`[webhook] Processing PR: ${repo} #${pr.number} "${pr.title}" (${payload.action}) — reviewer: ${reviewProvider} (${reviewModel})`)
 
     // --- Fetch PR context (all calls degrade gracefully) ---
     const [diffResult, fileList, commitMessages, reviewComments, reviews, priorCache, existingCommentId] = await Promise.all([
@@ -520,6 +620,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       commitMessages,
       reviewComments,
       reviews,
+      reviewProvider,
+      reviewModel,
     }
 
     // --- Create workspace ---
@@ -559,21 +661,58 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       sessionName = `PR #${pr.number}: ${pr.title}`
     }
 
-    this.sessions.create(sessionName, workspacePath, {
+    const sessionOptions: CreateSessionOptions = {
       source: 'webhook',
       id: sessionId,
       groupDir,
-      model: 'sonnet',
-      allowedTools: [
+      provider: reviewProvider,
+      model: reviewModel,
+    }
+
+    if (reviewProvider === 'claude') {
+      // Claude uses allowedTools and addDirs for sandboxed tool access
+      sessionOptions.allowedTools = [
         'Bash(gh:*)',
         'Write',
         'mcp__plugin_context7_context7__resolve-library-id',
         'mcp__plugin_context7_context7__query-docs',
         'WebFetch',
         'WebSearch',
-      ],
-      addDirs: [dirname(cachePath)],
-    })
+      ]
+      sessionOptions.addDirs = [dirname(cachePath)]
+    } else {
+      // OpenCode uses opencode.json in the workspace for scoped permissions.
+      // Write a config that mirrors Claude's allowedTools — allow gh/git bash,
+      // file reads/edits, and access to the PR cache directory.
+      // Note: OpenCode's pattern matching evaluates rules in order, last match wins.
+      // The catch-all "*": "deny" MUST come first so specific allows override it.
+      // external_directory and doom_loop default to "ask" — we explicitly deny them
+      // by default to prevent bypassPermissions from auto-approving arbitrary access.
+      const opencodeConfig = {
+        $schema: 'https://opencode.ai/config.json',
+        permission: {
+          bash: { '*': 'deny', 'gh *': 'allow', 'git *': 'allow', 'cat *': 'allow', 'ls *': 'allow', 'head *': 'allow', 'tail *': 'allow', 'wc *': 'allow', 'mkdir *': 'allow', 'echo *': 'allow' },
+          read: 'allow',
+          edit: 'allow',
+          grep: 'allow',
+          webfetch: 'allow',
+          external_directory: { '*': 'deny', [dirname(cachePath) + '/**']: 'allow' },
+          doom_loop: 'deny',
+        },
+      }
+      writeFileSync(join(workspacePath, 'opencode.json'), JSON.stringify(opencodeConfig, null, 2))
+      console.log(`[webhook] Wrote opencode.json permissions config to ${workspacePath}`)
+      // bypassPermissions auto-approves permission.asked SSE events — but only
+      // for permissions set to "ask" (the default for external_directory, etc.).
+      // OpenCode enforces "deny" rules server-side BEFORE emitting permission.asked,
+      // so bypassPermissions cannot override the deny rules in opencode.json above.
+      // See: https://opencode.ai/docs/permissions/
+      // This ensures automated sessions don't hang on "ask" prompts while the
+      // opencode.json deny rules still block unauthorized bash commands.
+      sessionOptions.permissionMode = 'bypassPermissions'
+    }
+
+    this.sessions.create(sessionName, workspacePath, sessionOptions)
 
     console.log(`[webhook] PR session created: ${sessionName} (${sessionId})`)
     this.updateEventStatus(event.id, 'session_created')
@@ -596,6 +735,29 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   // ---------------------------------------------------------------------------
   // Shared helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Resolve the provider and model for a PR review session based on config.
+   *
+   * `split` mode is **random A/B selection**: each review independently flips a
+   * 50/50 coin between Claude and OpenCode. This is intentionally NOT alternation —
+   * two consecutive reviews may land on the same provider. The goal is unbiased
+   * sampling over many reviews to compare output quality between models, not
+   * guaranteed interleaving. If you need strict alternation, use `claude` or
+   * `opencode` explicitly and toggle by config.
+   */
+  private resolvePrReviewProvider(): { provider: 'claude' | 'opencode'; model: string } {
+    if (this.config.prReviewProvider === 'opencode') {
+      return { provider: 'opencode', model: this.config.prReviewOpencodeModel }
+    }
+    if (this.config.prReviewProvider === 'split') {
+      // Random A/B sampling — see JSDoc above for rationale.
+      return Math.random() < 0.5
+        ? { provider: 'claude', model: this.config.prReviewClaudeModel }
+        : { provider: 'opencode', model: this.config.prReviewOpencodeModel }
+    }
+    return { provider: 'claude', model: this.config.prReviewClaudeModel }
+  }
 
   /**
    * Handle a PR being closed or merged: kill active sessions and archive/delete cache.
@@ -630,7 +792,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       baseBranch: pr.base.ref,
     })
 
-    // Kill any active review sessions for this PR
+    // Cancel pending debounce and kill any active review sessions for this PR
+    this.cancelPendingDebounce(repo, pr.number, merged ? 'PR merged' : 'PR closed')
     this.supersedePrSessions(repo, pr.number, merged ? 'PR merged' : 'PR closed')
 
     // Archive or delete the cache file
@@ -648,6 +811,158 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         status: 'processed',
         action: merged ? 'merged' : 'closed',
       },
+    }
+  }
+
+  /**
+   * Called when the debounce timer fires for a PR event.
+   * Runs the deferred supersede → cap check → async processing pipeline.
+   */
+  private fireDebouncedPrEvent(
+    payload: PullRequestPayload,
+    event: WebhookEvent,
+    sessionId: string,
+  ): void {
+    const pr = payload.pull_request
+    const repo = payload.repository.full_name
+
+    console.log(`[webhook] Debounce fired for ${repo}#${pr.number} (event ${event.id})`)
+
+    // Supersede any active session for this PR
+    this.supersedePrSessions(repo, pr.number)
+
+    // Cap check — we already responded 202 so we can't return 429; mark as error instead
+    if (this.isAtSessionCap()) {
+      this.updateEventStatus(event.id, 'error', `Max concurrent webhook sessions reached (${this.config.maxConcurrentSessions})`)
+      console.warn(`[webhook] Cap reached when debounce fired for ${repo}#${pr.number}, dropping event ${event.id}`)
+      return
+    }
+
+    // Transition from debounced → processing.
+    // Reset receivedAt so the watchdog timeout counts from processing start,
+    // not from when the webhook originally arrived (which includes debounce time).
+    this.updateEventStatus(event.id, 'processing')
+    const liveEvent = this.getEvent(event.id)
+    if (liveEvent) liveEvent.receivedAt = new Date().toISOString()
+
+    this.processPullRequestAsync(payload, event, sessionId).catch(err => {
+      console.error('[webhook] PR async processing error:', err)
+      if (this.getEvent(event.id)?.status !== 'superseded') {
+        this.updateEventStatus(event.id, 'error', String(err))
+      }
+    })
+  }
+
+  /**
+   * Cancel a pending debounce timer for a PR, if one exists.
+   * Used when the PR is closed/merged or the server is shutting down.
+   */
+  private cancelPendingDebounce(repo: string, prNumber: number, reason: string): void {
+    const key = `${repo}#${prNumber}`
+    const pending = this.pendingDebounce.get(key)
+    if (pending) {
+      clearTimeout(pending.timer)
+      this.updateEventStatus(pending.event.id, 'superseded', reason)
+      this.pendingDebounce.delete(key)
+      console.log(`[webhook] Cancelled pending debounce for ${key}: ${reason}`)
+    }
+  }
+
+  /**
+   * Persist all currently-pending debounced events to disk so they survive a restart.
+   * Called from shutdown(). GitHub already received a 202 for these, so we must not
+   * lose them — they will be restored and fired on next startup.
+   */
+  private savePendingDebounces(): void {
+    if (this.pendingDebounce.size === 0) {
+      // Only delete a stale file if restore actually ran this lifecycle.
+      // Otherwise an unhealthy-startup path (e.g. `gh` unavailable) would silently
+      // drop events persisted by a prior healthy run — GitHub won't retry them.
+      if (this.debounceFileConsumed && existsSync(PENDING_DEBOUNCE_FILE)) {
+        try { unlinkSync(PENDING_DEBOUNCE_FILE) } catch { /* best effort */ }
+      }
+      return
+    }
+
+    const records: PendingDebounceRecord[] = []
+    for (const [key, pending] of this.pendingDebounce) {
+      records.push({
+        key,
+        payload: pending.payload,
+        event: pending.event,
+        sessionId: pending.sessionId,
+      })
+    }
+
+    try {
+      mkdirSync(dirname(PENDING_DEBOUNCE_FILE), { recursive: true })
+      const tmp = PENDING_DEBOUNCE_FILE + '.tmp'
+      writeFileSync(tmp, JSON.stringify({ records }, null, 2), { mode: 0o600 })
+      renameSync(tmp, PENDING_DEBOUNCE_FILE)
+      console.log(`[webhook] Saved ${records.length} pending debounce(s) to disk for recovery`)
+    } catch (err) {
+      console.error('[webhook] Failed to persist pending debounces:', err)
+    }
+  }
+
+  /**
+   * Restore pending debounced events from disk and fire them immediately.
+   * Called from checkHealth() after gh is confirmed available. The events were
+   * already 202'd to GitHub, so any delay risks further lag — fire now rather
+   * than re-arming the debounce timer.
+   */
+  private restorePendingDebounces(): void {
+    // Mark that restore has run this lifecycle, even if the file doesn't exist.
+    // This lets savePendingDebounces() safely delete stale files later.
+    this.debounceFileConsumed = true
+
+    if (!existsSync(PENDING_DEBOUNCE_FILE)) return
+
+    let records: PendingDebounceRecord[] = []
+    try {
+      const raw = readFileSync(PENDING_DEBOUNCE_FILE, 'utf-8')
+      const data = JSON.parse(raw) as { records?: PendingDebounceRecord[] }
+      if (Array.isArray(data.records)) records = data.records
+    } catch (err) {
+      console.error('[webhook] Failed to load pending debounces:', err)
+      return
+    }
+
+    // Delete the file now — we're about to process these entries, and if
+    // processing fails we don't want to retry-loop on the next startup.
+    try { unlinkSync(PENDING_DEBOUNCE_FILE) } catch { /* best effort */ }
+
+    if (records.length === 0) return
+
+    console.log(`[webhook] Restoring ${records.length} pending debounce(s) from disk`)
+    for (const rec of records) {
+      // Per-record try/catch so one malformed entry can't throw through checkHealth()
+      // and become an unhandled promise rejection in ws-server.ts.
+      try {
+        // Skip restore if the PR was reviewed during the downtime window
+        // (e.g. via a manual review or a different Codekin instance).
+        // Mirrors the smart SHA filter in handlePullRequestEvent.
+        if (rec.event.headSha) {
+          const cache = loadPrCache(rec.event.repo, rec.event.runId)
+          if (cache && cache.lastReviewedSha === rec.event.headSha) {
+            console.log(`[webhook] Skipping restored event ${rec.event.id} for ${rec.key} — SHA ${rec.event.headSha.slice(0, 7)} already reviewed`)
+            this.recordEvent({
+              ...rec.event,
+              status: 'filtered',
+              filterReason: `SHA ${rec.event.headSha.slice(0, 7)} already reviewed during downtime`,
+            })
+            continue
+          }
+        }
+
+        // Re-record the event in the ring buffer (it was lost on shutdown)
+        this.recordEvent(rec.event)
+        // Fire immediately — no more waiting, GitHub has been waiting long enough
+        console.log(`[webhook] Resuming debounced event ${rec.event.id} for ${rec.key}`)
+        this.fireDebouncedPrEvent(rec.payload, rec.event, rec.sessionId)
+      } catch (err) {
+        console.error(`[webhook] Failed to restore debounce record ${rec.key}:`, err)
+      }
     }
   }
 
@@ -806,10 +1121,24 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       maxConcurrentSessions: this.config.maxConcurrentSessions,
       logLinesToInclude: this.config.logLinesToInclude,
       actorAllowlist: this.config.actorAllowlist,
+      prDebounceMs: this.config.prDebounceMs,
+      prReviewProvider: this.config.prReviewProvider,
+      prReviewClaudeModel: this.config.prReviewClaudeModel,
+      prReviewOpencodeModel: this.config.prReviewOpencodeModel,
     }
   }
 
   shutdown(): void {
+    // Persist pending debounces to disk BEFORE clearing timers — they were already
+    // 202'd to GitHub, so losing them would drop the webhook silently.
+    this.savePendingDebounces()
+
+    // Cancel all pending debounce timers (state was saved above, so this is safe)
+    for (const [, pending] of this.pendingDebounce) {
+      clearTimeout(pending.timer)
+    }
+    this.pendingDebounce.clear()
+
     super.shutdown()
     this.dedup.shutdown()
   }

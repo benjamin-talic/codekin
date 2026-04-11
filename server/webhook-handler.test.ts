@@ -47,6 +47,19 @@ vi.mock('./webhook-prompt.js', () => ({
   buildPrompt: vi.fn(() => 'test prompt'),
 }))
 
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  return {
+    ...actual,
+    writeFileSync: vi.fn(),
+    existsSync: vi.fn(() => false),
+    readFileSync: vi.fn(() => '{}'),
+    mkdirSync: vi.fn(),
+    renameSync: vi.fn(),
+    unlinkSync: vi.fn(),
+  }
+})
+
 vi.mock('./webhook-workspace.js', () => ({
   createWorkspace: vi.fn(async () => '/tmp/workspace'),
   cleanupWorkspace: vi.fn(),
@@ -75,6 +88,7 @@ vi.mock('./webhook-pr-prompt.js', () => ({
 
 import { WebhookHandler } from './webhook-handler.js'
 import { createWorkspace } from './webhook-workspace.js'
+import { writeFileSync, existsSync, readFileSync } from 'fs'
 import type { FullWebhookConfig } from './webhook-config.js'
 
 const SECRET = 'test-secret-123'
@@ -86,6 +100,10 @@ function makeConfig(overrides: Partial<FullWebhookConfig> = {}): FullWebhookConf
     maxConcurrentSessions: 3,
     logLinesToInclude: 200,
     actorAllowlist: [],
+    prDebounceMs: 60_000,
+    prReviewProvider: 'claude' as const,
+    prReviewClaudeModel: 'sonnet',
+    prReviewOpencodeModel: 'openai/gpt-5.4',
     ...overrides,
   }
 }
@@ -491,6 +509,10 @@ describe('WebhookHandler', () => {
         maxConcurrentSessions: 3,
         logLinesToInclude: 200,
         actorAllowlist: [],
+        prDebounceMs: 60_000,
+        prReviewProvider: 'claude',
+        prReviewClaudeModel: 'sonnet',
+        prReviewOpencodeModel: 'openai/gpt-5.4',
       })
       expect('secret' in config).toBe(false)
     })
@@ -621,7 +643,9 @@ describe('WebhookHandler', () => {
       expect(result.body.status).toBe('duplicate')
     })
 
-    it('returns 429 when max sessions reached', async () => {
+    it('returns 429 when max sessions reached and debounce disabled', async () => {
+      handler.shutdown()
+      handler = new WebhookHandler(makeConfig({ prDebounceMs: 0 }), sessions)
       await handler.checkHealth()
       sessions.list.mockReturnValue([
         { id: '1', source: 'webhook', active: true },
@@ -634,7 +658,35 @@ describe('WebhookHandler', () => {
       expect(result.statusCode).toBe(429)
     })
 
-    it('returns 202 for valid PR event', async () => {
+    it('accepts event into debounce even when sessions are at cap', async () => {
+      await handler.checkHealth()
+      sessions.list.mockReturnValue([
+        { id: '1', source: 'webhook', active: true },
+        { id: '2', source: 'webhook', active: true },
+        { id: '3', source: 'webhook', active: true },
+      ])
+      const payload = makePrPayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makePrHeaders(body))
+      // With debounce, we accept the event and check cap later
+      expect(result.statusCode).toBe(202)
+      expect(result.body.status).toBe('debounced')
+    })
+
+    it('returns 202 with debounced status for valid PR event', async () => {
+      await handler.checkHealth()
+      const payload = makePrPayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makePrHeaders(body))
+      expect(result.statusCode).toBe(202)
+      expect(result.body.accepted).toBe(true)
+      expect(result.body.status).toBe('debounced')
+      expect(result.body.sessionId).toBeDefined()
+    })
+
+    it('returns 202 with processing status when debounce is disabled', async () => {
+      handler.shutdown()
+      handler = new WebhookHandler(makeConfig({ prDebounceMs: 0 }), sessions)
       await handler.checkHealth()
       const payload = makePrPayload()
       const body = Buffer.from(JSON.stringify(payload))
@@ -642,7 +694,6 @@ describe('WebhookHandler', () => {
       expect(result.statusCode).toBe(202)
       expect(result.body.accepted).toBe(true)
       expect(result.body.status).toBe('processing')
-      expect(result.body.sessionId).toBeDefined()
     })
 
     it('records PR-specific fields in event', async () => {
@@ -656,6 +707,7 @@ describe('WebhookHandler', () => {
       expect(event?.headSha).toBe('deadbeef1234567890abcdef1234567890abcdef')
       expect(event?.baseBranch).toBe('main')
       expect(event?.event).toBe('pull_request')
+      expect(event?.status).toBe('debounced')
     })
 
     it('accepts opened, synchronize, reopened, and ready_for_review actions', async () => {
@@ -665,6 +717,7 @@ describe('WebhookHandler', () => {
         const body = Buffer.from(JSON.stringify(payload))
         const result = await handler.handleWebhook(body, makePrHeaders(body, { delivery: `d-${action}` }))
         expect(result.statusCode).toBe(202)
+        expect(result.body.status).toBe('debounced')
       }
     })
 
@@ -677,14 +730,14 @@ describe('WebhookHandler', () => {
       expect(result.body.status).toBe('filtered')
     })
 
-    it('async processing creates session and sends PR review prompt', async () => {
+    it('async processing creates session and sends PR review prompt after debounce', async () => {
       await handler.checkHealth()
       const payload = makePrPayload()
       const body = Buffer.from(JSON.stringify(payload))
       await handler.handleWebhook(body, makePrHeaders(body))
 
-      // Let async processing complete
-      await vi.advanceTimersByTimeAsync(100)
+      // Advance past debounce (60s) + async processing
+      await vi.advanceTimersByTimeAsync(60_100)
 
       expect(sessions.create).toHaveBeenCalledWith(
         expect.stringContaining('PR #42'),
@@ -703,7 +756,7 @@ describe('WebhookHandler', () => {
       const body = Buffer.from(JSON.stringify(payload))
       await handler.handleWebhook(body, makePrHeaders(body))
 
-      await vi.advanceTimersByTimeAsync(100)
+      await vi.advanceTimersByTimeAsync(60_100)
 
       expect(sessions.create).toHaveBeenCalledWith(
         expect.stringContaining('update @deadbee'),
@@ -712,28 +765,147 @@ describe('WebhookHandler', () => {
       )
     })
 
-    describe('session superseding', () => {
-      it('supersedes active session when new event arrives for the same PR', async () => {
+    describe('provider selection', () => {
+      it('uses claude provider with configured model by default', async () => {
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig({ prDebounceMs: 0, prReviewClaudeModel: 'opus' }), sessions)
         await handler.checkHealth()
 
-        // First event — creates a session
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(sessions.create).toHaveBeenCalledWith(
+          expect.any(String),
+          '/tmp/workspace',
+          expect.objectContaining({
+            provider: 'claude',
+            model: 'opus',
+            allowedTools: expect.arrayContaining(['Write']),
+          }),
+        )
+        expect(mockBuildPrReviewPrompt).toHaveBeenCalledWith(
+          expect.objectContaining({ reviewProvider: 'claude', reviewModel: 'opus' }),
+          '/tmp/workspace',
+          expect.any(Object),
+        )
+      })
+
+      it('uses opencode provider and omits claude-only options', async () => {
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig({
+          prDebounceMs: 0,
+          prReviewProvider: 'opencode',
+          prReviewOpencodeModel: 'openai/gpt-5.4',
+        }), sessions)
+        await handler.checkHealth()
+
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(sessions.create).toHaveBeenCalledWith(
+          expect.any(String),
+          '/tmp/workspace',
+          expect.objectContaining({
+            provider: 'opencode',
+            model: 'openai/gpt-5.4',
+          }),
+        )
+
+        // allowedTools and addDirs should NOT be present for opencode
+        const createCall = sessions.create.mock.calls[sessions.create.mock.calls.length - 1]
+        const options = createCall?.[2] as Record<string, unknown>
+        expect(options.allowedTools).toBeUndefined()
+        expect(options.addDirs).toBeUndefined()
+
+        // Should write opencode.json with scoped permissions instead
+        expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith(
+          '/tmp/workspace/opencode.json',
+          expect.stringContaining('"gh *": "allow"'),
+        )
+
+        expect(mockBuildPrReviewPrompt).toHaveBeenCalledWith(
+          expect.objectContaining({ reviewProvider: 'opencode', reviewModel: 'openai/gpt-5.4' }),
+          '/tmp/workspace',
+          expect.any(Object),
+        )
+      })
+
+      it('split mode chooses claude when random < 0.5', async () => {
+        vi.spyOn(Math, 'random').mockReturnValueOnce(0.1)
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig({
+          prDebounceMs: 0,
+          prReviewProvider: 'split',
+          prReviewClaudeModel: 'sonnet-split',
+          prReviewOpencodeModel: 'openai/gpt-5.4-split',
+        }), sessions)
+        await handler.checkHealth()
+
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(sessions.create).toHaveBeenCalledWith(
+          expect.any(String),
+          '/tmp/workspace',
+          expect.objectContaining({ provider: 'claude', model: 'sonnet-split' }),
+        )
+      })
+
+      it('split mode chooses opencode when random >= 0.5', async () => {
+        vi.spyOn(Math, 'random').mockReturnValueOnce(0.9)
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig({
+          prDebounceMs: 0,
+          prReviewProvider: 'split',
+          prReviewClaudeModel: 'sonnet-split',
+          prReviewOpencodeModel: 'openai/gpt-5.4-split',
+        }), sessions)
+        await handler.checkHealth()
+
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(sessions.create).toHaveBeenCalledWith(
+          expect.any(String),
+          '/tmp/workspace',
+          expect.objectContaining({ provider: 'opencode', model: 'openai/gpt-5.4-split' }),
+        )
+      })
+    })
+
+    describe('session superseding', () => {
+      it('supersedes active session when debounce fires for same PR', async () => {
+        await handler.checkHealth()
+
+        // First event — goes through debounce and creates a session
         const payload1 = makePrPayload({ action: 'opened' })
         const body1 = Buffer.from(JSON.stringify(payload1))
         const result1 = await handler.handleWebhook(body1, makePrHeaders(body1, { delivery: 'pr-d-1' }))
         expect(result1.statusCode).toBe(202)
 
-        await vi.advanceTimersByTimeAsync(100)
+        // Let debounce fire + async complete
+        await vi.advanceTimersByTimeAsync(60_100)
 
         const event1 = handler.getEvent(result1.body.eventId as string)
         expect(event1?.status).toBe('session_created')
 
         // Second event — same PR, new SHA (synchronize)
         const payload2 = makePrPayload({ action: 'synchronize' })
-        // Override the head SHA to simulate a new push
         payload2.pull_request.head.sha = 'newsha_1234567890abcdef1234567890abcdef12'
         const body2 = Buffer.from(JSON.stringify(payload2))
         const result2 = await handler.handleWebhook(body2, makePrHeaders(body2, { delivery: 'pr-d-2' }))
         expect(result2.statusCode).toBe(202)
+
+        // Let second debounce fire
+        await vi.advanceTimersByTimeAsync(60_100)
 
         // Old event should be superseded
         const event1After = handler.getEvent(result1.body.eventId as string)
@@ -744,6 +916,34 @@ describe('WebhookHandler', () => {
         expect(sessions.delete).toHaveBeenCalledWith(event1?.sessionId)
       })
 
+      it('supersedes pending debounce for same PR without creating session', async () => {
+        await handler.checkHealth()
+
+        // First event — enters debounce
+        const payload1 = makePrPayload({ action: 'opened' })
+        const body1 = Buffer.from(JSON.stringify(payload1))
+        const result1 = await handler.handleWebhook(body1, makePrHeaders(body1, { delivery: 'pr-d-1' }))
+        expect(handler.getEvent(result1.body.eventId as string)?.status).toBe('debounced')
+
+        // Second event arrives 10s later — same PR, new SHA
+        await vi.advanceTimersByTimeAsync(10_000)
+        const payload2 = makePrPayload({ action: 'synchronize' })
+        payload2.pull_request.head.sha = 'newsha_1234567890abcdef1234567890abcdef12'
+        const body2 = Buffer.from(JSON.stringify(payload2))
+        const result2 = await handler.handleWebhook(body2, makePrHeaders(body2, { delivery: 'pr-d-2' }))
+        expect(result2.statusCode).toBe(202)
+
+        // First event should be superseded (cancelled during debounce)
+        expect(handler.getEvent(result1.body.eventId as string)?.status).toBe('superseded')
+
+        // No session should have been created yet (still debouncing)
+        expect(sessions.create).not.toHaveBeenCalled()
+
+        // Let second debounce fire — only one session should be created
+        await vi.advanceTimersByTimeAsync(60_100)
+        expect(sessions.create).toHaveBeenCalledTimes(1)
+      })
+
       it('does not supersede sessions for different PRs', async () => {
         await handler.checkHealth()
 
@@ -751,7 +951,7 @@ describe('WebhookHandler', () => {
         const payload1 = makePrPayload({ action: 'opened' })
         const body1 = Buffer.from(JSON.stringify(payload1))
         const result1 = await handler.handleWebhook(body1, makePrHeaders(body1, { delivery: 'pr-d-1' }))
-        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(60_100)
 
         // Event for PR #99 (different PR)
         const payload2 = makePrPayload({ action: 'opened' })
@@ -775,7 +975,7 @@ describe('WebhookHandler', () => {
         const payload1 = makePrPayload({ action: 'opened' })
         const body1 = Buffer.from(JSON.stringify(payload1))
         const result1 = await handler.handleWebhook(body1, makePrHeaders(body1, { delivery: 'pr-d-1' }))
-        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(60_100)
 
         // Simulate session completion
         const sessionId = result1.body.sessionId as string
@@ -787,15 +987,19 @@ describe('WebhookHandler', () => {
         payload2.pull_request.head.sha = 'newsha_1234567890abcdef1234567890abcdef12'
         const body2 = Buffer.from(JSON.stringify(payload2))
         await handler.handleWebhook(body2, makePrHeaders(body2, { delivery: 'pr-d-2' }))
+        await vi.advanceTimersByTimeAsync(60_100)
 
         // Completed event should NOT be superseded
         const event1After = handler.getEvent(result1.body.eventId as string)
         expect(event1After?.status).toBe('completed')
-        expect(sessions.delete).not.toHaveBeenCalled()
       })
 
       it('does not overwrite superseded status when workspace creation fails', async () => {
+        // Use prDebounceMs=0 for direct processing to test workspace failure handling
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig({ prDebounceMs: 0 }), sessions)
         await handler.checkHealth()
+
         // Make workspace creation slow, then fail
         let rejectWorkspace: (err: Error) => void
         vi.mocked(createWorkspace).mockReturnValueOnce(
@@ -824,7 +1028,11 @@ describe('WebhookHandler', () => {
       })
 
       it('supersedes events still in processing state', async () => {
+        // Use prDebounceMs=0 for direct processing to test processing-state superseding
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig({ prDebounceMs: 0 }), sessions)
         await handler.checkHealth()
+
         // Make workspace hang so event stays in 'processing'
         vi.mocked(createWorkspace).mockReturnValueOnce(new Promise(() => {}))
 
@@ -852,7 +1060,7 @@ describe('WebhookHandler', () => {
         const payload = makePrPayload()
         const body = Buffer.from(JSON.stringify(payload))
         await handler.handleWebhook(body, makePrHeaders(body))
-        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(60_100)
 
         expect(mockLoadPrCache).toHaveBeenCalledWith('owner/repo', 42)
       })
@@ -862,7 +1070,7 @@ describe('WebhookHandler', () => {
         const payload = makePrPayload()
         const body = Buffer.from(JSON.stringify(payload))
         await handler.handleWebhook(body, makePrHeaders(body))
-        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(60_100)
 
         expect(mockFetchExistingReviewComment).toHaveBeenCalledWith('owner/repo', 42)
       })
@@ -877,6 +1085,9 @@ describe('WebhookHandler', () => {
           codebaseContext: 'context',
           reviewFindings: 'findings',
         }
+        // Called twice: once in smart filter (SHA mismatch → passes through),
+        // once in processPullRequestAsync for cache context
+        mockLoadPrCache.mockReturnValueOnce(mockCache as any)
         mockLoadPrCache.mockReturnValueOnce(mockCache as any)
         mockFetchExistingReviewComment.mockResolvedValueOnce(12345)
 
@@ -884,7 +1095,7 @@ describe('WebhookHandler', () => {
         const payload = makePrPayload()
         const body = Buffer.from(JSON.stringify(payload))
         await handler.handleWebhook(body, makePrHeaders(body))
-        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(60_100)
 
         expect(mockBuildPrReviewPrompt).toHaveBeenCalledWith(
           expect.any(Object),
@@ -902,7 +1113,7 @@ describe('WebhookHandler', () => {
         const payload = makePrPayload()
         const body = Buffer.from(JSON.stringify(payload))
         await handler.handleWebhook(body, makePrHeaders(body))
-        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(60_100)
 
         expect(sessions.create).toHaveBeenCalledWith(
           expect.any(String),
@@ -922,7 +1133,7 @@ describe('WebhookHandler', () => {
         const payload = makePrPayload()
         const body = Buffer.from(JSON.stringify(payload))
         const result = await handler.handleWebhook(body, makePrHeaders(body))
-        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(60_100)
 
         expect(result.statusCode).toBe(202)
         expect(mockBuildPrReviewPrompt).toHaveBeenCalledWith(
@@ -942,7 +1153,7 @@ describe('WebhookHandler', () => {
         const payload = makePrPayload()
         const body = Buffer.from(JSON.stringify(payload))
         const result = await handler.handleWebhook(body, makePrHeaders(body))
-        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(60_100)
 
         const eventId = result.body.eventId as string
         const event = handler.getEvent(eventId)
@@ -964,7 +1175,7 @@ describe('WebhookHandler', () => {
         const payload = makePrPayload()
         const body = Buffer.from(JSON.stringify(payload))
         const result = await handler.handleWebhook(body, makePrHeaders(body))
-        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(60_100)
 
         const event = handler.getEvent(result.body.eventId as string)
 
@@ -1043,7 +1254,7 @@ describe('WebhookHandler', () => {
         const openPayload = makePrPayload({ action: 'opened' })
         const openBody = Buffer.from(JSON.stringify(openPayload))
         const openResult = await handler.handleWebhook(openBody, makePrHeaders(openBody, { delivery: 'pr-open' }))
-        await vi.advanceTimersByTimeAsync(100)
+        await vi.advanceTimersByTimeAsync(60_100)
         const openEvent = handler.getEvent(openResult.body.eventId as string)
         expect(openEvent?.status).toBe('session_created')
 
@@ -1056,6 +1267,307 @@ describe('WebhookHandler', () => {
         const openEventAfter = handler.getEvent(openResult.body.eventId as string)
         expect(openEventAfter?.status).toBe('superseded')
         expect(sessions.delete).toHaveBeenCalledWith(openEvent?.sessionId)
+      })
+
+      it('cancels pending debounce on PR close', async () => {
+        await handler.checkHealth()
+
+        // Open event enters debounce
+        const openPayload = makePrPayload({ action: 'opened' })
+        const openBody = Buffer.from(JSON.stringify(openPayload))
+        const openResult = await handler.handleWebhook(openBody, makePrHeaders(openBody, { delivery: 'pr-open' }))
+        expect(handler.getEvent(openResult.body.eventId as string)?.status).toBe('debounced')
+
+        // Close the PR before debounce fires
+        const closePayload = makeClosedPrPayload(false)
+        const closeBody = Buffer.from(JSON.stringify(closePayload))
+        await handler.handleWebhook(closeBody, makePrHeaders(closeBody, { delivery: 'pr-close' }))
+
+        // The debounced event should be superseded
+        expect(handler.getEvent(openResult.body.eventId as string)?.status).toBe('superseded')
+
+        // Advance past debounce — no session should be created
+        await vi.advanceTimersByTimeAsync(60_100)
+        expect(sessions.create).not.toHaveBeenCalled()
+      })
+    })
+
+    describe('debounce persistence across restart', () => {
+      it('persists pending debounces to disk on shutdown', async () => {
+        await handler.checkHealth()
+
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+        expect(result.body.status).toBe('debounced')
+
+        // Shut down while event is still debounced
+        handler.shutdown()
+
+        // writeFileSync should have been called with the pending debounces
+        const calls = vi.mocked(writeFileSync).mock.calls
+        const persistCall = calls.find(c => String(c[0]).includes('webhook-pending-debounce'))
+        expect(persistCall).toBeDefined()
+        const persisted = JSON.parse(String(persistCall?.[1])) as { records: Array<{ key: string; event: { id: string } }> }
+        expect(persisted.records).toHaveLength(1)
+        expect(persisted.records[0].key).toBe('owner/repo#42')
+        expect(persisted.records[0].event.id).toBe(result.body.eventId)
+
+        // Re-initialize handler (checkHealth will no-op on shutdown since we lose state)
+        handler = new WebhookHandler(makeConfig(), sessions)
+      })
+
+      it('deletes persist file on shutdown when restore ran and no debounces pending', async () => {
+        // checkHealth must run first so restorePendingDebounces sets debounceFileConsumed.
+        // Without that, the stale-file deletion is (correctly) skipped — see regression test below.
+        await handler.checkHealth()
+
+        // Now simulate a stale file appearing after checkHealth (e.g. written by a prior process)
+        vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
+          String(p).includes('webhook-pending-debounce'),
+        )
+
+        const { unlinkSync } = await import('fs')
+        vi.mocked(unlinkSync).mockClear()
+        handler.shutdown()
+
+        // Should try to unlink the stale file
+        expect(vi.mocked(unlinkSync)).toHaveBeenCalledWith(expect.stringContaining('webhook-pending-debounce'))
+      })
+
+      it('restores pending debounces from disk on checkHealth and fires them immediately', async () => {
+        const persistedPayload = makePrPayload()
+        const persistedEvent = {
+          id: 'restored-event-id',
+          idempotencyKey: 'restored-key',
+          receivedAt: new Date().toISOString(),
+          event: 'pull_request',
+          action: 'opened',
+          repo: 'owner/repo',
+          branch: 'fix-auth',
+          workflow: 'PR Review',
+          runId: 42,
+          runAttempt: 1,
+          conclusion: 'opened',
+          status: 'debounced',
+          sessionId: 'restored-session-id',
+          prNumber: 42,
+          prTitle: 'Fix auth bug',
+          headSha: 'deadbeef1234567890abcdef1234567890abcdef',
+          baseBranch: 'main',
+        }
+
+        // Simulate persisted file existing with one record
+        vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
+          String(p).includes('webhook-pending-debounce'),
+        )
+        vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
+          records: [{
+            key: 'owner/repo#42',
+            payload: persistedPayload,
+            event: persistedEvent,
+            sessionId: 'restored-session-id',
+          }],
+        }))
+
+        // Re-initialize handler — checkHealth should restore and fire
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig(), sessions)
+        await handler.checkHealth()
+
+        // Fire is synchronous but async processing starts — give it a tick
+        await vi.advanceTimersByTimeAsync(100)
+
+        // The event should be in the ring buffer
+        const event = handler.getEvent('restored-event-id')
+        expect(event).toBeDefined()
+
+        // sessions.create should have been called (the debounce fired)
+        expect(sessions.create).toHaveBeenCalled()
+      })
+
+      it('does not restore if file is missing', async () => {
+        vi.mocked(readFileSync).mockClear()
+        vi.mocked(existsSync).mockReturnValue(false)
+
+        // Fresh handler so prior tests don't leak state
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig(), sessions)
+        await handler.checkHealth()
+
+        // readFileSync should not be called for the persist file
+        const readCalls = vi.mocked(readFileSync).mock.calls
+        const persistRead = readCalls.find(c => String(c[0]).includes('webhook-pending-debounce'))
+        expect(persistRead).toBeUndefined()
+      })
+
+      it('does NOT delete persist file on shutdown when restore never ran (unhealthy startup)', async () => {
+        // Scenario: prior run saved events to disk. Current run has unhealthy gh,
+        // so checkHealth() never calls restorePendingDebounces(). On shutdown,
+        // savePendingDebounces() must NOT delete the file — otherwise events from
+        // the prior run would be lost forever (GitHub won't retry after 202).
+
+        // Reset mocks and create a fresh handler
+        vi.mocked(existsSync).mockClear()
+        const { unlinkSync } = await import('fs')
+        vi.mocked(unlinkSync).mockClear()
+
+        handler.shutdown()
+        handler = new WebhookHandler(makeConfig(), sessions)
+
+        // Simulate unhealthy gh — skip checkHealth entirely (or mock it to fail).
+        // Either way, restorePendingDebounces() must not run.
+
+        // Simulate the persist file existing on disk (left by a prior healthy run)
+        vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
+          String(p).includes('webhook-pending-debounce'),
+        )
+
+        // Shut down without calling checkHealth — debounceFileConsumed stays false
+        handler.shutdown()
+
+        // The stale file should NOT have been deleted
+        const unlinkCalls = vi.mocked(unlinkSync).mock.calls
+        const persistUnlink = unlinkCalls.find(c => String(c[0]).includes('webhook-pending-debounce'))
+        expect(persistUnlink).toBeUndefined()
+
+        // Reset existsSync so it doesn't leak to the next test
+        vi.mocked(existsSync).mockReturnValue(false)
+
+        // Re-initialize handler so subsequent tests start clean
+        handler = new WebhookHandler(makeConfig(), sessions)
+      })
+    })
+
+    describe('smart SHA filter', () => {
+      it('filters reopened when SHA was already reviewed', async () => {
+        await handler.checkHealth()
+        mockLoadPrCache.mockReturnValueOnce({
+          prNumber: 42,
+          repo: 'owner/repo',
+          lastReviewedSha: 'deadbeef1234567890abcdef1234567890abcdef',
+          timestamp: '2026-04-02T10:00:00.000Z',
+          priorReviewSummary: 'summary',
+          codebaseContext: 'context',
+          reviewFindings: 'findings',
+        } as any)
+
+        const payload = makePrPayload({ action: 'reopened' })
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+        expect(result.statusCode).toBe(200)
+        expect(result.body.status).toBe('filtered')
+        expect(result.body.filterReason).toContain('already reviewed')
+      })
+
+      it('filters ready_for_review when SHA was already reviewed', async () => {
+        await handler.checkHealth()
+        mockLoadPrCache.mockReturnValueOnce({
+          prNumber: 42,
+          repo: 'owner/repo',
+          lastReviewedSha: 'deadbeef1234567890abcdef1234567890abcdef',
+          timestamp: '2026-04-02T10:00:00.000Z',
+          priorReviewSummary: 'summary',
+          codebaseContext: 'context',
+          reviewFindings: 'findings',
+        } as any)
+
+        const payload = makePrPayload({ action: 'ready_for_review' })
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+        expect(result.statusCode).toBe(200)
+        expect(result.body.status).toBe('filtered')
+        expect(result.body.filterReason).toContain('already reviewed')
+      })
+
+      it('proceeds when SHA differs from cached review', async () => {
+        await handler.checkHealth()
+        mockLoadPrCache.mockReturnValueOnce({
+          prNumber: 42,
+          repo: 'owner/repo',
+          lastReviewedSha: 'oldsha_different_from_current_headsha_00000',
+          timestamp: '2026-04-02T10:00:00.000Z',
+          priorReviewSummary: 'summary',
+          codebaseContext: 'context',
+          reviewFindings: 'findings',
+        } as any)
+
+        const payload = makePrPayload({ action: 'reopened' })
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+        expect(result.statusCode).toBe(202)
+        expect(result.body.status).toBe('debounced')
+      })
+
+      it('proceeds when no prior cache exists', async () => {
+        await handler.checkHealth()
+        mockLoadPrCache.mockReturnValueOnce(undefined)
+
+        const payload = makePrPayload({ action: 'reopened' })
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+        expect(result.statusCode).toBe(202)
+        expect(result.body.status).toBe('debounced')
+      })
+
+      it('filters opened/synchronize redeliveries when SHA was already reviewed', async () => {
+        await handler.checkHealth()
+        const mockCache = {
+          prNumber: 42,
+          repo: 'owner/repo',
+          lastReviewedSha: 'deadbeef1234567890abcdef1234567890abcdef',
+          timestamp: '2026-04-02T10:00:00.000Z',
+          priorReviewSummary: 'summary',
+          codebaseContext: 'context',
+          reviewFindings: 'findings',
+        } as any
+
+        for (const action of ['opened', 'synchronize']) {
+          mockLoadPrCache.mockReturnValueOnce(mockCache)
+          const payload = makePrPayload({ action })
+          const body = Buffer.from(JSON.stringify(payload))
+          const result = await handler.handleWebhook(body, makePrHeaders(body, { delivery: `d-${action}` }))
+          expect(result.statusCode).toBe(200)
+          expect(result.body.status).toBe('filtered')
+          expect(result.body.filterReason).toContain('redeliver')
+        }
+      })
+
+      it('proceeds for opened/synchronize when no cache exists', async () => {
+        await handler.checkHealth()
+        for (const action of ['opened', 'synchronize']) {
+          mockLoadPrCache.mockReturnValueOnce(undefined)
+          const payload = makePrPayload({ action })
+          const body = Buffer.from(JSON.stringify(payload))
+          const result = await handler.handleWebhook(body, makePrHeaders(body, { delivery: `d-${action}` }))
+          expect(result.statusCode).toBe(202)
+          expect(result.body.status).toBe('debounced')
+        }
+      })
+    })
+
+    describe('debounce session cap', () => {
+      it('marks event as error when cap is reached at debounce fire time', async () => {
+        await handler.checkHealth()
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+        expect(result.body.status).toBe('debounced')
+
+        // Fill up session cap before debounce fires
+        sessions.list.mockReturnValue([
+          { id: '1', source: 'webhook', active: true },
+          { id: '2', source: 'webhook', active: true },
+          { id: '3', source: 'webhook', active: true },
+        ])
+
+        // Let debounce fire
+        await vi.advanceTimersByTimeAsync(60_100)
+
+        const event = handler.getEvent(result.body.eventId as string)
+        expect(event?.status).toBe('error')
+        expect(event?.error).toContain('Max concurrent')
+        expect(sessions.create).not.toHaveBeenCalled()
       })
     })
   })

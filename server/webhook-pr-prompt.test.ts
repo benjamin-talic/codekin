@@ -57,6 +57,37 @@ describe('buildPrReviewPrompt', () => {
     expect(prompt).toContain('**Repository**: owner/repo')
     expect(prompt).toContain('**PR**: #42 — Fix authentication bug')
     expect(prompt).toContain('**Author**: octocat')
+    // No reviewer line when fields are absent
+    expect(prompt).not.toContain('**Reviewer**:')
+  })
+
+  it('includes reviewer metadata when provider/model are set', () => {
+    const prompt = buildPrReviewPrompt(
+      makeContext({ reviewProvider: 'opencode', reviewModel: 'openai/gpt-5.4' }),
+      '/tmp/workspace',
+    )
+    expect(prompt).toContain('**Reviewer**: OpenCode (openai/gpt-5.4)')
+  })
+
+  it('includes claude reviewer metadata', () => {
+    const prompt = buildPrReviewPrompt(
+      makeContext({ reviewProvider: 'claude', reviewModel: 'sonnet' }),
+      '/tmp/workspace',
+    )
+    expect(prompt).toContain('**Reviewer**: Claude (sonnet)')
+  })
+
+  it('includes reviewer attribution footer instruction', () => {
+    const prompt = buildPrReviewPrompt(
+      makeContext({ reviewProvider: 'opencode', reviewModel: 'openai/gpt-5.4' }),
+      '/tmp/workspace',
+    )
+    expect(prompt).toContain('*Reviewed by OpenCode (openai/gpt-5.4)*')
+  })
+
+  it('omits reviewer attribution footer when fields are absent', () => {
+    const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
+    expect(prompt).not.toContain('*Reviewed by ')
     expect(prompt).toContain('**Branch**: fix-auth → main')
     expect(prompt).toContain('3 files changed, +25/-10')
     expect(prompt).toContain('**Head**: abc1234')
@@ -188,6 +219,65 @@ describe('buildPrReviewPrompt', () => {
       // Should fall back to default since file was whitespace-only
       expect(prompt).toContain('comprehensive code review')
     })
+
+    it('uses provider-specific repo-level prompt when available', () => {
+      vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
+        String(p) === '/tmp/workspace/.codekin/pr-review-prompt.opencode.md',
+      )
+      vi.mocked(readFileSync).mockReturnValue('OpenCode-specific repo prompt')
+
+      const prompt = buildPrReviewPrompt(
+        makeContext({ reviewProvider: 'opencode', reviewModel: 'openai/gpt-5.4' }),
+        '/tmp/workspace',
+      )
+      expect(prompt).toContain('OpenCode-specific repo prompt')
+    })
+
+    it('provider-specific repo prompt takes priority over generic repo prompt', () => {
+      vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) => {
+        const s = String(p)
+        return s === '/tmp/workspace/.codekin/pr-review-prompt.claude.md'
+            || s === '/tmp/workspace/.codekin/pr-review-prompt.md'
+      })
+      vi.mocked(readFileSync).mockImplementation((p: Parameters<typeof readFileSync>[0]) => {
+        if (String(p).includes('.claude.md')) return 'Claude-specific prompt'
+        return 'Generic prompt'
+      })
+
+      const prompt = buildPrReviewPrompt(
+        makeContext({ reviewProvider: 'claude', reviewModel: 'sonnet' }),
+        '/tmp/workspace',
+      )
+      expect(prompt).toContain('Claude-specific prompt')
+      expect(prompt).not.toContain('Generic prompt')
+    })
+
+    it('falls back to generic when provider-specific prompt not found', () => {
+      vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
+        String(p) === '/tmp/workspace/.codekin/pr-review-prompt.md',
+      )
+      vi.mocked(readFileSync).mockReturnValue('Generic repo prompt')
+
+      const prompt = buildPrReviewPrompt(
+        makeContext({ reviewProvider: 'opencode', reviewModel: 'openai/gpt-5.4' }),
+        '/tmp/workspace',
+      )
+      expect(prompt).toContain('Generic repo prompt')
+    })
+
+    it('uses provider-specific global prompt when no repo-level exists', () => {
+      vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) => {
+        const s = String(p)
+        return s.includes('.codekin/pr-review-prompt.opencode.md') && !s.includes('/tmp/workspace')
+      })
+      vi.mocked(readFileSync).mockReturnValue('Global opencode prompt')
+
+      const prompt = buildPrReviewPrompt(
+        makeContext({ reviewProvider: 'opencode', reviewModel: 'openai/gpt-5.4' }),
+        '/tmp/workspace',
+      )
+      expect(prompt).toContain('Global opencode prompt')
+    })
   })
 
   describe('prior review context (cache)', () => {
@@ -271,7 +361,7 @@ describe('buildPrReviewPrompt', () => {
       })
       expect(prompt).toContain('## Posting Your Review Summary')
       expect(prompt).toContain('comment ID: 12345')
-      expect(prompt).toContain('Update it instead of creating a new comment')
+      expect(prompt).toContain('**Update it** instead of creating a new comment')
       expect(prompt).toContain('PATCH')
       expect(prompt).toContain('-F body=@/tmp/workspace/pr-42-review-body.md')
       expect(prompt).toContain(`issues/comments/12345`)
