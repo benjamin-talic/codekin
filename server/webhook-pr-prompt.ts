@@ -282,6 +282,8 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('**Bash is restricted to:** `git` commands, `gh` commands for PR interaction, and a small set of read-only helpers (`cat`, `ls`, `head`, `tail`, `wc`, `mkdir`, `echo`). All other bash commands (including `grep`, `rg`, `find`, `sed`, `awk`) are denied.')
     lines.push('')
     lines.push('**Stay within the workspace.** Access to files outside the cloned repo is blocked by `external_directory: deny`. The only exception is the PR cache directory, which is allow-listed.')
+    lines.push('')
+    lines.push('**No web access.** `webfetch` is denied. Rely on the PR context and local code inspection only — do not fetch external URLs.')
   } else {
     // Claude
     lines.push('Your session runs with Claude `--allowedTools` restricting which tools are available.')
@@ -296,6 +298,8 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('**Only use Bash for:** `git` commands and `gh` commands.')
     lines.push('')
     lines.push('**Stay within the workspace directory.** Do not access files outside the cloned repo.')
+    lines.push('')
+    lines.push('**No web access.** `WebFetch` and `WebSearch` are not in your allowedTools. For library documentation, use the `context7` MCP tools (`resolve-library-id`, `query-docs`) which are the only network calls authorized. Do not attempt to fetch arbitrary URLs.')
   }
 
   // --- Comment posting instructions ---

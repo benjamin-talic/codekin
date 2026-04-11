@@ -670,14 +670,15 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     }
 
     if (reviewProvider === 'claude') {
-      // Claude uses allowedTools and addDirs for sandboxed tool access
+      // Claude uses allowedTools and addDirs for sandboxed tool access.
+      // No WebFetch/WebSearch — review should rely on PR context and cached
+      // library docs (context7 MCP) only. General web access is an exfil vector
+      // for prompt-injection attacks embedded in PR content.
       sessionOptions.allowedTools = [
         'Bash(gh:*)',
         'Write',
         'mcp__plugin_context7_context7__resolve-library-id',
         'mcp__plugin_context7_context7__query-docs',
-        'WebFetch',
-        'WebSearch',
       ]
       sessionOptions.addDirs = [dirname(cachePath)]
     } else {
@@ -695,7 +696,9 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
           read: 'allow',
           edit: 'allow',
           grep: 'allow',
-          webfetch: 'allow',
+          // webfetch denied — review should rely on PR context only. General web
+          // access is an exfil vector for prompt-injection attacks embedded in PR content.
+          webfetch: 'deny',
           external_directory: { '*': 'deny', [dirname(cachePath) + '/**']: 'allow' },
           doom_loop: 'deny',
         },
