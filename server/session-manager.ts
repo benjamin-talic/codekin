@@ -112,6 +112,9 @@ export class SessionManager {
   private _promptListeners: Array<(sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void> = []
   /** Registered listeners notified when a session completes a turn (result event). */
   private _resultListeners: Array<(sessionId: string, isError: boolean) => void> = []
+  /** Registered listeners notified when a session's Claude/OpenCode process emits an error message.
+   *  Used by webhook-handler to capture error text for provider health classification. */
+  private _errorListeners: Array<(sessionId: string, errorText: string) => void> = []
   /** Delegated approval logic (auto-approve patterns, deny-lists, pattern management). */
   private _approvalManager: ApprovalManager
   /** Delegated auto-naming logic (generates session names from first user message via Claude API). */
@@ -156,6 +159,7 @@ export class SessionManager {
       approvalManager: this._approvalManager,
       promptRouter: this.promptRouter,
       exitListeners: this._exitListeners,
+      errorListeners: this._errorListeners,
       onSystemInit: (cp, session, model) => this.onSystemInit(cp, session, model),
       onTextEvent: (session, sessionId, text) => this.onTextEvent(session, sessionId, text),
       onThinkingEvent: (session, summary) => this.onThinkingEvent(session, summary),
@@ -629,6 +633,17 @@ export class SessionManager {
     return () => {
       const idx = this._resultListeners.indexOf(listener)
       if (idx >= 0) this._resultListeners.splice(idx, 1)
+    }
+  }
+
+  /** Register a listener called when any session's Claude/OpenCode process emits an error message.
+   *  Used by webhook-handler to capture the last error text per session so the subsequent
+   *  exit event can classify it (rate_limit / auth_failure / other) and act accordingly. */
+  onSessionError(listener: (sessionId: string, errorText: string) => void): () => void {
+    this._errorListeners.push(listener)
+    return () => {
+      const idx = this._errorListeners.indexOf(listener)
+      if (idx >= 0) this._errorListeners.splice(idx, 1)
     }
   }
 
