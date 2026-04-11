@@ -672,13 +672,24 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     if (reviewProvider === 'claude') {
       // Narrowed Claude allowedTools mirroring the OpenCode sandbox:
       //   - git: read-only subcommands only (no commit/push/reset/rebase/clean)
-      //   - gh: specific PR/review API endpoints only (no auth/repo/secret/workflow)
+      //   - gh: scoped to PR/review endpoints
       //   - Write: needed to write the review body file and PR cache JSON
       //   - context7 MCP: the only allowed network lookup (library docs)
       //   - no WebFetch / WebSearch — general web access is an exfil vector
       //
+      // Note: Claude CLI's multi-word prefix patterns like `Bash(git diff:*)`
+      // occasionally produce false "requires approval" errors on command variants
+      // the model tries first — but the model retries and the review completes
+      // successfully. Verified empirically on PR #15.
+      //
+      // `Bash(gh api:*)` is intentionally broader than OpenCode's per-endpoint
+      // patterns. Codekin's approval hook uses literal word-boundary prefix matching
+      // which doesn't work with slashes (`gh api repos/owner/...` has no space
+      // after `repos`). The prompt's explicit gh-endpoint policy is what keeps
+      // the model from calling `gh api user`, `gh api /orgs/*`, etc.
+      //
       // We pass skipDefaultBashGit to prevent claude-process from prepending
-      // the default broad Bash(git:*), which would defeat the narrowing below.
+      // the default broad Bash(git:*), which would defeat the narrowing.
       sessionOptions.skipDefaultBashGit = true
       sessionOptions.allowedTools = [
         // git read-only
@@ -691,14 +702,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         'Bash(git ls-files:*)',
         'Bash(git branch:*)',
         'Bash(git config:*)',
-        // gh review-specific. Codekin's approval hook (prompt-router.ts matchesAllowedTools)
-        // uses literal word-boundary prefix matching (prefix + space OR exact match),
-        // so multi-word prefixes with slashes like "gh api repos/" don't match commands
-        // like "gh api repos/owner/repo/..." (no space after "repos"). We use the broader
-        // `gh api` pattern here and rely on the prompt's sandbox rules + hostile-input
-        // preamble to keep the model from calling `gh api user`, `gh api /orgs/*`, etc.
-        // OpenCode's opencode.json gets proper glob-by-path scoping since its permission
-        // engine handles glob patterns natively.
+        // gh review-specific
         'Bash(gh pr view:*)',
         'Bash(gh pr diff:*)',
         'Bash(gh pr review:*)',
@@ -763,17 +767,20 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
             'git branch': 'allow',
             'git branch --show-current': 'allow',
             'git config --get *': 'allow',
-            // read-only filesystem helpers
-            'cat *': 'allow',
-            'ls *': 'allow',
-            'head *': 'allow',
-            'tail *': 'allow',
-            'wc *': 'allow',
-            'mkdir *': 'allow',
-            'echo *': 'allow',
+            // NO shell primitives (cat/ls/head/tail/wc/mkdir/echo/...) — even when
+            // labeled "read-only" they can write arbitrary files via shell redirection:
+            //   cat <<EOF > ~/.ssh/authorized_keys  (exfil via SSH key)
+            //   echo X >> ~/.bashrc                 (persistence)
+            //   head file > /tmp/stage              (stage attack payload)
+            // OpenCode's `external_directory: deny` scopes the built-in read/write/edit
+            // tools but NOT raw bash commands — bash runs with the full filesystem
+            // permissions of the user running codekin. For file operations the model
+            // MUST use the built-in `read` / `write` / `edit` / `grep` tools, which are
+            // path-scoped by external_directory.
           },
           read: 'allow',
           edit: 'allow',
+          write: 'allow',
           grep: 'allow',
           // webfetch denied — review should rely on PR context only. General web
           // access is an exfil vector for prompt-injection attacks embedded in PR content.

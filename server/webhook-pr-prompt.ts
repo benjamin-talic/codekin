@@ -264,14 +264,13 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
   if (ctx.reviewProvider === 'opencode') {
     lines.push('Your session runs inside an OpenCode sandbox with scoped permissions. The following rules are enforced by `opencode.json` in the workspace:')
     lines.push('')
-    lines.push('**Use built-in tools for file operations — NOT bash equivalents:**')
+    lines.push('**All file operations MUST use built-in tools — NOT bash:**')
     lines.push('- Use the **read** tool to read files (not `cat`, `head`, `tail`)')
     lines.push('- Use the **grep** tool to search file contents (not bash `grep`, `rg`, `awk`)')
-    lines.push('- Use the **edit** or **write** tool to create/modify files (not `echo >` or heredocs)')
+    lines.push('- Use the **write** tool to create files, including the JSON cache file (not `echo >`, not heredocs, not redirection)')
+    lines.push('- Use the **edit** tool to modify existing files (not `sed`, not `awk`)')
     lines.push('')
-    lines.push('Built-in tools are pre-authorized and path-scoped to the workspace. Bash `grep`/`rg`/`find`/`sed`/`awk` are DENIED and will fail.')
-    lines.push('')
-    lines.push('**Exception**: the structured JSON cache file (see "Post-Review: Save Context" below) should be written via bash heredoc — this avoids escape issues with arbitrary JSON content. All OTHER file operations should use the built-in tools.')
+    lines.push('Built-in tools are path-scoped to the workspace and the PR cache directory via `external_directory`. Shell primitives like `cat`, `echo`, `ls`, `head`, `tail`, `wc`, `mkdir` are NOT in the bash allowlist — they can write arbitrary files via redirection (`cat <<EOF > ...`, `echo x > ...`) which bypasses the path scoping, so they are denied outright.')
     lines.push('')
     lines.push('**Bash is restricted to:**')
     lines.push('- Read-only git subcommands only: `git status`, `git diff`, `git log`, `git show`, `git blame`, `git rev-parse`, `git ls-files`, `git branch --show-current`, `git config --get *`. Write operations like `git commit`, `git push`, `git checkout`, `git reset`, `git rebase`, `git clean` are DENIED and will fail.')
@@ -283,9 +282,8 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('  - `gh api repos/*/pulls/*/reviews ...` (list prior reviews)')
     lines.push('  - `gh api repos/*/pulls/*/reviews/*/dismissals ...` (dismiss a review)')
     lines.push('  - Other `gh` commands — including `gh auth *`, `gh repo *`, `gh secret *`, `gh workflow *`, `gh api user`, `gh api /orgs/*` — are DENIED.')
-    lines.push('- Read-only filesystem helpers: `cat`, `ls`, `head`, `tail`, `wc`, `mkdir`, `echo`')
     lines.push('')
-    lines.push('All other bash commands (including `grep`, `rg`, `find`, `sed`, `awk`) are denied. Do NOT use bash command substitution `$(...)` or variable assignments on the same line as the denied check — the sandbox matches on the literal command string.')
+    lines.push('All other bash commands (including `grep`, `rg`, `find`, `sed`, `awk`, and any shell primitives) are denied. Do NOT use bash command substitution `$(...)` or variable assignments on the same line as the denied check — the sandbox matches on the literal command string.')
     lines.push('')
     lines.push('**Stay within the workspace.** Access to files outside the cloned repo is blocked by `external_directory: deny`. The only exception is the PR cache directory, which is allow-listed.')
     lines.push('')
@@ -395,7 +393,7 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('Use an empty array `[]` if there are no findings. The `verdict` must be exactly one of: approve, request_changes, comment.')
     lines.push('')
     if (ctx.reviewProvider === 'opencode') {
-      lines.push('Save this file using bash: `cat > ' + options.cachePath + ' << \'CACHE_EOF\'` followed by the JSON content and `CACHE_EOF`. This helps future reviews of this PR be more efficient.')
+      lines.push(`Save this file using the built-in **write** tool (path: \`${options.cachePath}\`). Do NOT use bash heredoc or redirection — shell primitives for file writing are not available in the sandbox. This helps future reviews of this PR be more efficient.`)
     } else {
       lines.push('Use the Write tool to save this file. This helps future reviews of this PR be more efficient.')
     }
