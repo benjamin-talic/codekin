@@ -256,7 +256,7 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('')
     lines.push('**Exception**: the structured JSON cache file (see "Post-Review: Save Context" below) should be written via bash heredoc — this avoids escape issues with arbitrary JSON content. All OTHER file operations should use the built-in tools.')
     lines.push('')
-    lines.push('**Bash is restricted to:** `git` subcommands (`status`, `diff`, `log`, `show`, `blame`), `gh` subcommands for PR interaction, and a small set of read-only helpers (`cat`, `ls`, `head`, `tail`, `wc`, `mkdir`, `echo`).')
+    lines.push('**Bash is restricted to:** `git` commands, `gh` commands for PR interaction, and a small set of read-only helpers (`cat`, `ls`, `head`, `tail`, `wc`, `mkdir`, `echo`). All other bash commands (including `grep`, `rg`, `find`, `sed`, `awk`) are denied.')
     lines.push('')
     lines.push('**Stay within the workspace.** Access to files outside the cloned repo is blocked by `external_directory: deny`. The only exception is the PR cache directory, which is allow-listed.')
   } else {
