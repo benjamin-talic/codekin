@@ -694,8 +694,30 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         permission: {
           bash: {
             '*': 'deny',
-            // gh subcommands needed for PR review (narrowed further in task 22)
-            'gh *': 'allow',
+            // gh subcommands needed for PR review — narrowed to block gh auth,
+            // gh repo clone, gh secret, gh workflow, gh api user, etc.
+            'gh pr view *': 'allow',
+            'gh pr diff *': 'allow',
+            'gh pr review *': 'allow',
+            // gh api scoped to repo-level PR/issue endpoints only.
+            // This blocks `gh api user`, `gh api /user`, `gh api /repos/../actions/secrets`, etc.
+            // while still allowing everything the review flow needs:
+            //   GET/POST/PATCH repos/*/issues/*/comments, repos/*/issues/comments/*
+            //   GET/POST     repos/*/pulls/*/comments
+            //   GET          repos/*/pulls/*/reviews
+            //   PUT          repos/*/pulls/*/reviews/*/dismissals
+            'gh api repos/*/issues/*/comments': 'allow',
+            'gh api repos/*/issues/*/comments *': 'allow',
+            'gh api repos/*/issues/comments/*': 'allow',
+            'gh api repos/*/issues/comments/* *': 'allow',
+            'gh api repos/*/pulls/*/comments': 'allow',
+            'gh api repos/*/pulls/*/comments *': 'allow',
+            'gh api repos/*/pulls/*/reviews': 'allow',
+            'gh api repos/*/pulls/*/reviews *': 'allow',
+            'gh api repos/*/pulls/*/reviews/*': 'allow',
+            'gh api repos/*/pulls/*/reviews/* *': 'allow',
+            'gh api repos/*/pulls/*/reviews/*/dismissals': 'allow',
+            'gh api repos/*/pulls/*/reviews/*/dismissals *': 'allow',
             // git read-only subcommands only — no checkout/commit/push/reset/rebase/clean
             'git status': 'allow',
             'git status *': 'allow',

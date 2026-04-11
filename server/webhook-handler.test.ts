@@ -822,10 +822,18 @@ describe('WebhookHandler', () => {
         expect(options.addDirs).toBeUndefined()
 
         // Should write opencode.json with scoped permissions instead
-        expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith(
-          '/tmp/workspace/opencode.json',
-          expect.stringContaining('"gh *": "allow"'),
+        const writeCall = vi.mocked(writeFileSync).mock.calls.find(c =>
+          String(c[0]).endsWith('opencode.json'),
         )
+        expect(writeCall).toBeDefined()
+        const written = String(writeCall?.[1])
+        // Scoped gh patterns (not the old blanket "gh *")
+        expect(written).toContain('"gh pr view *": "allow"')
+        expect(written).toContain('"gh api repos/*/issues/*/comments *": "allow"')
+        // Blanket gh must NOT be present anymore
+        expect(written).not.toContain('"gh *": "allow"')
+        // webfetch must be denied
+        expect(written).toContain('"webfetch": "deny"')
 
         expect(mockBuildPrReviewPrompt).toHaveBeenCalledWith(
           expect.objectContaining({ reviewProvider: 'opencode', reviewModel: 'openai/gpt-5.4' }),
