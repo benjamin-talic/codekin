@@ -198,11 +198,11 @@ The original `isDuplicate()` was check-and-record in one call. This meant events
 - `isDuplicate(deliveryId, idempotencyKey)` — check only, no side effects
 - `recordProcessed(deliveryId, idempotencyKey)` — called after the event passes filters and dedup
 
-**Note:** With debounce enabled, `recordProcessed()` is called when the event enters the debounce queue (before the timer fires). This is intentional — it prevents GitHub from retrying the delivery during the 60s debounce window. A server crash during the window silently drops the event; GitHub's retry mechanism covers this since the webhook delivery will time out and be retried.
+**Note:** With debounce enabled, `recordProcessed()` is called when the event enters the debounce queue (before the timer fires). This prevents GitHub from retrying the delivery during the 60s debounce window. Server restarts during the window are handled by [Debounce Persistence](#debounce-persistence) — pending entries are written to disk on shutdown and restored on the next startup — so no events are dropped on a graceful restart.
 
 ## Testing
 
-- `server/webhook-handler.test.ts` — 97 tests including PR events, debounce, smart SHA filter, superseding, cache/comment integration, closed/merged handling
+- `server/webhook-handler.test.ts` — 79 tests including PR events, debounce, debounce persistence across restarts, smart SHA filter, provider selection (claude/opencode/split), superseding, cache/comment integration, closed/merged handling
 - `server/webhook-pr-github.test.ts` — 22 tests for all fetch functions (diff, files, commits, review comments, reviews, existing review comment detection)
 - `server/webhook-pr-prompt.test.ts` — 26 tests including prompt resolution, prior context rendering, cache-writing instructions, comment update/create instructions
 - `server/webhook-pr-cache.test.ts` — 15 tests for cache loading, path generation, validation, error handling, archive, and delete
