@@ -204,7 +204,7 @@ The original `isDuplicate()` was check-and-record in one call. This meant events
 
 - `server/webhook-handler.test.ts` — 79 tests including PR events, debounce, debounce persistence across restarts, smart SHA filter, provider selection (claude/opencode/split), superseding, cache/comment integration, closed/merged handling
 - `server/webhook-pr-github.test.ts` — 22 tests for all fetch functions (diff, files, commits, review comments, reviews, existing review comment detection)
-- `server/webhook-pr-prompt.test.ts` — 26 tests including prompt resolution, prior context rendering, cache-writing instructions, comment update/create instructions
+- `server/webhook-pr-prompt.test.ts` — 38 tests including prompt resolution (4-tier provider-specific + generic fallback), prior context rendering, cache-writing instructions, comment update/create instructions, reviewer attribution footer
 - `server/webhook-pr-cache.test.ts` — 15 tests for cache loading, path generation, validation, error handling, archive, and delete
 - `server/webhook-dedup.test.ts` — 26 tests for dedup check/record split, TTL eviction, max entries, disk persistence
 
