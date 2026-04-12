@@ -1111,9 +1111,15 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
           continue
         }
 
+        // Concurrency cap — don't overload the system with retries.
+        // Leave the entry in the backlog; it'll be picked up next tick.
+        if (this.isAtSessionCap()) {
+          console.log(`[webhook-backlog] Skipping ${entry.repo}#${entry.prNumber} — at session cap (${this.config.maxConcurrentSessions})`)
+          continue
+        }
+
         // PR is still open — re-fire the event.
         console.log(`[webhook-backlog] Retrying ${entry.repo}#${entry.prNumber} (attempt ${entry.retryCount + 1})`)
-        this.backlog.remove(entry.id)
 
         // Build a fresh WebhookEvent for the retry.
         const newEvent: WebhookEvent = {
@@ -1139,10 +1145,18 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         newEvent.sessionId = newSessionId
         this.recordEvent(newEvent)
 
-        // Don't await — let it run in the background. If it fails again,
-        // handleReviewFailure will create a fresh backlog entry.
-        this.processPullRequestAsync(entry.payload, newEvent, newSessionId).catch(err => {
+        // Keep the backlog entry until the session is definitely established.
+        // Remove on success; bump retryAfter on pre-session failure so the
+        // entry isn't lost if processPullRequestAsync throws before creating
+        // a session (workspace failure, context fetch error, etc.).
+        // If the session IS created but later fails with rate_limit/auth_failure,
+        // handleReviewFailure will create a fresh backlog entry — the old one
+        // was already removed so there's no duplicate.
+        this.processPullRequestAsync(entry.payload, newEvent, newSessionId).then(() => {
+          this.backlog.remove(entry.id)
+        }).catch(err => {
           console.error('[webhook-backlog] Retry session error:', err)
+          this.backlog.bumpRetry(entry.id)
           if (this.getEvent(newEvent.id)?.status !== 'superseded') {
             this.updateEventStatus(newEvent.id, 'error', String(err))
           }
