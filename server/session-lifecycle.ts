@@ -174,9 +174,10 @@ export class SessionLifecycle {
     session.claudeProcess = cp
     this.deps.globalBroadcast?.({ type: 'sessions_updated' })
 
-    // Only show "Session started" for the initial start, not for restarts
+    // Only show "Session started" for the very first start, not for restarts
     // triggered by model/permission changes — those already show a model message.
-    const isRestart = !!session._lastReportedModel
+    const isRestart = !!session._processStartedOnce
+    session._processStartedOnce = true
     const startMsg: WsServerMessage = { type: 'claude_started', sessionId }
     this.deps.addToHistory(session, startMsg)
     if (!isRestart) {
