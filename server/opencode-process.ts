@@ -490,6 +490,9 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         if (!this.isOwnSession(properties)) break
         const field = properties.field as string | undefined
         const delta = properties.delta as string | undefined
+        if (process.env.CODEKIN_DEBUG_SSE) {
+          console.log(`[opencode-sse] delta field=${field} len=${delta?.length ?? 0} text=${delta?.slice(0, 80)}`)
+        }
         if (field === 'text' && delta) {
           this.receivedDeltas = true
           // Buffer initial deltas to detect and strip user echo prefix.
@@ -538,6 +541,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
 
         // Only process events for our session
         if (!this.isOwnSession(properties)) break
+
+        if (process.env.CODEKIN_DEBUG_SSE) {
+          console.log(`[opencode-sse] part.updated type=${part.type} len=${part.text?.length ?? 0} text=${part.text?.slice(0, 80)} receivedDeltas=${this.receivedDeltas} emittedPartText=${this.emittedPartText}`)
+        }
 
         switch (part.type) {
           case 'text': {
@@ -709,6 +716,12 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
           parts?: OpenCodeMessagePart[]
         } | undefined
         if (!info || info.role !== 'assistant' || !info.parts) break
+        if (process.env.CODEKIN_DEBUG_SSE) {
+          console.log(`[opencode-sse] message.updated parts=${info.parts.length} types=${info.parts.map(p => p.type).join(',')}`)
+          for (const p of info.parts) {
+            console.log(`[opencode-sse]   part type=${p.type} text=${p.text?.slice(0, 120)}`)
+          }
+        }
         for (const part of info.parts) {
           this.handleSSEEvent({ type: 'message.part.updated', properties: { ...properties, part } })
         }

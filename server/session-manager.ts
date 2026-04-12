@@ -1211,7 +1211,10 @@ export class SessionManager {
   setModel(sessionId: string, model: string): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false
-    session.model = model || undefined
+    const newModel = model || undefined
+    // Skip restart if the model hasn't actually changed.
+    if (session.model === newModel) return true
+    session.model = newModel
     // Clear any pending restart timer from a prior crash to prevent a stale
     // timer from spawning a second process after we restart below.
     if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
