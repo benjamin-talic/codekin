@@ -238,9 +238,16 @@ export default function App() {
       openCodeModelsDirRef.current = activeWd
       const currentIsOpenCode = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
       if (!currentIsOpenCode) {
-        const [defaultProvider, defaultModelId] = Object.entries(result.defaults)[0] ?? []
-        if (defaultProvider && defaultModelId) setModel(`${defaultProvider}/${defaultModelId}`)
-        else if (models.length > 0) setModel(models[0].id)
+        // Prefer the user's last OpenCode model selection from localStorage
+        const savedOcModel = localStorage.getItem('opencode-model')
+        const savedIsValid = savedOcModel && models.some(m => m.id === savedOcModel)
+        if (savedIsValid) {
+          setModel(savedOcModel)
+        } else {
+          const [defaultProvider, defaultModelId] = Object.entries(result.defaults)[0] ?? []
+          if (defaultProvider && defaultModelId) setModel(`${defaultProvider}/${defaultModelId}`)
+          else if (models.length > 0) setModel(models[0].id)
+        }
       }
     }).catch(() => { setOpenCodeConnected(false) })
   }, [activeSessionProvider, settings.token, openCodeModels.length, setModel, activeOpenCodeWd])
@@ -298,6 +305,14 @@ export default function App() {
   // Unified slash command list for autocomplete (skills + bundled + built-in)
   const allCommands = useMemo(() => buildSlashCommandList(allSkills), [allSkills])
 
+  // Wrap setModel to also persist OpenCode model selection to localStorage
+  const handleModelChange = useCallback((model: string) => {
+    setModel(model)
+    if (activeSessionProvider === 'opencode') {
+      localStorage.setItem('opencode-model', model)
+    }
+  }, [setModel, activeSessionProvider])
+
   // Handle built-in slash commands locally (not sent to Claude)
   const handleBuiltinCommand = useCallback((command: string, args: string) => {
     switch (command) {
@@ -313,7 +328,7 @@ export default function App() {
         break
       case '/model':
         if (args) {
-          setModel(args)
+          handleModelChange(args)
         } else {
           sendInput(`Current model: ${currentModel ?? 'default'}. To change, use the model selector in the input bar.`)
         }
@@ -325,7 +340,7 @@ export default function App() {
         sendInput(`[Codekin] Command ${command} is not available in the web UI.`)
         break
     }
-  }, [leaveSession, clearMessages, activeWorkingDir, handleNewSessionForRepo, sendInput, currentModel, setModel])
+  }, [leaveSession, clearMessages, activeWorkingDir, handleNewSessionForRepo, sendInput, currentModel, handleModelChange])
 
   // Message sending: file uploads, skill expansion, tentative queue
   const {
@@ -652,7 +667,7 @@ export default function App() {
             skillGroups={skillGroups}
             slashCommands={allCommands}
             currentModel={currentModel}
-            onModelChange={setModel}
+            onModelChange={handleModelChange}
             currentPermissionMode={currentPermissionMode}
             onPermissionModeChange={handlePermissionModeChange}
             disabled={!settings.token}
@@ -693,7 +708,7 @@ export default function App() {
             sessionInputs={sessionInputs}
             onSessionInputChange={handleSessionInputChange}
             currentModel={currentModel}
-            onModelChange={setModel}
+            onModelChange={handleModelChange}
             isMobile={isMobile}
             currentPermissionMode={currentPermissionMode}
             onPermissionModeChange={handlePermissionModeChange}
@@ -730,7 +745,7 @@ export default function App() {
             sessionInputs={sessionInputs}
             onSessionInputChange={handleSessionInputChange}
             currentModel={currentModel}
-            onModelChange={setModel}
+            onModelChange={handleModelChange}
             availableModels={availableModels}
             hasUserMessages={messages.some(m => m.type === 'user')}
             useWorktree={useWorktree}
