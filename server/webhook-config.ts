@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs'
 import { homedir } from 'os'
-import { join } from 'path'
+import { join, dirname } from 'path'
+import { randomBytes } from 'crypto'
 import type { WebhookConfig } from './webhook-types.js'
 
 const CONFIG_FILE = join(homedir(), '.codekin', 'webhook-config.json')
@@ -19,18 +20,20 @@ export function loadWebhookConfig(): FullWebhookConfig {
   let maxConcurrentSessions = 3
   let logLinesToInclude = 200
   let actorAllowlist: string[] = []
+  let secret = ''
 
   // Try loading config file
   if (existsSync(CONFIG_FILE)) {
     try {
       const raw = readFileSync(CONFIG_FILE, 'utf-8')
-      const file = JSON.parse(raw) as Partial<WebhookConfig>
+      const file = JSON.parse(raw) as Partial<WebhookConfig> & { secret?: string }
       if (typeof file.enabled === 'boolean') enabled = file.enabled
       if (typeof file.maxConcurrentSessions === 'number') maxConcurrentSessions = file.maxConcurrentSessions
       if (typeof file.logLinesToInclude === 'number') logLinesToInclude = file.logLinesToInclude
       if (Array.isArray(file.actorAllowlist) && file.actorAllowlist.every(v => typeof v === 'string')) {
         actorAllowlist = file.actorAllowlist
       }
+      if (typeof file.secret === 'string') secret = file.secret
     } catch (err) {
       console.warn('[webhook] Failed to parse config file:', err)
     }
@@ -59,7 +62,10 @@ export function loadWebhookConfig(): FullWebhookConfig {
     actorAllowlist = envActorAllowlist.split(',').map(s => s.trim()).filter(Boolean)
   }
 
-  const secret = process.env.GITHUB_WEBHOOK_SECRET || ''
+  const envSecret = process.env.GITHUB_WEBHOOK_SECRET
+  if (envSecret !== undefined) {
+    secret = envSecret
+  }
 
   return {
     enabled,
@@ -68,4 +74,41 @@ export function loadWebhookConfig(): FullWebhookConfig {
     logLinesToInclude,
     actorAllowlist,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Config persistence for auto-setup
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a cryptographically random webhook secret.
+ */
+export function generateWebhookSecret(): string {
+  return randomBytes(32).toString('hex')
+}
+
+/**
+ * Persist webhook config updates to the config file (atomic read-merge-write).
+ * Only writes fields that are explicitly provided; preserves existing values.
+ */
+export function saveWebhookConfig(updates: Partial<FullWebhookConfig>): void {
+  let existing: Record<string, unknown> = {}
+
+  if (existsSync(CONFIG_FILE)) {
+    try {
+      existing = JSON.parse(readFileSync(CONFIG_FILE, 'utf-8')) as Record<string, unknown>
+    } catch {
+      // Start fresh if file is corrupt
+    }
+  }
+
+  const merged = { ...existing, ...updates }
+
+  // Ensure directory exists
+  mkdirSync(dirname(CONFIG_FILE), { recursive: true })
+
+  // Atomic write: write to tmp file then rename
+  const tmpFile = CONFIG_FILE + '.tmp'
+  writeFileSync(tmpFile, JSON.stringify(merged, null, 2) + '\n', 'utf-8')
+  renameSync(tmpFile, CONFIG_FILE)
 }
