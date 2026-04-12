@@ -89,6 +89,8 @@ export interface Session {
   _namingAttempts: number
   /** The model reported by the last system init event, used to suppress duplicate init messages. */
   _lastReportedModel?: string
+  /** Whether a process has been started at least once (to suppress "Session started" on restarts). */
+  _processStartedOnce?: boolean
   /** Last user input sent, stored for API error retry. */
   _lastUserInput?: string
   /** First user input, preserved for session naming (not cleared by API retry). */
