@@ -52,7 +52,8 @@ When generating audit reports, health checks, or any recurring assessment:
 - `docs/conventions.md` — coding patterns and file organization
 - `docs/WORKFLOWS.md` — automated workflow system
 - `docs/API-REFERENCE.md` — REST and WebSocket API
-- `docs/stream-json-protocol.md` — Claude CLI integration protocol
+- `docs/stream-json-protocol.md` — Claude CLI integration protocol (NDJSON, spawn flags, permission flow)
+- `docs/OPENCODE-INTEGRATION.md` — OpenCode integration (HTTP REST + SSE, shared server, opencode.json permissions)
 - `docs/FEATURES.md` — comprehensive feature reference
 - `docs/PR-REVIEW-WEBHOOK.md` — PR review webhook flow and configuration
 - `docs/PROVIDER-HEALTH-BACKLOG.md` — provider health tracking + retry backlog for webhook reviews

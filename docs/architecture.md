@@ -104,6 +104,10 @@ CodingProcess (interface)
 
 Both emit identical `ClaudeProcessEvents`, so `SessionManager` is provider-agnostic.
 
+Detailed protocol docs:
+- Claude CLI: [stream-json-protocol.md](./stream-json-protocol.md) — NDJSON spawn flags, stdin/stdout events, permission flow
+- OpenCode: [OPENCODE-INTEGRATION.md](./OPENCODE-INTEGRATION.md) — shared server, SSE events, `opencode.json` permissions, HTTP API
+
 ## Permission Modes
 
 | Mode | Behavior |

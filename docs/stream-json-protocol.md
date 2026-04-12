@@ -1,6 +1,8 @@
 # Claude Code Stream-JSON Protocol
 
-How Codekin spawns and communicates with Claude Code CLI sessions over the stream-json protocol.
+How Codekin spawns and communicates with Claude Code CLI sessions over the stream-json protocol. This covers the `ClaudeProcess` implementation in `server/claude-process.ts`.
+
+For OpenCode integration (HTTP REST + SSE), see [OPENCODE-INTEGRATION.md](./OPENCODE-INTEGRATION.md). Both providers implement the same `CodingProcess` interface — see [architecture.md](./architecture.md#provider-architecture) for the shared abstraction.
 
 ## Spawning
 
