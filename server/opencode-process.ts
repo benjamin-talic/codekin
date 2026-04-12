@@ -275,6 +275,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private reasoningBuffer = ''
   /** Whether we've already emitted a thinking summary from reasoning deltas. */
   private emittedReasoningSummary = false
+  /** Whether we're currently inside a <think> block in streamed text deltas. */
+  private insideThinkTag = false
+  /** Buffer for accumulating text inside <think> tags during streaming. */
+  private thinkTagBuffer = ''
 
   constructor(workingDir: string, opts?: Partial<OpenCodeProcessOptions>) {
     super()
@@ -467,9 +471,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       this.deltaBufferFlushed = true
       if (this.lastUserInput && this.deltaBuffer.startsWith(this.lastUserInput)) {
         const remainder = this.deltaBuffer.slice(this.lastUserInput.length)
-        if (remainder) this.emit('text', remainder)
+        if (remainder) { const clean = this.stripThinkTags(remainder); if (clean) this.emit('text', clean) }
       } else {
-        this.emit('text', this.deltaBuffer)
+        const clean = this.stripThinkTags(this.deltaBuffer)
+        if (clean) this.emit('text', clean)
       }
       this.deltaBuffer = ''
     }
@@ -496,15 +501,19 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
               this.deltaBufferFlushed = true
               if (this.deltaBuffer.startsWith(this.lastUserInput)) {
                 const remainder = this.deltaBuffer.slice(this.lastUserInput.length)
-                if (remainder) this.emit('text', remainder)
+                if (remainder) { const clean = this.stripThinkTags(remainder); if (clean) this.emit('text', clean) }
               } else {
-                this.emit('text', this.deltaBuffer)
+                const clean = this.stripThinkTags(this.deltaBuffer)
+                if (clean) this.emit('text', clean)
               }
               this.deltaBuffer = ''
             }
             // Still buffering — don't emit yet
           } else {
-            this.emit('text', delta)
+            // Strip <think>...</think> tags — some models (e.g. Kimi) embed
+            // chain-of-thought reasoning in the text output using these tags.
+            const clean = this.stripThinkTags(delta)
+            if (clean) this.emit('text', clean)
           }
         } else if (field === 'reasoning' && delta) {
           // Accumulate reasoning deltas and emit a thinking summary once we
@@ -543,6 +552,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
               if (this.lastUserInput && text.startsWith(this.lastUserInput)) {
                 text = text.slice(this.lastUserInput.length)
               }
+              // Strip <think>...</think> blocks from full text
+              text = OpenCodeProcess.stripThinkTagsFull(text)
               if (text) this.emit('text', text)
             }
             break
@@ -737,6 +748,67 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   }
 
   /**
+   * Strip `<think>...</think>` tags from text content. Some models (e.g. Kimi)
+   * embed chain-of-thought reasoning in the text output using these tags rather
+   * than using a separate reasoning/thinking field.
+   * Returns the text with think blocks removed; thinking content is routed to
+   * the thinking summary emitter.
+   */
+  private stripThinkTags(text: string): string {
+    // Fast path: no think tags at all
+    if (!text.includes('<think') && !text.includes('</think') && !this.insideThinkTag) {
+      return text
+    }
+
+    let result = ''
+    let i = 0
+    while (i < text.length) {
+      if (this.insideThinkTag) {
+        const closeIdx = text.indexOf('</think>', i)
+        if (closeIdx === -1) {
+          // Still inside think block, buffer the rest
+          this.thinkTagBuffer += text.slice(i)
+          i = text.length
+        } else {
+          this.thinkTagBuffer += text.slice(i, closeIdx)
+          this.insideThinkTag = false
+          // Emit thinking summary from accumulated think content
+          if (this.thinkTagBuffer.length > 20 && !this.emittedReasoningSummary) {
+            this.emittedReasoningSummary = true
+            const match = this.thinkTagBuffer.match(/^(.+?[.!?\n])/)
+            const summary = match && match[1].length <= 120
+              ? match[1].replace(/\n/g, ' ').trim()
+              : this.thinkTagBuffer.slice(0, 80).trim()
+            this.emit('thinking', summary)
+          }
+          this.thinkTagBuffer = ''
+          i = closeIdx + '</think>'.length
+        }
+      } else {
+        const openIdx = text.indexOf('<think>', i)
+        if (openIdx === -1) {
+          result += text.slice(i)
+          i = text.length
+        } else {
+          result += text.slice(i, openIdx)
+          this.insideThinkTag = true
+          i = openIdx + '<think>'.length
+        }
+      }
+    }
+    return result
+  }
+
+  /**
+   * Strip `<think>...</think>` blocks from a complete text string (non-streaming).
+   * Returns the text with all think blocks removed.
+   */
+  private static stripThinkTagsFull(text: string): string {
+    // Remove complete <think>...</think> blocks (including multiline)
+    return text.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trimStart()
+  }
+
+  /**
    * Detect TodoWrite/TaskCreate/TaskUpdate tool calls and emit todo_update events.
    * Mirrors the task-tracking logic in ClaudeProcess.handleTaskTool().
    */
@@ -804,6 +876,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     this.deltaBufferFlushed = false
     this.reasoningBuffer = ''
     this.emittedReasoningSummary = false
+    this.insideThinkTag = false
+    this.thinkTagBuffer = ''
 
     const baseUrl = `http://localhost:${serverState.port}`
     // Parse [Attached files: ...] prefix and convert image paths to proper parts.

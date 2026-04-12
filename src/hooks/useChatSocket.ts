@@ -433,8 +433,12 @@ export function useChatSocket({
   }, [send])
 
   const createSession = useCallback((name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode, provider?: import('../types').CodingProvider) => {
-    send({ type: 'create_session', name, workingDir, useWorktree, permissionMode, provider })
-  }, [send])
+    // Include the current model so the server starts with the right model
+    // immediately, avoiding a "default model" message followed by a second
+    // "actual model" message when setModel fires later.
+    const model = currentModel ?? undefined
+    send({ type: 'create_session', name, workingDir, model, useWorktree, permissionMode, provider })
+  }, [send, currentModel])
 
   const sendInput = useCallback((data: string, displayText?: string) => {
     send({ type: 'input', data, ...(displayText ? { displayText } : {}) } as WsClientMessage)
