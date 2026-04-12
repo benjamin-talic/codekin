@@ -48,6 +48,32 @@ export function createWebhookRouter(
     res.json({ config: webhookHandler.getConfig() })
   })
 
+  /**
+   * Provider health + backlog snapshot.
+   *
+   * Returns the last known status for each review provider (`claude` and
+   * `opencode`) plus the current retry backlog size. Provider health is
+   * observational only — routing never short-circuits on unhealthy state.
+   * A provider flips back to healthy on the next successful review.
+   *
+   * Response shape:
+   *   {
+   *     claude:   { status, reason?, detectedAt?, lastError?, lastSuccessAt? },
+   *     opencode: { status, reason?, detectedAt?, lastError?, lastSuccessAt? },
+   *     backlog:  <number of queued retries>
+   *   }
+   */
+  router.get('/api/webhooks/health', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const providers = webhookHandler.getProviderHealth()
+    res.json({
+      claude: providers.claude,
+      opencode: providers.opencode,
+      backlog: webhookHandler.getBacklogSize(),
+    })
+  })
+
   // --- Stepflow management endpoints ---
 
   router.get('/api/stepflow/events', (req, res) => {

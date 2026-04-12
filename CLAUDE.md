@@ -54,3 +54,5 @@ When generating audit reports, health checks, or any recurring assessment:
 - `docs/API-REFERENCE.md` — REST and WebSocket API
 - `docs/stream-json-protocol.md` — Claude CLI integration protocol
 - `docs/FEATURES.md` — comprehensive feature reference
+- `docs/PR-REVIEW-WEBHOOK.md` — PR review webhook flow and configuration
+- `docs/PROVIDER-HEALTH-BACKLOG.md` — provider health tracking + retry backlog for webhook reviews

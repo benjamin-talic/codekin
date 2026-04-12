@@ -13,6 +13,8 @@ const mockFetchPrCommits = vi.hoisted(() => vi.fn(async () => '- abc1234: fix bu
 const mockFetchPrReviewComments = vi.hoisted(() => vi.fn(async () => ''))
 const mockFetchPrReviews = vi.hoisted(() => vi.fn(async () => ''))
 const mockFetchExistingReviewComment = vi.hoisted(() => vi.fn(async () => undefined as number | undefined))
+const mockFetchPrState = vi.hoisted(() => vi.fn(async (_repo: string, _prNumber: number): Promise<'open' | 'closed' | undefined> => 'open'))
+const mockPostProviderUnavailableComment = vi.hoisted(() => vi.fn(async () => {}))
 const mockBuildPrReviewPrompt = vi.hoisted(() => vi.fn(() => 'mock pr review prompt'))
 const mockLoadPrCache = vi.hoisted(() => vi.fn(() => undefined))
 const mockEnsureCacheDir = vi.hoisted(() => vi.fn(() => '/home/user/.codekin/pr-cache/owner/repo/pr-42.json'))
@@ -72,6 +74,8 @@ vi.mock('./webhook-pr-github.js', () => ({
   fetchPrReviewComments: mockFetchPrReviewComments,
   fetchPrReviews: mockFetchPrReviews,
   fetchExistingReviewComment: mockFetchExistingReviewComment,
+  fetchPrState: mockFetchPrState,
+  postProviderUnavailableComment: mockPostProviderUnavailableComment,
   REVIEW_COMMENT_MARKER: '<!-- codekin-review -->',
 }))
 
@@ -1580,6 +1584,193 @@ describe('WebhookHandler', () => {
         expect(event?.status).toBe('error')
         expect(event?.error).toContain('Max concurrent')
         expect(sessions.create).not.toHaveBeenCalled()
+      })
+    })
+
+    describe('provider health + backlog on failure', () => {
+      beforeEach(() => {
+        mockPostProviderUnavailableComment.mockClear()
+        mockFetchPrState.mockClear()
+        mockFetchPrState.mockImplementation(async () => 'open' as const)
+      })
+
+      async function triggerSessionAndGetSessionId(): Promise<string> {
+        handler.shutdown()
+        // Clear stale callback subscriptions from the shut-down handler so the
+        // fresh handler's callbacks sit at index 0. Without this, the fake
+        // SessionManager accumulates callbacks and `_exitCallbacks[0]` would
+        // fire the dead handler.
+        sessions._exitCallbacks.length = 0
+        sessions._errorCallbacks.length = 0
+        sessions._resultCallbacks.length = 0
+        handler = new WebhookHandler(makeConfig({ prDebounceMs: 0 }), sessions)
+        await handler.checkHealth()
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+        return result.body.sessionId as string
+      }
+
+      it('rate_limit error marks provider unhealthy, posts comment, enqueues backlog (fixed mode)', async () => {
+        const sessionId = await triggerSessionAndGetSessionId()
+        const event = handler.getEvents().find(e => e.sessionId === sessionId)
+        expect(event?.status).toBe('session_created')
+
+        // Fire error event with rate-limit text, then fire exit with non-zero code.
+        for (const cb of sessions._errorCallbacks) {
+          cb(sessionId, 'API Error: 429 rate limit exceeded')
+        }
+        sessions._exitCallbacks[0](sessionId, 1, null, false)
+
+        // Event should be marked 'error' with backlog reason in the message.
+        const e = handler.getEvents().find(ev => ev.sessionId === sessionId)
+        expect(e?.status).toBe('error')
+        expect(e?.error).toContain('rate_limit')
+        expect(e?.error).toContain('claude')
+        expect(e?.error).toContain('backlogged')
+
+        // Provider health should show claude as unhealthy.
+        const health = handler.getProviderHealth()
+        expect(health.claude.status).toBe('unhealthy')
+        expect(health.claude.reason).toBe('rate_limit')
+        expect(health.claude.lastError).toContain('429')
+
+        // Backlog should have one entry.
+        expect(handler.getBacklogSize()).toBe(1)
+
+        // PR comment should have been posted.
+        expect(mockPostProviderUnavailableComment).toHaveBeenCalledOnce()
+        const postArgs = mockPostProviderUnavailableComment.mock.calls[0][0] as Record<string, unknown>
+        expect(postArgs.reason).toBe('rate_limit')
+        expect(postArgs.providerDisplay).toContain('Claude')
+      })
+
+      it('auth_failure error marks provider unhealthy with auth reason', async () => {
+        const sessionId = await triggerSessionAndGetSessionId()
+
+        for (const cb of sessions._errorCallbacks) {
+          cb(sessionId, '401 Unauthorized: invalid api key')
+        }
+        sessions._exitCallbacks[0](sessionId, 1, null, false)
+
+        const health = handler.getProviderHealth()
+        expect(health.claude.status).toBe('unhealthy')
+        expect(health.claude.reason).toBe('auth_failure')
+
+        expect(mockPostProviderUnavailableComment).toHaveBeenCalledWith(
+          expect.objectContaining({ reason: 'auth_failure' }),
+        )
+      })
+
+      it('"other" errors skip backlog and mark event as error without posting a comment', async () => {
+        const sessionId = await triggerSessionAndGetSessionId()
+
+        for (const cb of sessions._errorCallbacks) {
+          cb(sessionId, 'Connection refused: network error')
+        }
+        sessions._exitCallbacks[0](sessionId, 1, null, false)
+
+        // Event marked error but not backlogged.
+        expect(handler.getBacklogSize()).toBe(0)
+        // No PR comment posted.
+        expect(mockPostProviderUnavailableComment).not.toHaveBeenCalled()
+        // Provider health should NOT be unhealthy (generic failures don't flip health).
+        const health = handler.getProviderHealth()
+        expect(health.claude.status).toBe('healthy')
+      })
+
+      it('split mode fallback: first provider failure spins up second provider', async () => {
+        handler.shutdown()
+        sessions._exitCallbacks.length = 0
+        sessions._errorCallbacks.length = 0
+        sessions._resultCallbacks.length = 0
+        // Seed Math.random so split mode picks claude first, then verify
+        // fallback creates a second session with opencode.
+        vi.spyOn(Math, 'random').mockReturnValue(0.1)  // < 0.5 → claude
+        handler = new WebhookHandler(makeConfig({ prDebounceMs: 0, prReviewProvider: 'split' }), sessions)
+        await handler.checkHealth()
+
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        // First session should be claude.
+        const firstCall = sessions.create.mock.calls[0]
+        expect(firstCall?.[2]).toEqual(expect.objectContaining({ provider: 'claude' }))
+
+        const firstSessionId = firstCall?.[2]?.id as string
+
+        // Simulate claude failing with rate limit.
+        for (const cb of sessions._errorCallbacks) {
+          cb(firstSessionId, 'rate limit exceeded')
+        }
+        sessions._exitCallbacks[0](firstSessionId, 1, null, false)
+        await vi.advanceTimersByTimeAsync(100)
+
+        // A second session should have been created using opencode.
+        expect(sessions.create.mock.calls.length).toBe(2)
+        const secondCall = sessions.create.mock.calls[1]
+        expect(secondCall?.[2]).toEqual(expect.objectContaining({ provider: 'opencode' }))
+
+        // Backlog should still be empty — fallback was the first response, not a backlog.
+        expect(handler.getBacklogSize()).toBe(0)
+      })
+
+      it('split mode: both providers failing ends in backlog', async () => {
+        handler.shutdown()
+        sessions._exitCallbacks.length = 0
+        sessions._errorCallbacks.length = 0
+        sessions._resultCallbacks.length = 0
+        vi.spyOn(Math, 'random').mockReturnValue(0.1)
+        handler = new WebhookHandler(makeConfig({ prDebounceMs: 0, prReviewProvider: 'split' }), sessions)
+        await handler.checkHealth()
+
+        const payload = makePrPayload()
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        // Fail claude session (first)
+        const firstSessionId = sessions.create.mock.calls[0]?.[2]?.id as string
+        for (const cb of sessions._errorCallbacks) {
+          cb(firstSessionId, 'rate limit on claude')
+        }
+        sessions._exitCallbacks[0](firstSessionId, 1, null, false)
+        await vi.advanceTimersByTimeAsync(100)
+
+        // Fail opencode session (fallback)
+        expect(sessions.create.mock.calls.length).toBe(2)
+        const secondSessionId = sessions.create.mock.calls[1]?.[2]?.id as string
+        for (const cb of sessions._errorCallbacks) {
+          cb(secondSessionId, 'rate limit on opencode')
+        }
+        sessions._exitCallbacks[0](secondSessionId, 1, null, false)
+        await vi.advanceTimersByTimeAsync(100)
+
+        // Both providers now unhealthy.
+        const health = handler.getProviderHealth()
+        expect(health.claude.status).toBe('unhealthy')
+        expect(health.opencode.status).toBe('unhealthy')
+
+        // Backlogged with failedProvider=both.
+        expect(handler.getBacklogSize()).toBe(1)
+        // Comment was posted for the final fallback failure.
+        expect(mockPostProviderUnavailableComment).toHaveBeenCalled()
+      })
+
+      it('successful review marks provider healthy', async () => {
+        const sessionId = await triggerSessionAndGetSessionId()
+
+        // Fire result (turn completed successfully)
+        for (const cb of sessions._resultCallbacks) {
+          cb(sessionId, false)
+        }
+
+        const health = handler.getProviderHealth()
+        expect(health.claude.status).toBe('healthy')
+        expect(health.claude.lastSuccessAt).toBeDefined()
       })
     })
   })
