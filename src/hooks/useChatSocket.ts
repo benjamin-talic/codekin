@@ -431,12 +431,12 @@ export function useChatSocket({
   }, [send])
 
   const createSession = useCallback((name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode, provider?: import('../types').CodingProvider) => {
-    // Include the current model so the server starts with the right model
-    // immediately, avoiding a "default model" message followed by a second
-    // "actual model" message when setModel fires later.
-    const model = currentModel ?? undefined
-    send({ type: 'create_session', name, workingDir, model, useWorktree, permissionMode, provider })
-  }, [send, currentModel])
+    // Don't pass a model — the provider-specific model validation effect
+    // will call setModel with the correct provider-appropriate model after
+    // the session is created. Passing a cross-provider model (e.g. a Claude
+    // model to an OpenCode session) causes a spurious model message.
+    send({ type: 'create_session', name, workingDir, useWorktree, permissionMode, provider })
+  }, [send])
 
   const sendInput = useCallback((data: string, displayText?: string) => {
     send({ type: 'input', data, ...(displayText ? { displayText } : {}) } as WsClientMessage)
