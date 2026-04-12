@@ -601,6 +601,11 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       baseBranch: pr.base.ref,
     })
 
+    // --- Evict any backlogged retry for this PR immediately ---
+    // A new event supersedes any pending retry. Do this BEFORE debounce so
+    // the retry worker can't pick up a stale entry during the debounce window.
+    this.backlog.removeByPr(payload.repository.full_name, pr.number)
+
     // --- Debounce: wait before processing to coalesce rapid events ---
     if (debounceMs > 0) {
       const webhookEvent = makeEvent('debounced')
@@ -1150,13 +1155,18 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         newEvent.sessionId = newSessionId
         this.recordEvent(newEvent)
 
-        // Remove the entry on success. If processPullRequestAsync throws
-        // before creating a session, the entry stays with its already-bumped
-        // retryAfter — it will be picked up again next cycle.
+        // Only remove the backlog entry when a session was actually created.
+        // processPullRequestAsync resolves normally on pre-session failures
+        // (workspace errors, context fetch failures) — it catches those
+        // internally and marks the event as 'error'. In that case the entry
+        // stays with its already-bumped retryAfter for the next cycle.
         // If the session IS created but later fails with rate_limit/auth_failure,
         // handleReviewFailure creates a fresh backlog entry.
         this.processPullRequestAsync(entry.payload, newEvent, newSessionId).then(() => {
-          this.backlog.remove(entry.id)
+          const status = this.getEvent(newEvent.id)?.status
+          if (status === 'session_created' || status === 'completed') {
+            this.backlog.remove(entry.id)
+          }
         }).catch(err => {
           console.error('[webhook-backlog] Retry session error:', err)
           if (this.getEvent(newEvent.id)?.status !== 'superseded') {
@@ -1398,9 +1408,6 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     }
 
-    // Evict any backlogged retry for this PR — the new event supersedes it.
-    // If the new event also fails, it will create its own backlog entry.
-    this.backlog.removeByPr(repo, prNumber)
   }
 
   /**
