@@ -50,7 +50,6 @@ import {
   fetchPrReviews,
   fetchExistingReviewComment,
   fetchPrState,
-  fetchPrHeadSha,
   postProviderUnavailableComment,
 } from './webhook-pr-github.js'
 import { buildPrompt } from './webhook-prompt.js'
@@ -1119,17 +1118,6 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
           continue
         }
 
-        // Check if the PR has moved on since this entry was backlogged.
-        // If new commits landed, a `synchronize` event will have been
-        // processed (or is in the debounce queue), so retrying the old SHA
-        // would produce a stale review.
-        const currentSha = await fetchPrHeadSha(entry.repo, entry.prNumber)
-        if (currentSha && currentSha !== entry.headSha) {
-          console.log(`[webhook-backlog] Dropping ${entry.id} — PR ${entry.repo}#${entry.prNumber} HEAD moved from ${entry.headSha.slice(0, 8)} to ${currentSha.slice(0, 8)}`)
-          this.backlog.remove(entry.id)
-          continue
-        }
-
         // Bump retryAfter immediately so subsequent ticks don't pick up the
         // same entry while the async retry is in progress. If the retry
         // succeeds, the entry gets removed; if it fails pre-session, the
@@ -1409,6 +1397,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         this.sessions.delete(oldEvent.sessionId)
       }
     }
+
+    // Evict any backlogged retry for this PR — the new event supersedes it.
+    // If the new event also fails, it will create its own backlog entry.
+    this.backlog.removeByPr(repo, prNumber)
   }
 
   /**

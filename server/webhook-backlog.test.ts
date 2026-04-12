@@ -269,6 +269,31 @@ describe('BacklogManager', () => {
     })
   })
 
+  describe('removeByPr', () => {
+    it('removes all entries for a given PR', () => {
+      const mgr = new BacklogManager()
+      mgr.enqueue({ repo: 'owner/repo', prNumber: 42, headSha: 'a', payload: samplePayload(), reason: 'rate_limit', failedProvider: 'claude' })
+      mgr.enqueue({ repo: 'owner/repo', prNumber: 42, headSha: 'b', payload: samplePayload(), reason: 'auth_failure', failedProvider: 'opencode' })
+      mgr.enqueue({ repo: 'owner/repo', prNumber: 99, headSha: 'c', payload: samplePayload(), reason: 'rate_limit', failedProvider: 'claude' })
+
+      const removed = mgr.removeByPr('owner/repo', 42)
+      expect(removed).toBe(2)
+      expect(mgr.size()).toBe(1)
+      expect(mgr.all()[0].prNumber).toBe(99)
+    })
+
+    it('returns 0 and does not flush when no entries match', () => {
+      const mgr = new BacklogManager()
+      mgr.enqueue({ repo: 'owner/repo', prNumber: 1, headSha: 'a', payload: samplePayload(), reason: 'rate_limit', failedProvider: 'claude' })
+      vi.mocked(writeFileSync).mockClear()
+
+      const removed = mgr.removeByPr('owner/repo', 999)
+      expect(removed).toBe(0)
+      expect(mgr.size()).toBe(1)
+      expect(writeFileSync).not.toHaveBeenCalled()
+    })
+  })
+
   describe('bumpRetry', () => {
     it('increments retryCount and pushes retryAfter forward', () => {
       const mgr = new BacklogManager()

@@ -102,6 +102,23 @@ export class BacklogManager {
   }
 
   /**
+   * Remove all entries for a given PR. Called when a new event arrives for the
+   * same PR — the new event supersedes the backlogged one, matching the same
+   * supersede/dedup pattern used for active sessions and debounced events.
+   * Returns the number of entries removed.
+   */
+  removeByPr(repo: string, prNumber: number): number {
+    const before = this.entries.length
+    this.entries = this.entries.filter(e => !(e.repo === repo && e.prNumber === prNumber))
+    const removed = before - this.entries.length
+    if (removed > 0) {
+      this.flushToDisk()
+      console.log(`[webhook-backlog] Evicted ${removed} entry/entries for ${repo}#${prNumber} — superseded by new event`)
+    }
+    return removed
+  }
+
+  /**
    * Reschedule an entry for another retry round. Increments `retryCount`
    * and pushes `retryAfter` forward by `retryDelayMs`. No-op if id unknown.
    * Called by the retry worker when the new attempt also fails.
