@@ -238,6 +238,29 @@ export async function fetchPrState(repo: string, prNumber: number): Promise<'ope
 }
 
 /**
+ * Fetch the current HEAD SHA of a pull request.
+ * Used by the backlog retry worker to detect stale entries — if the PR
+ * has moved on since the backlogged SHA, the retry should be skipped
+ * (a `synchronize` event for the new SHA will have been processed).
+ *
+ * Returns the SHA string, or `undefined` on failure.
+ */
+export async function fetchPrHeadSha(repo: string, prNumber: number): Promise<string | undefined> {
+  try {
+    const raw = await ghRunner([
+      'api',
+      `/repos/${repo}/pulls/${prNumber}`,
+      '--jq', '.head.sha',
+    ])
+    const sha = raw.trim()
+    return sha || undefined
+  } catch (err) {
+    console.warn(`fetchPrHeadSha: failed for ${repo} PR #${prNumber}:`, err)
+    return undefined
+  }
+}
+
+/**
  * Post or update the Codekin review comment on a PR with a "provider
  * unavailable" status message. Used when a review session fails due to
  * rate limits or auth failures — the comment tells the PR author that

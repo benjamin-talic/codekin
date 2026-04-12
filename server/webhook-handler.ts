@@ -50,6 +50,7 @@ import {
   fetchPrReviews,
   fetchExistingReviewComment,
   fetchPrState,
+  fetchPrHeadSha,
   postProviderUnavailableComment,
 } from './webhook-pr-github.js'
 import { buildPrompt } from './webhook-prompt.js'
@@ -1118,7 +1119,23 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
           continue
         }
 
-        // PR is still open — re-fire the event.
+        // Check if the PR has moved on since this entry was backlogged.
+        // If new commits landed, a `synchronize` event will have been
+        // processed (or is in the debounce queue), so retrying the old SHA
+        // would produce a stale review.
+        const currentSha = await fetchPrHeadSha(entry.repo, entry.prNumber)
+        if (currentSha && currentSha !== entry.headSha) {
+          console.log(`[webhook-backlog] Dropping ${entry.id} — PR ${entry.repo}#${entry.prNumber} HEAD moved from ${entry.headSha.slice(0, 8)} to ${currentSha.slice(0, 8)}`)
+          this.backlog.remove(entry.id)
+          continue
+        }
+
+        // Bump retryAfter immediately so subsequent ticks don't pick up the
+        // same entry while the async retry is in progress. If the retry
+        // succeeds, the entry gets removed; if it fails pre-session, the
+        // bumped retryAfter stands as the next attempt window.
+        this.backlog.bumpRetry(entry.id)
+
         console.log(`[webhook-backlog] Retrying ${entry.repo}#${entry.prNumber} (attempt ${entry.retryCount + 1})`)
 
         // Build a fresh WebhookEvent for the retry.
@@ -1145,18 +1162,15 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         newEvent.sessionId = newSessionId
         this.recordEvent(newEvent)
 
-        // Keep the backlog entry until the session is definitely established.
-        // Remove on success; bump retryAfter on pre-session failure so the
-        // entry isn't lost if processPullRequestAsync throws before creating
-        // a session (workspace failure, context fetch error, etc.).
+        // Remove the entry on success. If processPullRequestAsync throws
+        // before creating a session, the entry stays with its already-bumped
+        // retryAfter — it will be picked up again next cycle.
         // If the session IS created but later fails with rate_limit/auth_failure,
-        // handleReviewFailure will create a fresh backlog entry — the old one
-        // was already removed so there's no duplicate.
+        // handleReviewFailure creates a fresh backlog entry.
         this.processPullRequestAsync(entry.payload, newEvent, newSessionId).then(() => {
           this.backlog.remove(entry.id)
         }).catch(err => {
           console.error('[webhook-backlog] Retry session error:', err)
-          this.backlog.bumpRetry(entry.id)
           if (this.getEvent(newEvent.id)?.status !== 'superseded') {
             this.updateEventStatus(newEvent.id, 'error', String(err))
           }

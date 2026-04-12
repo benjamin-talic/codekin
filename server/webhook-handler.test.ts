@@ -14,6 +14,7 @@ const mockFetchPrReviewComments = vi.hoisted(() => vi.fn(async () => ''))
 const mockFetchPrReviews = vi.hoisted(() => vi.fn(async () => ''))
 const mockFetchExistingReviewComment = vi.hoisted(() => vi.fn(async () => undefined as number | undefined))
 const mockFetchPrState = vi.hoisted(() => vi.fn(async (_repo: string, _prNumber: number): Promise<'open' | 'closed' | undefined> => 'open'))
+const mockFetchPrHeadSha = vi.hoisted(() => vi.fn(async (_repo: string, _prNumber: number): Promise<string | undefined> => undefined))
 const mockPostProviderUnavailableComment = vi.hoisted(() => vi.fn(async () => {}))
 const mockBuildPrReviewPrompt = vi.hoisted(() => vi.fn(() => 'mock pr review prompt'))
 const mockLoadPrCache = vi.hoisted(() => vi.fn(() => undefined))
@@ -75,6 +76,7 @@ vi.mock('./webhook-pr-github.js', () => ({
   fetchPrReviews: mockFetchPrReviews,
   fetchExistingReviewComment: mockFetchExistingReviewComment,
   fetchPrState: mockFetchPrState,
+  fetchPrHeadSha: mockFetchPrHeadSha,
   postProviderUnavailableComment: mockPostProviderUnavailableComment,
   REVIEW_COMMENT_MARKER: '<!-- codekin-review -->',
 }))

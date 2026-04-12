@@ -1,6 +1,6 @@
 /** Tests for PR-specific GitHub API helpers — verifies diff/files/commits fetching and graceful degradation. */
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews, fetchExistingReviewComment, fetchPrState, postProviderUnavailableComment, REVIEW_COMMENT_MARKER, _setGhRunner, _resetGhRunner } from './webhook-pr-github.js'
+import { fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews, fetchExistingReviewComment, fetchPrState, fetchPrHeadSha, postProviderUnavailableComment, REVIEW_COMMENT_MARKER, _setGhRunner, _resetGhRunner } from './webhook-pr-github.js'
 
 describe('fetchPrDiff', () => {
   afterEach(() => {
@@ -250,6 +250,41 @@ describe('fetchPrState', () => {
     expect(capturedArgs).toContain('/repos/owner/repo/pulls/7')
     expect(capturedArgs).toContain('--jq')
     expect(capturedArgs).toContain('.state')
+  })
+})
+
+describe('fetchPrHeadSha', () => {
+  afterEach(() => {
+    _resetGhRunner()
+  })
+
+  it('returns the HEAD SHA for a PR', async () => {
+    _setGhRunner(async () => 'abc123def456\n')
+    const result = await fetchPrHeadSha('owner/repo', 42)
+    expect(result).toBe('abc123def456')
+  })
+
+  it('returns undefined on error', async () => {
+    _setGhRunner(async () => { throw new Error('api error') })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const result = await fetchPrHeadSha('owner/repo', 42)
+    expect(result).toBeUndefined()
+    warnSpy.mockRestore()
+  })
+
+  it('returns undefined for empty response', async () => {
+    _setGhRunner(async () => '\n')
+    const result = await fetchPrHeadSha('owner/repo', 42)
+    expect(result).toBeUndefined()
+  })
+
+  it('passes correct API path and --jq flag', async () => {
+    let capturedArgs: string[] = []
+    _setGhRunner(async (args) => { capturedArgs = args; return 'deadbeef' })
+    await fetchPrHeadSha('owner/repo', 7)
+    expect(capturedArgs).toContain('/repos/owner/repo/pulls/7')
+    expect(capturedArgs).toContain('--jq')
+    expect(capturedArgs).toContain('.head.sha')
   })
 })
 
