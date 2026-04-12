@@ -53,8 +53,22 @@ export function createSessionRouter(
   router.get('/api/opencode/models', async (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-    const workingDir = (req.query.workingDir as string) || osHomedir()
-    const result = await fetchOpenCodeModels(workingDir)
+    const rawDir = (req.query.workingDir as string) || osHomedir()
+
+    // Bounds-check: workingDir must be under home or REPOS_ROOT (same as /api/sessions/create)
+    const home = osHomedir()
+    const allowedRoots = [home, REPOS_ROOT]
+    let resolvedDir: string
+    try {
+      resolvedDir = fsRealpathSync(pathResolve(rawDir))
+    } catch {
+      return res.status(400).json({ error: 'workingDir could not be resolved (path does not exist or is inaccessible)' })
+    }
+    if (!allowedRoots.some(root => resolvedDir === root || resolvedDir.startsWith(root + '/'))) {
+      return res.status(403).json({ error: 'workingDir is outside allowed directories' })
+    }
+
+    const result = await fetchOpenCodeModels(resolvedDir)
     res.json(result)
   })
 

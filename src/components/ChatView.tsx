@@ -213,9 +213,12 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
               return <a href={safeHref} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
             },
             img({ src, alt, ...props }) {
+              // Only allow https: and data: URIs to prevent tracking beacons and arbitrary protocol access
+              const safeSrc = src && /^(https:|data:image\/)/i.test(src) ? src : undefined
+              if (!safeSrc) return <span className="text-neutral-5">[image blocked: untrusted source]</span>
               return (
                 <img
-                  src={src}
+                  src={safeSrc}
                   alt={alt || 'Image'}
                   className="max-w-full max-h-96 rounded-lg border border-neutral-8 my-2"
                   loading="lazy"

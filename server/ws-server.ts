@@ -195,6 +195,12 @@ const commitEventState: { handler: CommitEventHandler | undefined } = { handler:
 // ---------------------------------------------------------------------------
 const app = express()
 
+// Trust X-Forwarded-For headers when behind a reverse proxy so that
+// req.ip returns the real client IP for rate limiters and logging.
+if (TRUST_PROXY) {
+  app.set('trust proxy', true)
+}
+
 // In Docker / standalone mode (FRONTEND_DIST set), the server is reached directly without nginx.
 // nginx normally strips the /cc prefix before proxying; we replicate that here so the frontend
 // (which hardcodes BASE = '/cc') works against the Node server without modification.
