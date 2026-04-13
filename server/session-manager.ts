@@ -92,6 +92,8 @@ export interface CreateSessionOptions {
   addDirs?: string[]
   /** AI provider to use for this session. Defaults to 'claude'. */
   provider?: import('./coding-process.js').CodingProvider
+  /** When true, do NOT prepend Bash(git:*) to Claude's allowedTools. */
+  skipDefaultBashGit?: boolean
 }
 
 
@@ -289,6 +291,7 @@ export class SessionManager {
       permissionMode: options?.permissionMode,
       allowedTools: options?.allowedTools,
       addDirs: options?.addDirs,
+      skipDefaultBashGit: options?.skipDefaultBashGit,
       claudeProcess: null,
       clients: new Set(),
       outputHistory: [],

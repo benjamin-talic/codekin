@@ -20,7 +20,7 @@
 import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import type { CreateSessionOptions, SessionManager } from './session-manager.js'
 import { verifyHmacSignature } from './crypto-utils.js'
 import type { WsServerMessage } from './types.js'
@@ -793,7 +793,60 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       groupDir,
       provider: reviewProvider,
       model: reviewModel,
-      allowedTools: ['Bash(git:*)', 'Bash(gh:*)'],
+    }
+
+    if (reviewProvider === 'claude') {
+      // Narrowed allowedTools: read-only git, PR-review-specific gh,
+      // Write for cache, context7 MCP for library docs, no WebFetch/WebSearch.
+      sessionOptions.skipDefaultBashGit = true
+      sessionOptions.allowedTools = [
+        // git read-only
+        'Bash(git status:*)', 'Bash(git diff:*)', 'Bash(git log:*)',
+        'Bash(git show:*)', 'Bash(git blame:*)', 'Bash(git rev-parse:*)',
+        'Bash(git ls-files:*)', 'Bash(git branch:*)', 'Bash(git config:*)',
+        // gh review-specific (Bash(gh api:*) is broader than OpenCode's
+        // per-endpoint patterns — prompt provides secondary deny layer)
+        'Bash(gh pr view:*)', 'Bash(gh pr diff:*)', 'Bash(gh pr review:*)',
+        'Bash(gh api:*)',
+        // file/cache write
+        'Write',
+        // library docs lookup
+        'mcp__plugin_context7_context7__resolve-library-id',
+        'mcp__plugin_context7_context7__query-docs',
+      ]
+      sessionOptions.addDirs = [dirname(cachePath)]
+    } else {
+      // OpenCode: workspace-local opencode.json with scoped permissions.
+      const opencodeConfig = {
+        $schema: 'https://opencode.ai/config.json',
+        permission: {
+          bash: {
+            '*': 'deny',
+            'gh pr view *': 'allow', 'gh pr diff *': 'allow', 'gh pr review *': 'allow',
+            'gh api repos/*/issues/*/comments': 'allow', 'gh api repos/*/issues/*/comments *': 'allow',
+            'gh api repos/*/issues/comments/*': 'allow', 'gh api repos/*/issues/comments/* *': 'allow',
+            'gh api repos/*/pulls/*/comments': 'allow', 'gh api repos/*/pulls/*/comments *': 'allow',
+            'gh api repos/*/pulls/*/reviews': 'allow', 'gh api repos/*/pulls/*/reviews *': 'allow',
+            'gh api repos/*/pulls/*/reviews/*': 'allow', 'gh api repos/*/pulls/*/reviews/* *': 'allow',
+            'gh api repos/*/pulls/*/reviews/*/dismissals': 'allow', 'gh api repos/*/pulls/*/reviews/*/dismissals *': 'allow',
+            'git status': 'allow', 'git status *': 'allow',
+            'git diff': 'allow', 'git diff *': 'allow',
+            'git log': 'allow', 'git log *': 'allow',
+            'git show': 'allow', 'git show *': 'allow',
+            'git blame *': 'allow', 'git rev-parse *': 'allow',
+            'git ls-files': 'allow', 'git ls-files *': 'allow',
+            'git branch': 'allow', 'git branch --show-current': 'allow',
+            'git config --get *': 'allow',
+          },
+          read: 'allow', edit: 'allow', write: 'allow', grep: 'allow',
+          webfetch: 'deny',
+          external_directory: { '*': 'deny', [dirname(cachePath) + '/**']: 'allow' },
+          doom_loop: 'deny',
+        },
+      }
+      writeFileSync(join(workspacePath, 'opencode.json'), JSON.stringify(opencodeConfig, null, 2))
+      console.log(`[webhook] Wrote opencode.json permissions config to ${workspacePath}`)
+      sessionOptions.permissionMode = 'bypassPermissions'
     }
 
     this.sessions.create(sessionName, workspacePath, sessionOptions)

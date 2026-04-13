@@ -62,6 +62,8 @@ export interface Session {
   allowedTools?: string[]
   /** Extra directories to grant Claude access to via --add-dir. */
   addDirs?: string[]
+  /** When true, do NOT prepend Bash(git:*) to Claude's allowedTools. */
+  skipDefaultBashGit?: boolean
   /** Number of auto-restarts since last cooldown reset. */
   restartCount: number
   lastRestartAt: number | null

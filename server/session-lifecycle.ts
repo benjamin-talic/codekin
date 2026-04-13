@@ -165,6 +165,7 @@ export class SessionLifecycle {
         resume,
         allowedTools: mergedAllowedTools,
         addDirs: session.addDirs,
+        skipDefaultBashGit: session.skipDefaultBashGit,
       })
     }
 
