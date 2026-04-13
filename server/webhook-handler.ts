@@ -98,6 +98,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   private reviewSessions = new Map<string, ReviewSessionInfo>()
   private sessionLastError = new Map<string, string>()
   private retryWorkerTimer: ReturnType<typeof setInterval> | null = null
+  /** Backlog entry IDs currently being retried — prevents double-processing if a worker tick overlaps. */
+  private retryInProgress = new Set<string>()
   private debounceFileConsumed = false
 
   constructor(config: FullWebhookConfig, sessions: SessionManager) {
@@ -121,6 +123,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       const event = this.getEvents().find(e => e.sessionId === sessionId && (e.status === 'session_created' || e.status === 'processing'))
       if (!event) {
         this.sessionLastError.delete(sessionId)
+        this.reviewSessions.delete(sessionId)
         return
       }
 
@@ -1037,8 +1040,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     if (ready.length === 0) return
 
     for (const entry of ready) {
+      if (this.retryInProgress.has(entry.id)) continue
+      this.retryInProgress.add(entry.id)
       try {
-        if (this.isAtSessionCap()) continue
+        if (this.isAtSessionCap()) { this.retryInProgress.delete(entry.id); continue }
 
         const state = await fetchPrState(entry.repo, entry.prNumber)
         if (state === 'closed') {
@@ -1078,6 +1083,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         })
       } catch (err) {
         console.error(`[webhook-backlog] Failed to process retry for ${entry.id}:`, err)
+      } finally {
+        this.retryInProgress.delete(entry.id)
       }
     }
   }
