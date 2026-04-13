@@ -435,8 +435,11 @@ function checkWsRateLimit(ip: string): boolean {
 wss.on('connection', (ws: WebSocket, req) => {
   // Validate Origin header to prevent cross-site WebSocket hijacking.
   // In production CORS_ORIGIN is always set; in dev we also accept no origin (CLI tools).
+  // In standalone mode (FRONTEND_DIST set), also accept the server's own origin since the
+  // frontend is served from the same port.
   const origin = req.headers.origin
-  if (origin && origin !== CORS_ORIGIN) {
+  const selfOrigin = FRONTEND_DIST ? `http://localhost:${port}` : null
+  if (origin && origin !== CORS_ORIGIN && origin !== selfOrigin) {
     ws.close(4003, 'Origin not allowed')
     return
   }
