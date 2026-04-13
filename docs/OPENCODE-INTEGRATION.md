@@ -232,7 +232,7 @@ Written to the workspace root before session creation. Evaluated in order — **
     "webfetch": "deny",
     "external_directory": {
       "*": "deny",
-      "/home/user/.codekin/pr-cache/**": "allow"
+      "<homedir>/.codekin/pr-cache/**": "allow"  // expanded from os.homedir() at write time
     },
     "doom_loop": "deny"
   }
