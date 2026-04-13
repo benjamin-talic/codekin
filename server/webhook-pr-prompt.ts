@@ -27,36 +27,62 @@ export interface PrPromptOptions {
 const CUSTOM_PROMPT_FILENAME = 'pr-review-prompt.md'
 
 /**
- * Attempt to load a custom review prompt from disk.
- * Returns the file contents if found, or undefined.
+ * Try to read a file and return its trimmed content, or undefined.
  */
-function loadCustomPrompt(workspacePath: string): string | undefined {
-  // 1. Repo-level
-  const repoPromptPath = join(workspacePath, '.codekin', CUSTOM_PROMPT_FILENAME)
-  if (existsSync(repoPromptPath)) {
-    try {
-      const content = readFileSync(repoPromptPath, 'utf-8').trim()
-      if (content) {
-        console.log(`[pr-prompt] Using repo-level custom prompt: ${repoPromptPath}`)
-        return content
-      }
-    } catch (err) {
-      console.warn(`[pr-prompt] Failed to read repo-level prompt:`, err)
+function tryReadFile(path: string): string | undefined {
+  if (!existsSync(path)) return undefined
+  try {
+    const content = readFileSync(path, 'utf-8').trim()
+    return content || undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Attempt to load a custom review prompt from disk.
+ *
+ * 4-tier resolution (provider-specific takes precedence):
+ *   1. Repo-level provider-specific:  {workspace}/.codekin/pr-review-prompt.{provider}.md
+ *   2. Repo-level generic:            {workspace}/.codekin/pr-review-prompt.md
+ *   3. Global provider-specific:      ~/.codekin/pr-review-prompt.{provider}.md
+ *   4. Global generic:                ~/.codekin/pr-review-prompt.md
+ *
+ * Returns the file contents if found, or undefined (falls back to built-in default).
+ */
+function loadCustomPrompt(workspacePath: string, provider?: string): string | undefined {
+  const globalDir = join(homedir(), '.codekin')
+  const repoDir = join(workspacePath, '.codekin')
+  // 1. Repo-level provider-specific
+  if (provider) {
+    const content = tryReadFile(join(repoDir, `pr-review-prompt.${provider}.md`))
+    if (content) {
+      console.log(`[pr-prompt] Using repo-level ${provider}-specific prompt`)
+      return content
     }
   }
 
-  // 2. Global
-  const globalPromptPath = join(homedir(), '.codekin', CUSTOM_PROMPT_FILENAME)
-  if (existsSync(globalPromptPath)) {
-    try {
-      const content = readFileSync(globalPromptPath, 'utf-8').trim()
-      if (content) {
-        console.log(`[pr-prompt] Using global custom prompt: ${globalPromptPath}`)
-        return content
-      }
-    } catch (err) {
-      console.warn(`[pr-prompt] Failed to read global prompt:`, err)
+  // 2. Repo-level generic
+  const repoGeneric = tryReadFile(join(repoDir, CUSTOM_PROMPT_FILENAME))
+  if (repoGeneric) {
+    console.log(`[pr-prompt] Using repo-level generic prompt`)
+    return repoGeneric
+  }
+
+  // 3. Global provider-specific
+  if (provider) {
+    const content = tryReadFile(join(globalDir, `pr-review-prompt.${provider}.md`))
+    if (content) {
+      console.log(`[pr-prompt] Using global ${provider}-specific prompt`)
+      return content
     }
+  }
+
+  // 4. Global generic
+  const globalGeneric = tryReadFile(join(globalDir, CUSTOM_PROMPT_FILENAME))
+  if (globalGeneric) {
+    console.log(`[pr-prompt] Using global generic prompt`)
+    return globalGeneric
   }
 
   return undefined
@@ -190,12 +216,21 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
   lines.push('')
   lines.push('## Instructions')
 
-  const customPrompt = loadCustomPrompt(workspacePath)
+  const customPrompt = loadCustomPrompt(workspacePath, ctx.reviewProvider)
   if (customPrompt) {
     lines.push(customPrompt)
   } else {
     lines.push(buildDefaultInstructions(ctx))
   }
+
+  // Attribution footer — identifies which provider and model reviewed this PR.
+  // Must appear at the very end of the posted review comment (after the review body).
+  const providerLabel = ctx.reviewProvider === 'opencode'
+    ? `OpenCode (${ctx.reviewModel})`
+    : `Claude (${ctx.reviewModel})`
+  lines.push('')
+  lines.push('## Attribution')
+  lines.push(`Add this line at the very end of your review comment: \`*Reviewed by ${providerLabel}*\``)
 
   // Override any hardcoded intermediate review file paths from custom prompts
   // so concurrent reviews don't collide or write into tracked repo files.

@@ -21,6 +21,10 @@ export function loadWebhookConfig(): FullWebhookConfig {
   let logLinesToInclude = 200
   let actorAllowlist: string[] = []
   let secret = ''
+  let prDebounceMs = 60_000
+  let prReviewProvider: 'claude' | 'opencode' | 'split' = 'claude'
+  let prReviewClaudeModel = 'sonnet'
+  let prReviewOpencodeModel = 'openai/gpt-5.4'
 
   // Try loading config file
   if (existsSync(CONFIG_FILE)) {
@@ -34,6 +38,12 @@ export function loadWebhookConfig(): FullWebhookConfig {
         actorAllowlist = file.actorAllowlist
       }
       if (typeof file.secret === 'string') secret = file.secret
+      if (typeof file.prDebounceMs === 'number') prDebounceMs = file.prDebounceMs
+      if (file.prReviewProvider === 'claude' || file.prReviewProvider === 'opencode' || file.prReviewProvider === 'split') {
+        prReviewProvider = file.prReviewProvider
+      }
+      if (typeof file.prReviewClaudeModel === 'string') prReviewClaudeModel = file.prReviewClaudeModel
+      if (typeof file.prReviewOpencodeModel === 'string') prReviewOpencodeModel = file.prReviewOpencodeModel
     } catch (err) {
       console.warn('[webhook] Failed to parse config file:', err)
     }
@@ -67,12 +77,33 @@ export function loadWebhookConfig(): FullWebhookConfig {
     secret = envSecret
   }
 
+  const envDebounce = process.env.GITHUB_WEBHOOK_PR_DEBOUNCE_MS
+  if (envDebounce !== undefined) {
+    const n = parseInt(envDebounce, 10)
+    if (!isNaN(n) && n >= 0) prDebounceMs = n
+  }
+
+  const envProvider = process.env.GITHUB_WEBHOOK_PR_REVIEW_PROVIDER
+  if (envProvider === 'claude' || envProvider === 'opencode' || envProvider === 'split') {
+    prReviewProvider = envProvider
+  }
+
+  const envClaudeModel = process.env.GITHUB_WEBHOOK_PR_REVIEW_CLAUDE_MODEL
+  if (envClaudeModel) prReviewClaudeModel = envClaudeModel
+
+  const envOpencodeModel = process.env.GITHUB_WEBHOOK_PR_REVIEW_OPENCODE_MODEL
+  if (envOpencodeModel) prReviewOpencodeModel = envOpencodeModel
+
   return {
     enabled,
     secret,
     maxConcurrentSessions,
     logLinesToInclude,
     actorAllowlist,
+    prDebounceMs,
+    prReviewProvider,
+    prReviewClaudeModel,
+    prReviewOpencodeModel,
   }
 }
 
