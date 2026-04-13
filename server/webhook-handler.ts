@@ -954,8 +954,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         }
       }
 
-      // Re-record the event in the ring buffer
+      // Re-record the event and mark as processed in dedup so GitHub retries
+      // during the restart window are caught as duplicates.
       this.recordEvent(rec.event)
+      this.dedup.recordProcessed(rec.event.id, rec.event.idempotencyKey)
       this.fireDebouncedPrEvent(rec.payload, rec.event, rec.sessionId)
     }
   }
