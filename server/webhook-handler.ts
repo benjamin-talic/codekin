@@ -24,16 +24,23 @@ import { dirname, join } from 'path'
 import type { CreateSessionOptions, SessionManager } from './session-manager.js'
 import { verifyHmacSignature } from './crypto-utils.js'
 import type { WsServerMessage } from './types.js'
-import type { WebhookConfig, WebhookEvent, WebhookEventStatus, WorkflowRunPayload, FailureContext, PullRequestPayload, PullRequestContext } from './webhook-types.js'
+import type { CodingProvider } from './coding-process.js'
+import type { WebhookConfig, WebhookEvent, WebhookEventStatus, WorkflowRunPayload, FailureContext, PullRequestPayload, PullRequestContext, ProviderHealthFile } from './webhook-types.js'
 import type { FullWebhookConfig } from './webhook-config.js'
 import { WebhookDedup, computeIdempotencyKey, computePrIdempotencyKey } from './webhook-dedup.js'
 import { checkGhHealth, fetchFailedLogs, fetchJobs, fetchAnnotations, fetchCommitMessage, fetchPRTitle } from './webhook-github.js'
-import { fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews, fetchExistingReviewComment } from './webhook-pr-github.js'
+import {
+  fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews,
+  fetchExistingReviewComment, fetchPrState, postProviderUnavailableComment,
+} from './webhook-pr-github.js'
 import { buildPrReviewPrompt } from './webhook-pr-prompt.js'
 import { loadPrCache, ensureCacheDir, archivePrCache, deletePrCache } from './webhook-pr-cache.js'
 import { buildPrompt } from './webhook-prompt.js'
 import { createWorkspace, cleanupWorkspace } from './webhook-workspace.js'
 import { WebhookHandlerBase } from './webhook-handler-base.js'
+import { ProviderHealthManager } from './webhook-provider-health.js'
+import { BacklogManager } from './webhook-backlog.js'
+import { classifyProviderError } from './webhook-error-classifier.js'
 import { REPOS_ROOT } from './config.js'
 
 /** How long an event can stay in 'processing' before the watchdog marks it as error. */
@@ -67,18 +74,30 @@ interface PendingDebounceRecord {
 /** On-disk location for persisted pending debounces. */
 const PENDING_DEBOUNCE_FILE = join(homedir(), '.codekin', 'webhook-pending-debounce.json')
 
+/** How often the backlog retry worker checks for ready entries. */
+const RETRY_WORKER_INTERVAL_MS = 60 * 1000
+
+/** Tracking info for an active webhook review session. */
+interface ReviewSessionInfo {
+  eventId: string
+  provider: CodingProvider
+  model: string
+  payload: PullRequestPayload
+  isFallback: boolean
+}
+
 export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEventStatus> {
   private config: FullWebhookConfig
   private sessions: SessionManager
   private dedup: WebhookDedup
+  private providerHealth: ProviderHealthManager
+  private backlog: BacklogManager
   private ghHealthy = false
   /** Pending debounce timers keyed by `repo#prNumber`. */
   private pendingDebounce = new Map<string, PendingDebounce>()
-  /**
-   * Whether `restorePendingDebounces()` actually ran during this process lifecycle.
-   * Guards `savePendingDebounces()` from deleting a stale file when the map is empty
-   * but restore never ran (e.g. unhealthy `gh` on startup).
-   */
+  private reviewSessions = new Map<string, ReviewSessionInfo>()
+  private sessionLastError = new Map<string, string>()
+  private retryWorkerTimer: ReturnType<typeof setInterval> | null = null
   private debounceFileConsumed = false
 
   constructor(config: FullWebhookConfig, sessions: SessionManager) {
@@ -87,28 +106,42 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     this.config = config
     this.sessions = sessions
     this.dedup = new WebhookDedup()
+    this.providerHealth = new ProviderHealthManager()
+    this.backlog = new BacklogManager()
 
-    // Track session completion to update webhook event status.
-    // Only update on final exit (willRestart=false) to avoid prematurely
-    // marking events as 'error' when auto-restart will retry.
-    sessions.onSessionExit((sessionId, code, _signal, willRestart) => {
-      if (willRestart) return  // Don't update status — Claude will retry
-
-      // Match any non-terminal status — covers both 'processing' (if Claude
-      // exits before status reaches 'session_created') and 'session_created'.
-      const event = this.getEvents().find(e => e.sessionId === sessionId && (e.status === 'session_created' || e.status === 'processing'))
-      if (event) {
-        const status: WebhookEventStatus = (code === 0) ? 'completed' : 'error'
-        this.updateEventStatus(event.id, status, code !== 0 ? `Claude exited with code ${code}` : undefined)
-        console.log(`[webhook] Event ${event.id} → ${status} (session ${sessionId}, code=${code})`)
-
-        // Clean up the workspace for completed/errored webhook sessions
-        cleanupWorkspace(sessionId)
-      }
+    // Buffer the latest error text per session for classification on exit.
+    sessions.onSessionError((sessionId, errorText) => {
+      this.sessionLastError.set(sessionId, errorText)
     })
 
-    // Auto-kill PR review sessions after Claude completes its turn so they don't
-    // sit idle waiting for more input and consume memory indefinitely.
+    // Track session completion to update webhook event status.
+    sessions.onSessionExit((sessionId, code, _signal, willRestart) => {
+      if (willRestart) return
+
+      const event = this.getEvents().find(e => e.sessionId === sessionId && (e.status === 'session_created' || e.status === 'processing'))
+      if (!event) {
+        this.sessionLastError.delete(sessionId)
+        return
+      }
+
+      if (code === 0) {
+        this.updateEventStatus(event.id, 'completed')
+        console.log(`[webhook] Event ${event.id} → completed (session ${sessionId}, code=0)`)
+        this.reviewSessions.delete(sessionId)
+        this.sessionLastError.delete(sessionId)
+        cleanupWorkspace(sessionId)
+        return
+      }
+
+      // Non-zero exit — classify the error.
+      const errorText = this.sessionLastError.get(sessionId) ?? `Session exited with code ${code}`
+      this.sessionLastError.delete(sessionId)
+      const reviewInfo = this.reviewSessions.get(sessionId)
+      this.reviewSessions.delete(sessionId)
+      void this.handleReviewFailure(event, sessionId, errorText, reviewInfo)
+    })
+
+    // Auto-kill PR review sessions after Claude completes its turn.
     sessions.onSessionResult((sessionId, isError) => {
       if (isError) return
 
@@ -117,14 +150,28 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       )
       if (!event) return
 
+      // Successful review — mark the used provider healthy.
+      const reviewInfo = this.reviewSessions.get(sessionId)
+      if (reviewInfo) {
+        this.providerHealth.markHealthy(reviewInfo.provider)
+        this.reviewSessions.delete(sessionId)
+      }
+      this.sessionLastError.delete(sessionId)
+
       this.updateEventStatus(event.id, 'completed')
       console.log(`[webhook] Session ${sessionId} completed review, scheduling cleanup`)
 
-      this.sessions.stopClaude(sessionId) // suppress auto-restart
+      this.sessions.stopClaude(sessionId)
       setTimeout(() => {
         this.sessions.delete(sessionId)
       }, 2000)
     })
+
+    // Start the backlog retry worker.
+    this.retryWorkerTimer = setInterval(() => {
+      void this.runRetryWorker()
+    }, RETRY_WORKER_INTERVAL_MS)
+    if (this.retryWorkerTimer.unref) this.retryWorkerTimer.unref()
   }
 
   /**
@@ -578,6 +625,9 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       baseBranch: pr.base?.ref ?? 'main',
     })
 
+    // --- Evict any backlogged retry for this PR immediately ---
+    this.backlog.removeByPr(payload.repository.full_name, pr.number)
+
     // --- Debounce: wait before processing to coalesce rapid events ---
     if (debounceMs > 0) {
       const webhookEvent = makeEvent('debounced')
@@ -689,6 +739,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     payload: PullRequestPayload,
     event: WebhookEvent,
     sessionId: string,
+    opts?: { forceProvider?: CodingProvider; isFallback?: boolean },
   ): Promise<void> {
     const pr = payload.pull_request
     const repo = payload.repository.full_name
@@ -697,7 +748,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     const headSha = pr.head?.sha ?? ''
     const baseRef = pr.base?.ref ?? 'main'
 
-    const { provider: reviewProvider, model: reviewModel } = this.resolvePrReviewProvider()
+    const { provider: reviewProvider, model: reviewModel } = opts?.forceProvider
+      ? { provider: opts.forceProvider, model: opts.forceProvider === 'claude' ? this.config.prReviewClaudeModel : this.config.prReviewOpencodeModel }
+      : this.resolvePrReviewProvider()
+    const isFallback = !!opts?.isFallback
     console.log(`[webhook] Processing PR: ${repo} #${prNumber} "${pr.title}" (${payload.action}) — reviewer: ${reviewProvider} (${reviewModel})`)
 
     // --- Ensure cache dir ---
@@ -851,6 +905,14 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
 
     this.sessions.create(sessionName, workspacePath, sessionOptions)
 
+    this.reviewSessions.set(sessionId, {
+      eventId: event.id,
+      provider: reviewProvider,
+      model: reviewModel,
+      payload,
+      isFallback,
+    })
+
     console.log(`[webhook] PR session created: ${sessionName} (${sessionId})`)
     this.updateEventStatus(event.id, 'session_created')
 
@@ -889,6 +951,135 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         : { provider: 'opencode', model: this.config.prReviewOpencodeModel }
     }
     return { provider: 'claude', model: this.config.prReviewClaudeModel }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Provider health + backlog integration
+  // ---------------------------------------------------------------------------
+
+  getProviderHealth(): ProviderHealthFile {
+    return this.providerHealth.getAll()
+  }
+
+  getBacklogSize(): number {
+    return this.backlog.size()
+  }
+
+  private async handleReviewFailure(
+    event: WebhookEvent,
+    sessionId: string,
+    errorText: string,
+    reviewInfo: ReviewSessionInfo | undefined,
+  ): Promise<void> {
+    const category = classifyProviderError(errorText)
+    cleanupWorkspace(sessionId)
+
+    if (category === 'other' || !reviewInfo) {
+      this.updateEventStatus(event.id, 'error', errorText.slice(0, 500))
+      console.log(`[webhook] Event ${event.id} → error (session ${sessionId}, category=${category})`)
+      return
+    }
+
+    const { provider, model, payload, isFallback } = reviewInfo
+    this.providerHealth.markUnhealthy(provider, category, errorText)
+    console.warn(`[webhook] Provider ${provider} (${model}) failed with ${category}: ${errorText.slice(0, 200)}`)
+
+    // Split-mode fallback
+    const canFallback = this.config.prReviewProvider === 'split' && !isFallback
+    if (canFallback) {
+      const otherProvider: CodingProvider = provider === 'claude' ? 'opencode' : 'claude'
+      console.log(`[webhook] Split-mode fallback: retrying event ${event.id} with ${otherProvider}`)
+      this.updateEventStatus(event.id, 'superseded', `Falling back from ${provider} to ${otherProvider} (${category})`)
+
+      const newEvent: WebhookEvent = {
+        ...event, id: randomUUID(), receivedAt: new Date().toISOString(), status: 'processing',
+      }
+      const newSessionId = randomUUID()
+      newEvent.sessionId = newSessionId
+      this.recordEvent(newEvent)
+
+      this.processPrReviewAsync(payload, newEvent, newSessionId, {
+        forceProvider: otherProvider, isFallback: true,
+      }).catch(err => {
+        console.error('[webhook] Fallback session error:', err)
+        if (this.getEvent(newEvent.id)?.status !== 'superseded') {
+          this.updateEventStatus(newEvent.id, 'error', String(err))
+        }
+      })
+      return
+    }
+
+    // Fixed mode or split fallback also failed — backlog + PR comment.
+    const entry = this.backlog.enqueue({
+      repo: event.repo,
+      prNumber: event.runId,
+      headSha: event.headSha ?? payload.pull_request.head.sha,
+      payload,
+      reason: category,
+      failedProvider: isFallback ? 'both' : provider,
+    })
+
+    this.updateEventStatus(
+      event.id, 'error',
+      `${category} on ${provider}${isFallback ? ' (after split fallback)' : ''} — backlogged, retryAfter=${entry.retryAfter}`,
+    )
+
+    const providerDisplay = provider === 'opencode' ? `OpenCode (${model})` : `Claude (${model})`
+    await postProviderUnavailableComment({
+      repo: event.repo, prNumber: event.runId, reason: category,
+      providerDisplay, errorText, retryAfter: entry.retryAfter,
+    })
+  }
+
+  private async runRetryWorker(): Promise<void> {
+    if (!this.ghHealthy) return
+    const ready = this.backlog.getReady()
+    if (ready.length === 0) return
+
+    for (const entry of ready) {
+      try {
+        if (this.isAtSessionCap()) continue
+
+        const state = await fetchPrState(entry.repo, entry.prNumber)
+        if (state === 'closed') {
+          this.backlog.remove(entry.id)
+          continue
+        }
+        if (state === undefined) continue
+
+        this.backlog.bumpRetry(entry.id)
+        console.log(`[webhook-backlog] Retrying ${entry.repo}#${entry.prNumber} (attempt ${entry.retryCount + 1})`)
+
+        const newEvent: WebhookEvent = {
+          id: randomUUID(),
+          idempotencyKey: computePrIdempotencyKey(entry.repo, entry.prNumber, entry.payload.action, entry.headSha),
+          receivedAt: new Date().toISOString(),
+          event: 'pull_request', action: entry.payload.action, repo: entry.repo,
+          branch: entry.payload.pull_request.head.ref, workflow: 'PR Review',
+          runId: entry.prNumber, runAttempt: 1, conclusion: entry.payload.action,
+          status: 'processing', sessionId: undefined,
+          prNumber: entry.prNumber, prTitle: entry.payload.pull_request.title,
+          headSha: entry.headSha, baseBranch: entry.payload.pull_request.base.ref,
+        }
+        const newSessionId = randomUUID()
+        newEvent.sessionId = newSessionId
+        this.recordEvent(newEvent)
+
+        this.processPrReviewAsync(entry.payload, newEvent, newSessionId).then(() => {
+          const status = this.getEvent(newEvent.id)?.status
+          if (status === 'session_created' || status === 'completed') {
+            this.backlog.remove(entry.id)
+          }
+        }).catch(err => {
+          console.error('[webhook-backlog] Retry session error:', err)
+          if (this.getEvent(newEvent.id)?.status !== 'superseded') {
+            this.updateEventStatus(newEvent.id, 'error', String(err))
+          }
+        })
+      } catch (err) {
+        console.error(`[webhook-backlog] Failed to process retry for ${entry.id}:`, err)
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1039,14 +1230,20 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   }
 
   shutdown(): void {
-    // Persist pending debounces to disk BEFORE clearing timers
     this.savePendingDebounces()
 
-    // Cancel all pending debounce timers
     for (const [, pending] of this.pendingDebounce) {
       clearTimeout(pending.timer)
     }
     this.pendingDebounce.clear()
+
+    if (this.retryWorkerTimer) {
+      clearInterval(this.retryWorkerTimer)
+      this.retryWorkerTimer = null
+    }
+
+    this.providerHealth.shutdown()
+    this.backlog.shutdown()
 
     super.shutdown()
     this.dedup.shutdown()
