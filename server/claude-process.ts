@@ -40,6 +40,8 @@ export interface ClaudeProcessOptions {
   allowedTools?: string[]
   /** Extra directories to grant Claude access to via --add-dir. */
   addDirs?: string[]
+  /** When true, do NOT prepend `Bash(git:*)` to allowedTools. Used by webhook review sessions that specify narrow git subcommand patterns. */
+  skipDefaultBashGit?: boolean
 }
 
 /** Accumulated state for an in-progress extended thinking block. */
@@ -135,6 +137,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private permissionMode?: PermissionMode
   private allowedTools?: string[]
   private addDirs?: string[]
+  private skipDefaultBashGit: boolean
 
   constructor(workingDir: string, opts?: Partial<ClaudeProcessOptions>) {
     super()
@@ -147,6 +150,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     this.resume = !!(o.resume && o.sessionId)
     this.allowedTools = o.allowedTools
     this.addDirs = o.addDirs
+    this.skipDefaultBashGit = !!o.skipDefaultBashGit
   }
 
   /** Spawn the Claude CLI process with stream-json I/O and acceptEdits mode. */
@@ -196,7 +200,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       ...(skipPermissions
         ? ['--dangerously-skip-permissions']
         : ['--permission-mode', this.permissionMode || 'acceptEdits']),
-      '--allowedTools', ['Bash(git:*)', ...(this.allowedTools || [])].join(','),
+      '--allowedTools', [
+        ...(this.skipDefaultBashGit ? [] : ['Bash(git:*)']),
+        ...(this.allowedTools || []),
+      ].join(','),
       '--add-dir', SCREENSHOTS_DIR,
       ...(this.addDirs || []).flatMap(d => ['--add-dir', d]),
       '--include-partial-messages',
