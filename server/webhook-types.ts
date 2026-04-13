@@ -109,6 +109,41 @@ export interface DedupEntry {
   eventId: string
 }
 
+/**
+ * Category for a provider failure — used by the webhook error classifier and
+ * by the backlog / health subsystems to decide how to react.
+ */
+export type ProviderUnhealthyReason = 'rate_limit' | 'auth_failure'
+
+/** Current health snapshot for a single provider. Persisted to disk. */
+export interface ProviderHealth {
+  status: 'healthy' | 'unhealthy'
+  reason?: ProviderUnhealthyReason
+  detectedAt?: string
+  lastError?: string
+  lastSuccessAt?: string
+}
+
+/** On-disk shape of `~/.codekin/provider-health.json`. */
+export interface ProviderHealthFile {
+  claude: ProviderHealth
+  opencode: ProviderHealth
+}
+
+/** A webhook event queued for retry after provider failure. */
+export interface BacklogEntry {
+  id: string
+  repo: string
+  prNumber: number
+  headSha: string
+  payload: PullRequestPayload
+  reason: ProviderUnhealthyReason
+  failedProvider: 'claude' | 'opencode' | 'both'
+  queuedAt: string
+  retryAfter: string
+  retryCount: number
+}
+
 // --- Webhook configuration (Phase 1 subset) ---
 export interface WebhookConfig {
   enabled: boolean
