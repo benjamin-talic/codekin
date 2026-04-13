@@ -119,6 +119,10 @@ export class SessionManager {
   /** Registered listeners notified when a session's Claude/OpenCode process emits an error message.
    *  Used by webhook-handler to capture error text for provider health classification. */
   private _errorListeners: Array<(sessionId: string, errorText: string) => void> = []
+  /** Registered listeners notified when a session starts executing a tool. */
+  private _toolActiveListeners: Array<(sessionId: string, toolName: string, toolInput: string | undefined) => void> = []
+  /** Registered listeners notified when a session finishes executing a tool. */
+  private _toolDoneListeners: Array<(sessionId: string, toolName: string, summary: string | undefined) => void> = []
   /** Delegated approval logic (auto-approve patterns, deny-lists, pattern management). */
   private _approvalManager: ApprovalManager
   /** Delegated auto-naming logic (generates session names from first user message via Claude API). */
@@ -655,6 +659,24 @@ export class SessionManager {
     }
   }
 
+  /** Register a listener called when any session starts executing a tool. */
+  onToolActive(listener: (sessionId: string, toolName: string, toolInput: string | undefined) => void): () => void {
+    this._toolActiveListeners.push(listener)
+    return () => {
+      const idx = this._toolActiveListeners.indexOf(listener)
+      if (idx >= 0) this._toolActiveListeners.splice(idx, 1)
+    }
+  }
+
+  /** Register a listener called when any session finishes executing a tool. */
+  onToolDone(listener: (sessionId: string, toolName: string, summary: string | undefined) => void): () => void {
+    this._toolDoneListeners.push(listener)
+    return () => {
+      const idx = this._toolDoneListeners.indexOf(listener)
+      if (idx >= 0) this._toolDoneListeners.splice(idx, 1)
+    }
+  }
+
   get(id: string): Session | undefined {
     return this.sessions.get(id)
   }
@@ -948,10 +970,16 @@ export class SessionManager {
 
   private onToolActiveEvent(session: Session, toolName: string, toolInput: string | undefined): void {
     this.broadcastAndHistory(session, { type: 'tool_active', toolName, toolInput })
+    for (const listener of this._toolActiveListeners) {
+      try { listener(session.id, toolName, toolInput) } catch { /* listener error */ }
+    }
   }
 
   private onToolDoneEvent(session: Session, toolName: string, summary: string | undefined): void {
     this.broadcastAndHistory(session, { type: 'tool_done', toolName, summary })
+    for (const listener of this._toolDoneListeners) {
+      try { listener(session.id, toolName, summary) } catch { /* listener error */ }
+    }
   }
 
 

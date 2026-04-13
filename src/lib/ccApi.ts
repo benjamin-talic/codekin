@@ -555,3 +555,65 @@ export async function testWebhookDelivery(
   }
   return res.json()
 }
+
+// ---------------------------------------------------------------------------
+// Task Board (orchestrator sub-agent management)
+// ---------------------------------------------------------------------------
+
+import type { TaskBoardEntry } from '../types'
+
+/** List all tasks on the orchestrator's task board. */
+export async function listTasks(token: string): Promise<TaskBoardEntry[]> {
+  const res = await authFetch(`${BASE}/api/orchestrator/tasks`, { headers: headers(token) })
+  if (!res.ok) return []
+  const data = await res.json()
+  return data.tasks ?? []
+}
+
+/** Get a single task by ID. */
+export async function getTask(token: string, id: string): Promise<TaskBoardEntry | null> {
+  const res = await authFetch(`${BASE}/api/orchestrator/tasks/${id}`, { headers: headers(token) })
+  if (!res.ok) return null
+  const data = await res.json()
+  return data.task ?? null
+}
+
+/** Approve or deny a task's pending tool approval. */
+export async function approveTask(token: string, taskId: string, requestId: string, value: string): Promise<void> {
+  const res = await authFetch(`${BASE}/api/orchestrator/tasks/${taskId}/approve`, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify({ requestId, value }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Failed to approve' }))
+    throw new Error(data.error || `Approve failed: ${res.status}`)
+  }
+}
+
+/** Send a follow-up message to a running task's child session. */
+export async function sendTaskMessage(token: string, taskId: string, message: string): Promise<void> {
+  const res = await authFetch(`${BASE}/api/orchestrator/tasks/${taskId}/message`, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify({ message }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Failed to send message' }))
+    throw new Error(data.error || `Send message failed: ${res.status}`)
+  }
+}
+
+/** Retry a failed or timed-out task. */
+export async function retryTask(token: string, taskId: string): Promise<TaskBoardEntry | null> {
+  const res = await authFetch(`${BASE}/api/orchestrator/tasks/${taskId}/retry`, {
+    method: 'POST',
+    headers: headers(token),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Failed to retry' }))
+    throw new Error(data.error || `Retry failed: ${res.status}`)
+  }
+  const data = await res.json()
+  return data.task ?? null
+}

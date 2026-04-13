@@ -11,6 +11,7 @@ import { ChatView } from './ChatView'
 import { TodoPanel } from './TodoPanel'
 import { PromptButtons } from './PromptButtons'
 import { InputBar, type InputBarHandle } from './InputBar'
+import { TaskBoardPanel } from './TaskBoardPanel'
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
 import type { ChatMessage, PermissionMode, TaskItem } from '../types'
@@ -42,6 +43,10 @@ export interface OrchestratorContentProps {
   onPermissionModeChange: (mode: PermissionMode) => void
   disabled: boolean
   agentName?: string
+  taskBoardOpen: boolean
+  onCloseTaskBoard: () => void
+  onToggleTaskBoard: () => void
+  onViewSession: (sessionId: string) => void
 }
 
 export function OrchestratorContent({
@@ -70,6 +75,10 @@ export function OrchestratorContent({
   onPermissionModeChange,
   disabled,
   agentName,
+  taskBoardOpen,
+  onCloseTaskBoard,
+  onToggleTaskBoard,
+  onViewSession,
 }: OrchestratorContentProps) {
   return (
     <>
@@ -78,23 +87,25 @@ export function OrchestratorContent({
         onOrchestratorSessionReady={onOrchestratorSessionReady}
         sessionJoined={sessionJoined}
         agentName={agentName}
+        onToggleTaskBoard={onToggleTaskBoard}
       />
       {/* Render chat UI once orchestrator session is joined */}
       {activeSessionId && (
-        <div className="flex flex-1 flex-col overflow-hidden min-h-0">
-          <div className="relative flex-1 min-h-0 flex flex-col">
-            <ChatView
-              messages={messages}
-              fontSize={fontSize}
-              disabled={disabled}
-              planningMode={planningMode}
-              activityLabel={activityLabel}
-              isMobile={isMobile}
-              variant="orchestrator"
-              agentName={agentName}
-            />
-            <TodoPanel tasks={tasks} />
-          </div>
+        <div className="flex flex-1 overflow-hidden min-h-0">
+          <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+            <div className="relative flex-1 min-h-0 flex flex-col">
+              <ChatView
+                messages={messages}
+                fontSize={fontSize}
+                disabled={disabled}
+                planningMode={planningMode}
+                activityLabel={activityLabel}
+                isMobile={isMobile}
+                variant="orchestrator"
+                agentName={agentName}
+              />
+              <TodoPanel tasks={tasks} />
+            </div>
           {activePrompt && (
             <PromptButtons
               key={activePrompt.requestId}
@@ -129,6 +140,13 @@ export function OrchestratorContent({
             isMobile={isMobile}
             currentPermissionMode={currentPermissionMode}
             onPermissionModeChange={onPermissionModeChange}
+          />
+          </div>
+          <TaskBoardPanel
+            isOpen={taskBoardOpen}
+            onClose={onCloseTaskBoard}
+            token={token}
+            onViewSession={onViewSession}
           />
         </div>
       )}

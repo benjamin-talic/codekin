@@ -145,6 +145,54 @@ export interface TaskItem {
   activeForm?: string
 }
 
+// ---------------------------------------------------------------------------
+// Task Board types (orchestrator sub-agent task management)
+// ---------------------------------------------------------------------------
+
+export type TaskType = 'implement' | 'explore' | 'review' | 'research'
+export type TaskBoardStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out'
+export type TaskBoardState = 'idle' | 'processing' | 'waiting_for_approval' | 'exited'
+
+export interface TaskBoardEntry {
+  id: string
+  request: {
+    repo: string
+    task: string
+    branchName: string
+    taskType: TaskType
+    completionPolicy: string
+  }
+  status: TaskBoardStatus
+  snapshot: {
+    state: TaskBoardState
+    activeTool: string | null
+    activeToolInput: string | null
+    turnCount: number
+    lastToolSequence: Array<{ toolName: string; summary?: string; completedAt: string }>
+    filesRead: string[]
+    filesChanged: string[]
+    pendingApproval: {
+      requestId: string
+      toolName: string
+      toolInput: Record<string, unknown>
+      since: string
+    } | null
+  }
+  result: {
+    summary: string
+    artifacts: {
+      prUrl: string | null
+      branchName: string | null
+      filesChanged: string[]
+      commitCount: number
+    }
+    duration: number
+  } | null
+  error: string | null
+  startedAt: string
+  completedAt: string | null
+}
+
 /**
  * Messages sent from the WebSocket server to the browser client.
  *
