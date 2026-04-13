@@ -662,6 +662,16 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       console.warn(`[webhook] Failed to clean up PR cache for ${repo}#${pr.number}:`, err)
     }
 
+    // Cancel any pending debounce for this PR
+    const debounceKey = `${repo}#${pr.number}`
+    const pending = this.pendingDebounce.get(debounceKey)
+    if (pending) {
+      clearTimeout(pending.timer)
+      this.updateEventStatus(pending.event.id, 'superseded', merged ? 'PR merged' : 'PR closed')
+      this.pendingDebounce.delete(debounceKey)
+      console.log(`[webhook] Cancelled pending debounce for ${debounceKey} — PR ${merged ? 'merged' : 'closed'}`)
+    }
+
     // Kill any active review sessions for this PR
     this.supersedePrSessions(repo, pr.number, merged ? 'PR merged' : 'PR closed')
 
