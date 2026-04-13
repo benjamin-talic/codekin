@@ -213,6 +213,115 @@ export async function fetchExistingReviewComment(repo: string, prNumber: number)
   }
 }
 
+/**
+ * Check whether a pull request is still open on GitHub.
+ * Used by the backlog retry worker to skip entries whose PRs have been
+ * closed or merged while they were waiting.
+ *
+ * Returns `'open'` / `'closed'` / `undefined` on any failure (treat
+ * undefined as "don't know — retry next tick").
+ */
+export async function fetchPrState(repo: string, prNumber: number): Promise<'open' | 'closed' | undefined> {
+  try {
+    const raw = await ghRunner([
+      'api',
+      `/repos/${repo}/pulls/${prNumber}`,
+      '--jq', '.state',
+    ])
+    const state = raw.trim()
+    if (state === 'open' || state === 'closed') return state
+    return undefined
+  } catch (err) {
+    console.warn(`fetchPrState: failed for ${repo} PR #${prNumber}:`, err)
+    return undefined
+  }
+}
+
+/**
+ * Post or update the Codekin review comment on a PR with a "provider
+ * unavailable" status message. Used when a review session fails due to
+ * rate limits or auth failures — the comment tells the PR author that
+ * a retry is scheduled.
+ *
+ * If an existing `<!-- codekin-review -->` comment exists it gets PATCHed;
+ * otherwise a new one is created. Failures are logged but don't throw —
+ * the backlog + health state are the source of truth for retries, the
+ * comment is just user-facing signal.
+ */
+export async function postProviderUnavailableComment(params: {
+  repo: string
+  prNumber: number
+  reason: 'rate_limit' | 'auth_failure'
+  providerDisplay: string           // e.g. 'Claude (sonnet)'
+  errorText: string                 // truncated before passing in
+  retryAfter: string                // ISO timestamp
+}): Promise<void> {
+  const body = buildProviderUnavailableBody(params)
+
+  try {
+    const existingId = await fetchExistingReviewComment(params.repo, params.prNumber)
+
+    if (existingId) {
+      // Update existing marker comment via PATCH.
+      await ghRunner([
+        'api',
+        `/repos/${params.repo}/issues/comments/${existingId}`,
+        '-X', 'PATCH',
+        '-f', `body=${body}`,
+      ])
+    } else {
+      // Create a new marker comment.
+      await ghRunner([
+        'api',
+        `/repos/${params.repo}/issues/${params.prNumber}/comments`,
+        '-f', `body=${body}`,
+      ])
+    }
+  } catch (err) {
+    console.warn(`postProviderUnavailableComment: failed for ${params.repo} PR #${params.prNumber}:`, err)
+  }
+}
+
+/** Internal: render the comment body for a provider-unavailable notice. */
+function buildProviderUnavailableBody(params: {
+  reason: 'rate_limit' | 'auth_failure'
+  providerDisplay: string
+  errorText: string
+  retryAfter: string
+}): string {
+  const { reason, providerDisplay, errorText, retryAfter } = params
+  const title = reason === 'rate_limit'
+    ? '## ⏳ Codekin review deferred — usage limit reached'
+    : '## 🔑 Codekin review deferred — provider auth failed'
+
+  const reasonLine = reason === 'rate_limit'
+    ? '**Reason:** Rate limit / usage limit hit'
+    : '**Reason:** Authentication failure (invalid / expired credentials)'
+
+  const guidance = reason === 'rate_limit'
+    ? 'Codekin will automatically retry this review once the provider recovers. The PR needs to remain open for the retry to happen.'
+    : 'Codekin will keep retrying hourly until this PR closes. Check provider credentials on the codekin server if this persists.'
+
+  return [
+    REVIEW_COMMENT_MARKER,
+    title,
+    '',
+    `**Provider:** ${providerDisplay}`,
+    reasonLine,
+    `**Next retry:** \`${retryAfter}\``,
+    '',
+    guidance,
+    '',
+    `*Error detail (for operator):* \`${sanitizeForMarkdown(errorText)}\``,
+  ].join('\n')
+}
+
+/** Strip backticks + truncate so the error text is safe to inline in a markdown code span. */
+function sanitizeForMarkdown(text: string): string {
+  const stripped = text.replace(/`/g, "'")
+  return stripped.length > 300 ? stripped.slice(0, 300) + '…' : stripped
+}
+
 export async function fetchPrCommits(repo: string, prNumber: number): Promise<string> {
   try {
     const raw = await ghRunner([
