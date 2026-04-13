@@ -34,6 +34,7 @@ export interface SessionLifecycleDeps {
   approvalManager: ApprovalManager
   promptRouter: PromptRouter
   exitListeners: Array<(sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void>
+  errorListeners: Array<(sessionId: string, errorText: string) => void>
   // Event handler callbacks that remain in SessionManager
   onSystemInit(cp: CodingProcess, session: Session, model: string): void
   onTextEvent(session: Session, sessionId: string, text: string): void
@@ -245,7 +246,18 @@ export class SessionLifecycle {
       session.planManager.onTurnEnd()
       this.deps.handleClaudeResult(session, sessionId, result, isError)
     })
-    cp.on('error', (message) => this.deps.broadcast(session, { type: 'error', message }))
+    cp.on('error', (message) => {
+      this.deps.broadcast(session, { type: 'error', message })
+      // Fan out to registered listeners (webhook-handler uses this to buffer
+      // the latest error text per session for classification on exit).
+      for (const listener of this.deps.errorListeners) {
+        try {
+          listener(sessionId, message)
+        } catch (err) {
+          console.error('[session-lifecycle] errorListener threw:', err)
+        }
+      }
+    })
     cp.on('exit', (code, signal) => { cp.removeAllListeners(); this.handleClaudeExit(cp, session, sessionId, code, signal) })
   }
 

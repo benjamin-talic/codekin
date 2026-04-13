@@ -48,6 +48,17 @@ export function createWebhookRouter(
     res.json({ config: webhookHandler.getConfig() })
   })
 
+  router.get('/api/webhooks/health', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const providers = webhookHandler.getProviderHealth()
+    res.json({
+      claude: providers.claude,
+      opencode: providers.opencode,
+      backlog: webhookHandler.getBacklogSize(),
+    })
+  })
+
   // --- Stepflow management endpoints ---
 
   router.get('/api/stepflow/events', (req, res) => {
