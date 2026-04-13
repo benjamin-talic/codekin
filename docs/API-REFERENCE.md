@@ -300,6 +300,20 @@ Get webhook configuration.
 
 **Response:** `{ "config": { "enabled": true, "maxConcurrentSessions": 3, "logLinesToInclude": 200 } }`
 
+### `GET /api/webhooks/health`
+
+Get provider health snapshot and retry backlog size. See [PROVIDER-HEALTH-BACKLOG.md](./PROVIDER-HEALTH-BACKLOG.md).
+
+**Response:**
+
+```json
+{
+  "claude": { "status": "healthy", "lastSuccessAt": "2026-04-12T09:00:00Z" },
+  "opencode": { "status": "unhealthy", "reason": "rate_limit", "detectedAt": "2026-04-12T09:30:00Z", "lastError": "API Error: 429 ..." },
+  "backlog": 3
+}
+```
+
 ### `POST /api/webhooks/github`
 
 Raw GitHub webhook receiver. **No Bearer token** — uses HMAC signature verification via `x-hub-signature-256` header.
