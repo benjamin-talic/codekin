@@ -40,6 +40,10 @@ describe('loadWebhookConfig', () => {
         logLinesToInclude: 200,
         secret: '',
         actorAllowlist: [],
+        prDebounceMs: 60_000,
+        prReviewProvider: 'claude',
+        prReviewClaudeModel: 'sonnet',
+        prReviewOpencodeModel: 'openai/gpt-5.4',
       })
     })
   })

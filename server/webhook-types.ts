@@ -3,6 +3,7 @@ export type WebhookEventStatus =
   | 'received'
   | 'filtered'
   | 'duplicate'
+  | 'debounced'
   | 'processing'
   | 'session_created'
   | 'completed'
@@ -114,6 +115,14 @@ export interface WebhookConfig {
   maxConcurrentSessions: number
   logLinesToInclude: number
   actorAllowlist: string[]
+  /** Debounce window for PR events (ms). 0 disables debounce. Default: 60000. */
+  prDebounceMs: number
+  /** Which provider to use for PR reviews: claude, opencode, or split (random A/B). */
+  prReviewProvider: 'claude' | 'opencode' | 'split'
+  /** Claude model for PR reviews (e.g. 'sonnet'). */
+  prReviewClaudeModel: string
+  /** OpenCode model for PR reviews (e.g. 'openai/gpt-5.4'). */
+  prReviewOpencodeModel: string
 }
 
 // --- GitHub payload subset (pull_request) ---
@@ -221,4 +230,6 @@ export interface PullRequestContext {
   reviews: string                 // existing review summaries
   existingComment: string | null
   priorCache: import('./webhook-pr-cache.js').PrCacheData | null
+  reviewProvider: 'claude' | 'opencode'
+  reviewModel: string
 }
