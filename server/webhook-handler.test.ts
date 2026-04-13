@@ -77,9 +77,13 @@ function makeConfig(overrides: Partial<FullWebhookConfig> = {}): FullWebhookConf
 }
 
 type ExitCallback = (sessionId: string, code: number, signal: string | null, willRestart: boolean) => void
+type ResultCallback = (sessionId: string, isError: boolean) => void
+type ErrorCallback = (sessionId: string, errorText: string) => void
 
 function fakeSessionManager() {
   const exitCallbacks: ExitCallback[] = []
+  const resultCallbacks: ResultCallback[] = []
+  const errorCallbacks: ErrorCallback[] = []
   return {
     list: vi.fn(() => []),
     create: vi.fn(() => ({ id: 'session-1' })),
@@ -87,10 +91,13 @@ function fakeSessionManager() {
     broadcast: vi.fn(),
     sendInput: vi.fn(),
     onSessionExit: vi.fn((cb: ExitCallback) => { exitCallbacks.push(cb) }),
-    onSessionResult: vi.fn(() => () => {}),
+    onSessionResult: vi.fn((cb: ResultCallback) => { resultCallbacks.push(cb); return () => {} }),
+    onSessionError: vi.fn((cb: ErrorCallback) => { errorCallbacks.push(cb); return () => {} }),
     stopClaude: vi.fn(),
     delete: vi.fn(),
     _exitCallbacks: exitCallbacks,
+    _resultCallbacks: resultCallbacks,
+    _errorCallbacks: errorCallbacks,
   } as unknown as ReturnType<typeof fakeSessionManager>
 }
 
