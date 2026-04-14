@@ -45,6 +45,12 @@ export function createOrchestratorRouter(
   const children = injectedChildren ?? new OrchestratorChildManager(sessions)
   const taskBoard = injectedTaskBoard
 
+  /** Resolve effective repos root: DB setting (from UI) > REPOS_ROOT env/default. */
+  const resolveReposRoot = (): string => {
+    const custom = sessions.archive.getSetting('repos_path', '')
+    return custom || REPOS_ROOT
+  }
+
   /**
    * Verify that the request is authorized — accepts either the master auth
    * token OR the orchestrator session's scoped token.  This allows the
@@ -167,9 +173,10 @@ export function createOrchestratorRouter(
       }
     }
 
-    // Validate repo path: must resolve under REPOS_ROOT and be an existing directory
+    // Validate repo path: must resolve under the configured repos root
+    const reposRoot = resolveReposRoot()
     const resolvedRepo = resolve(repo)
-    if (!resolvedRepo.startsWith(REPOS_ROOT + '/') && resolvedRepo !== REPOS_ROOT) {
+    if (!resolvedRepo.startsWith(reposRoot + '/') && resolvedRepo !== reposRoot) {
       return res.status(400).json({ error: 'Invalid repo path: must be under configured repos root' })
     }
     if (!existsSync(resolvedRepo) || !statSync(resolvedRepo).isDirectory()) {
@@ -271,8 +278,9 @@ export function createOrchestratorRouter(
     }
 
     // Validate repo path
+    const reposRoot = resolveReposRoot()
     const resolvedRepo = resolve(repo)
-    if (!resolvedRepo.startsWith(REPOS_ROOT + '/') && resolvedRepo !== REPOS_ROOT) {
+    if (!resolvedRepo.startsWith(reposRoot + '/') && resolvedRepo !== reposRoot) {
       return res.status(400).json({ error: 'Invalid repo path: must be under configured repos root' })
     }
     if (!existsSync(resolvedRepo) || !statSync(resolvedRepo).isDirectory()) {
