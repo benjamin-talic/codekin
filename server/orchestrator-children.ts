@@ -36,7 +36,7 @@ export interface ChildSessionRequest {
   allowedTools?: string[]
 }
 
-export type ChildStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out'
+export type ChildStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out' | 'cancelled'
 
 export interface ChildSession {
   id: string
@@ -107,6 +107,28 @@ export class OrchestratorChildManager {
   /** Get a child session by ID. */
   get(id: string): ChildSession | null {
     return this.children.get(id) ?? null
+  }
+
+  /**
+   * Stop a running or starting child session.
+   * Kills the Claude process and sets status to 'cancelled'.
+   * Returns the child if found, null otherwise.
+   */
+  stopChild(id: string): ChildSession | null {
+    const child = this.children.get(id)
+    if (!child) return null
+    if (child.status !== 'starting' && child.status !== 'running') return child
+
+    const session = this.sessions.get(child.id)
+    if (session?.claudeProcess?.isAlive()) {
+      session.claudeProcess.stop()
+    }
+
+    child.status = 'cancelled'
+    child.error = 'Cancelled by user'
+    child.completedAt = new Date().toISOString()
+
+    return child
   }
 
   /** Purge completed/failed children older than the retention period. */
@@ -338,6 +360,12 @@ export class OrchestratorChildManager {
         // Result hook: Claude completed a turn
         const onResult = (sessionId: string, isError: boolean) => {
           if (sessionId !== child.id || settled) return
+          // Don't overwrite terminal status set externally (e.g. stopChild, timeout)
+          if (child.status !== 'starting' && child.status !== 'running') {
+            clearTimeout(timer)
+            settle()
+            return
+          }
           const session = this.sessions.get(child.id)
           if (!session) {
             child.status = 'failed'
@@ -370,6 +398,12 @@ export class OrchestratorChildManager {
         const onExit = (sessionId: string, _code: number | null, _signal: string | null, willRestart: boolean) => {
           if (sessionId !== child.id || settled) return
           if (willRestart) return  // Will auto-restart, keep monitoring
+          // Don't overwrite terminal status set externally (e.g. stopChild, timeout)
+          if (child.status !== 'starting' && child.status !== 'running') {
+            clearTimeout(timer)
+            settle()
+            return
+          }
 
           const session = this.sessions.get(child.id)
           const text = session ? this.extractText(session.outputHistory) : ''

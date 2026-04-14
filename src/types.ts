@@ -338,6 +338,29 @@ export interface DocsPickerProps {
   onClose?: () => void
 }
 
+// ---------------------------------------------------------------------------
+// Orchestrator child session types
+// ---------------------------------------------------------------------------
+
+/** Status of an orchestrator child session. Keep in sync with server/orchestrator-children.ts ChildStatus. */
+export type ChildStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out' | 'cancelled'
+
+/** Client-safe representation of an orchestrator child session. */
+export interface ChildSessionInfo {
+  id: string
+  request: {
+    repo: string
+    task: string
+    branchName: string
+    completionPolicy: 'pr' | 'merge' | 'commit-only'
+  }
+  status: ChildStatus
+  startedAt: string
+  completedAt: string | null
+  result: string | null
+  error: string | null
+}
+
 /** Mobile layout props for components that support responsive drawer mode. */
 export interface MobileProps {
   isMobile?: boolean

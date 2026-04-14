@@ -4,7 +4,7 @@
  * All REST calls (including uploads) go through the /cc proxy (nginx → server on port 32352).
  */
 
-import type { Session, WsServerMessage } from '../types'
+import type { Session, WsServerMessage, ChildSessionInfo } from '../types'
 
 /** Base path for the WebSocket server REST API (proxied by nginx). */
 const BASE = '/cc'
@@ -148,6 +148,20 @@ export async function startOrchestrator(token: string): Promise<{ sessionId: str
   })
   if (!res.ok) throw new Error(`Failed to start orchestrator: ${res.status}`)
   return res.json()
+}
+
+/** Stop a running orchestrator child session. */
+export async function stopChildSession(token: string, childId: string): Promise<ChildSessionInfo> {
+  const res = await authFetch(`${BASE}/api/orchestrator/children/${encodeURIComponent(childId)}/stop`, {
+    method: 'POST',
+    headers: headers(token),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Stop failed' }))
+    throw new Error(data.error || `Failed to stop child session: ${res.status}`)
+  }
+  const data = await res.json()
+  return data.child
 }
 
 /** Upload a file via the server. Returns the server-side file path. */
