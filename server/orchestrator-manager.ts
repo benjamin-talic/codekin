@@ -8,7 +8,6 @@
 
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { homedir } from 'os'
 import { randomUUID } from 'crypto'
 import { DATA_DIR, AGENT_DISPLAY_NAME, getAgentDisplayName, REPOS_ROOT } from './config.js'
 import type { SessionManager } from './session-manager.js'
@@ -374,10 +373,10 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
 
   const ORCHESTRATOR_ALLOWED_TOOLS = ['Bash(curl:*)', 'Bash(env:*)', 'Bash(printenv:*)', 'CronCreate', 'CronDelete', 'CronList']
 
-  // Grant the orchestrator access to the user's home directory so it (and its
-  // subagents) can read files in any repository the user points it to, not
-  // just the orchestrator workspace. Also add REPOS_ROOT explicitly.
-  const addDirs = [...new Set([REPOS_ROOT, homedir()])]
+  // The orchestrator does NOT get direct repo access — it delegates work to
+  // child sessions that run inside the target repo. Only REPOS_ROOT is added
+  // so Joe can read audit reports from .codekin/reports/ directories.
+  const addDirs = [REPOS_ROOT]
 
   // Check if session already exists
   const existing = sessions.get(stableId)
@@ -391,14 +390,15 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
     }
     if (dirty) existing.allowedTools = [...currentTools]
 
-    const currentDirs = new Set(existing.addDirs || [])
-    for (const dir of addDirs) {
-      if (!currentDirs.has(dir)) { currentDirs.add(dir); dirty = true }
+    // Replace addDirs with the canonical set (don't merge — we want to remove
+    // stale entries like a previously-added home directory).
+    const canonicalDirs = JSON.stringify([...addDirs].sort())
+    const existingDirs = JSON.stringify([...(existing.addDirs || [])].sort())
+    if (canonicalDirs !== existingDirs) {
+      existing.addDirs = [...addDirs]
+      dirty = true
     }
-    if (dirty) {
-      existing.addDirs = [...currentDirs]
-      sessions.persistToDisk()
-    }
+    if (dirty) sessions.persistToDisk()
     // Session exists — start Claude if not alive
     if (!existing.claudeProcess?.isAlive()) {
       console.log('[orchestrator] Restarting orchestrator Claude process')
