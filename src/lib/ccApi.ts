@@ -4,7 +4,7 @@
  * All REST calls (including uploads) go through the /cc proxy (nginx → server on port 32352).
  */
 
-import type { Session, WsServerMessage } from '../types'
+import type { Session, TaskBoardEntry, WsServerMessage } from '../types'
 
 /** Base path for the WebSocket server REST API (proxied by nginx). */
 const BASE = '/cc'
@@ -444,6 +444,41 @@ export async function getWebhookEvents(token: string): Promise<Array<{ id: strin
 export function wsUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${location.host}/cc/`
+}
+
+// ---------------------------------------------------------------------------
+// Task Board (orchestrator children)
+// ---------------------------------------------------------------------------
+
+/** Fetch all orchestrator child sessions for the task board. */
+export async function listTaskBoardEntries(token: string): Promise<TaskBoardEntry[]> {
+  const res = await authFetch(`${BASE}/api/orchestrator/children`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to list task board entries: ${res.status}`)
+  const data = await res.json()
+  return (data.children ?? []).map((c: Record<string, unknown>) => ({
+    id: c.id as string,
+    status: (c as { status: string }).status,
+    task: ((c as { request?: { task?: string } }).request?.task) ?? '',
+    repo: ((c as { request?: { repo?: string } }).request?.repo) ?? '',
+    branchName: ((c as { request?: { branchName?: string } }).request?.branchName) ?? '',
+    startedAt: (c as { startedAt: string }).startedAt,
+    completedAt: (c as { completedAt: string | null }).completedAt,
+    result: (c as { result: string | null }).result,
+    error: (c as { error: string | null }).error,
+  }))
+}
+
+/** Stop/cancel a running task board entry. */
+export async function stopTask(taskId: string): Promise<TaskBoardEntry> {
+  const token = localStorage.getItem('codekin-token') ?? ''
+  const res = await authFetch(`${BASE}/api/orchestrator/sessions/${taskId}`, {
+    method: 'DELETE',
+    headers: headers(token),
+  })
+  if (!res.ok) throw new Error(`Failed to stop task: ${res.status}`)
+  return res.json()
 }
 
 /** Fetch available models from the OpenCode server. */

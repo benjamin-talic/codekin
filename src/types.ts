@@ -296,3 +296,23 @@ export interface MobileProps {
   onMobileClose?: () => void
 }
 
+// ---------------------------------------------------------------------------
+// Task Board (orchestrator child sessions)
+// ---------------------------------------------------------------------------
+
+/** Status of a task board entry. Mirrors server ChildStatus + cancelled. */
+export type TaskBoardStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out' | 'cancelled'
+
+/** A task board entry representing an orchestrator child session. */
+export interface TaskBoardEntry {
+  id: string
+  status: TaskBoardStatus
+  task: string
+  repo: string
+  branchName: string
+  startedAt: string
+  completedAt: string | null
+  result: string | null
+  error: string | null
+}
+

@@ -9,12 +9,14 @@ import type { RefObject } from 'react'
 import { OrchestratorView } from './OrchestratorView'
 import { ChatView } from './ChatView'
 import { TodoPanel } from './TodoPanel'
+import { TaskBoardPanel } from './TaskBoardPanel'
 import { PromptButtons } from './PromptButtons'
 import { InputBar, type InputBarHandle } from './InputBar'
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
 import type { ChatMessage, PermissionMode, TaskItem } from '../types'
 import type { PromptEntry } from '../hooks/usePromptState'
+import { useTaskBoard } from '../hooks/useTaskBoard'
 
 export interface OrchestratorContentProps {
   token: string
@@ -71,6 +73,8 @@ export function OrchestratorContent({
   disabled,
   agentName,
 }: OrchestratorContentProps) {
+  const { entries: taskBoardEntries, refresh: refreshTaskBoard } = useTaskBoard(sessionJoined ? token : undefined)
+
   return (
     <>
       <OrchestratorView
@@ -79,57 +83,62 @@ export function OrchestratorContent({
         sessionJoined={sessionJoined}
         agentName={agentName}
       />
-      {/* Render chat UI once orchestrator session is joined */}
+      {/* Render chat UI + task board once orchestrator session is joined */}
       {activeSessionId && (
-        <div className="flex flex-1 flex-col overflow-hidden min-h-0">
-          <div className="relative flex-1 min-h-0 flex flex-col">
-            <ChatView
-              messages={messages}
-              fontSize={fontSize}
-              disabled={disabled}
-              planningMode={planningMode}
-              activityLabel={activityLabel}
-              isMobile={isMobile}
+        <div className="flex flex-1 overflow-hidden min-h-0">
+          {/* Chat column */}
+          <div className="flex flex-1 flex-col overflow-hidden min-h-0 min-w-0">
+            <div className="relative flex-1 min-h-0 flex flex-col">
+              <ChatView
+                messages={messages}
+                fontSize={fontSize}
+                disabled={disabled}
+                planningMode={planningMode}
+                activityLabel={activityLabel}
+                isMobile={isMobile}
+                variant="orchestrator"
+                agentName={agentName}
+              />
+              <TodoPanel tasks={tasks} />
+            </div>
+            {activePrompt && (
+              <PromptButtons
+                key={activePrompt.requestId}
+                options={activePrompt.options}
+                question={activePrompt.question}
+                multiSelect={activePrompt.multiSelect}
+                promptType={activePrompt.promptType}
+                questions={activePrompt.questions}
+                approvePattern={activePrompt.approvePattern}
+                onSelect={sendPromptResponse}
+                isMobile={isMobile}
+              />
+            )}
+            <InputBar
+              key={`orchestrator-${activeSessionId}`}
               variant="orchestrator"
-              agentName={agentName}
-            />
-            <TodoPanel tasks={tasks} />
-          </div>
-          {activePrompt && (
-            <PromptButtons
-              key={activePrompt.requestId}
-              options={activePrompt.options}
-              question={activePrompt.question}
-              multiSelect={activePrompt.multiSelect}
-              promptType={activePrompt.promptType}
-              questions={activePrompt.questions}
-              approvePattern={activePrompt.approvePattern}
-              onSelect={sendPromptResponse}
+              ref={inputBarRef}
+              onSendInput={onSendInput}
+              isWaiting={!!activePrompt}
+              disabled={disabled}
+              onEscape={() => {}}
+              pendingFiles={pendingFiles}
+              onAddFiles={onAddFiles}
+              onRemoveFile={onRemoveFile}
+              skillGroups={skillGroups}
+              slashCommands={slashCommands}
+              placeholder={`Ask Agent ${agentName ?? 'Joe'} to work on your code...`}
+              initialValue=""
+              onValueChange={() => {}}
+              currentModel={currentModel}
+              onModelChange={onModelChange}
               isMobile={isMobile}
+              currentPermissionMode={currentPermissionMode}
+              onPermissionModeChange={onPermissionModeChange}
             />
-          )}
-          <InputBar
-            key={`orchestrator-${activeSessionId}`}
-            variant="orchestrator"
-            ref={inputBarRef}
-            onSendInput={onSendInput}
-            isWaiting={!!activePrompt}
-            disabled={disabled}
-            onEscape={() => {}}
-            pendingFiles={pendingFiles}
-            onAddFiles={onAddFiles}
-            onRemoveFile={onRemoveFile}
-            skillGroups={skillGroups}
-            slashCommands={slashCommands}
-            placeholder={`Ask Agent ${agentName ?? 'Joe'} to work on your code...`}
-            initialValue=""
-            onValueChange={() => {}}
-            currentModel={currentModel}
-            onModelChange={onModelChange}
-            isMobile={isMobile}
-            currentPermissionMode={currentPermissionMode}
-            onPermissionModeChange={onPermissionModeChange}
-          />
+          </div>
+          {/* Task board sidebar */}
+          {!isMobile && <TaskBoardPanel entries={taskBoardEntries} onRefresh={refreshTaskBoard} />}
         </div>
       )}
     </>
