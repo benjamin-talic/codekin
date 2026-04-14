@@ -199,6 +199,20 @@ export function createOrchestratorRouter(
     res.json({ child })
   })
 
+  /** Stop a running child session. */
+  router.post('/api/orchestrator/children/:id/stop', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const existing = children.get(req.params.id)
+    if (!existing) return res.status(404).json({ error: 'Child session not found' })
+    if (existing.status !== 'starting' && existing.status !== 'running') {
+      return res.status(409).json({ error: `Cannot stop child in '${existing.status}' state` })
+    }
+
+    const child = children.stopChild(req.params.id)
+    res.json({ child })
+  })
+
   // -------------------------------------------------------------------------
   // Memory
   // -------------------------------------------------------------------------
