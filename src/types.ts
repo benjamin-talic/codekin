@@ -180,6 +180,7 @@ export interface TaskBoardEntry {
   }
   result: {
     summary: string
+    fullOutput: string
     artifacts: {
       prUrl: string | null
       branchName: string | null

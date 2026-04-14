@@ -96,8 +96,10 @@ export interface TaskArtifacts {
 }
 
 export interface TaskResult {
-  /** Last assistant message, capped at 1000 chars. */
+  /** Last assistant message, capped at MAX_SUMMARY_LENGTH chars. */
   summary: string
+  /** Full untruncated output from the last assistant turn. */
+  fullOutput: string
   /** Structured artifacts parsed from session events. */
   artifacts: TaskArtifacts
   /** Duration from start to completion in milliseconds. */

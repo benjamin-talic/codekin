@@ -366,18 +366,21 @@ export class TaskBoard {
 
   /** Build a structured result from the session's output history. */
   private buildStructuredResult(task: TaskEntry, session: Session): TaskResult {
-    const summary = this.extractSummary(session.outputHistory)
+    const fullOutput = this.extractLastTurnText(session.outputHistory)
+    const summary = fullOutput.length > MAX_SUMMARY_LENGTH
+      ? fullOutput.slice(0, MAX_SUMMARY_LENGTH - 3) + '...'
+      : fullOutput
     const artifacts = this.extractArtifacts(task, session)
     const duration = Date.now() - new Date(task.startedAt).getTime()
-    return { summary, artifacts, duration }
+    return { summary, fullOutput, artifacts, duration }
   }
 
   /**
-   * Extract the last assistant message as the summary.
-   * Walk outputHistory in reverse from the last 'result' marker, collecting
-   * 'output' messages to get only the final turn's text.
+   * Extract the full text of the last assistant turn.
+   * Walks outputHistory in reverse from the last 'result' marker, collecting
+   * 'output' messages to get only the final turn's text (untruncated).
    */
-  private extractSummary(history: WsServerMessage[]): string {
+  private extractLastTurnText(history: WsServerMessage[]): string {
     // Find the last 'result' message index
     let lastResultIdx = -1
     for (let i = history.length - 1; i >= 0; i--) {
@@ -409,11 +412,7 @@ export class TaskBoard {
       }
     }
 
-    text = text.trim()
-    if (text.length > MAX_SUMMARY_LENGTH) {
-      text = text.slice(0, MAX_SUMMARY_LENGTH - 3) + '...'
-    }
-    return text
+    return text.trim()
   }
 
   /** Extract structured artifacts from the task snapshot and session history. */

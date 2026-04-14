@@ -214,12 +214,22 @@ export function createOrchestratorRouter(
   // Task Board
   // -------------------------------------------------------------------------
 
-  /** List all tasks. */
+  /** Strip fullOutput from task results to keep default responses compact.
+   *  Joe can pass ?full=true to get the untruncated output when needed. */
+  function compactTask(task: import('./task-board-types.js').TaskEntry): import('./task-board-types.js').TaskEntry {
+    if (!task.result?.fullOutput) return task
+    const { fullOutput: _, ...compactResult } = task.result
+    return { ...task, result: { ...compactResult, fullOutput: '' } }
+  }
+
+  /** List all tasks. Pass ?full=true to include full untruncated output. */
   router.get('/api/orchestrator/tasks', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
     if (!taskBoard) return res.status(501).json({ error: 'Task board not available' })
 
-    res.json({ tasks: taskBoard.list() })
+    const full = req.query.full === 'true'
+    const tasks = taskBoard.list()
+    res.json({ tasks: full ? tasks : tasks.map(compactTask) })
   })
 
   /** Get task events (optionally pending only). */
@@ -231,7 +241,7 @@ export function createOrchestratorRouter(
     res.json({ events: taskBoard.getEvents(pendingOnly) })
   })
 
-  /** Get a specific task. */
+  /** Get a specific task. Pass ?full=true to include full untruncated output. */
   router.get('/api/orchestrator/tasks/:id', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
     if (!taskBoard) return res.status(501).json({ error: 'Task board not available' })
@@ -239,7 +249,8 @@ export function createOrchestratorRouter(
     const task = taskBoard.get(req.params.id)
     if (!task) return res.status(404).json({ error: 'Task not found' })
 
-    res.json({ task })
+    const full = req.query.full === 'true'
+    res.json({ task: full ? task : compactTask(task) })
   })
 
   /** Spawn a new task. */

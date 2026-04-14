@@ -185,7 +185,19 @@ curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/tasks" \\
 \`\`\`
 
 Each task includes a real-time snapshot with current state, active tool,
-files read/changed, and pending approvals.
+files read/changed, and pending approvals. The result summary is truncated
+by default to save tokens.
+
+### Getting Full Task Output
+Task summaries are truncated to ~1000 chars. To get the full untruncated
+output from a completed task, add \`?full=true\`:
+
+\`\`\`bash
+curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/tasks/TASK_ID?full=true" \\
+  -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"
+\`\`\`
+
+Use this when the summary is insufficient and you need the complete findings.
 
 ### Sending Messages to Running Tasks
 If a task needs guidance or correction while running:
