@@ -335,15 +335,19 @@ export function ensureOrchestratorDir(): void {
   const journalDir = join(ORCHESTRATOR_DIR, 'journal')
   if (!existsSync(journalDir)) mkdirSync(journalDir, { recursive: true })
 
-  // Seed files only if they don't exist (preserve user edits)
-  const seeds: [string, string][] = [
+  // Seed user-editable files only if they don't exist (preserve user edits)
+  const userFiles: [string, string][] = [
     [join(ORCHESTRATOR_DIR, 'PROFILE.md'), PROFILE_TEMPLATE],
     [join(ORCHESTRATOR_DIR, 'REPOS.md'), REPOS_TEMPLATE],
-    [join(ORCHESTRATOR_DIR, 'CLAUDE.md'), CLAUDE_MD_TEMPLATE],
   ]
-  for (const [path, content] of seeds) {
+  for (const [path, content] of userFiles) {
     if (!existsSync(path)) writeFileSync(path, content, 'utf-8')
   }
+
+  // CLAUDE.md is always overwritten with the latest template so the
+  // orchestrator picks up new capabilities (task types, event delivery, etc.)
+  // on server restart without requiring a fresh session.
+  writeFileSync(join(ORCHESTRATOR_DIR, 'CLAUDE.md'), CLAUDE_MD_TEMPLATE, 'utf-8')
 }
 
 /** Get or create a stable session UUID that persists across restarts. */
