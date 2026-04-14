@@ -14,7 +14,7 @@
 export type TaskType = 'implement' | 'explore' | 'review' | 'research'
 
 /** Lifecycle status of a task. */
-export type TaskStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out'
+export type TaskStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out' | 'cancelled'
 
 /** Real-time state of the child session behind a task. */
 export type TaskState = 'idle' | 'processing' | 'waiting_for_approval' | 'exited'
@@ -133,7 +133,7 @@ export interface TaskEntry {
 // Events (queued for delivery to the orchestrator)
 // ---------------------------------------------------------------------------
 
-export type TaskEventType = 'completed' | 'failed' | 'stuck' | 'timed_out' | 'approval_needed'
+export type TaskEventType = 'completed' | 'failed' | 'stuck' | 'timed_out' | 'approval_needed' | 'cancelled'
 
 export interface TaskEvent {
   /** Unique event ID. */

@@ -368,6 +368,19 @@ export function createOrchestratorRouter(
     }
   })
 
+  /** Stop a running task. */
+  router.post('/api/orchestrator/tasks/:id/stop', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!taskBoard) return res.status(501).json({ error: 'Task board not available' })
+
+    try {
+      const stopped = taskBoard.stopTask(req.params.id)
+      res.json({ task: stopped })
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to stop task' })
+    }
+  })
+
   /** Re-spawn a failed or timed-out task. */
   router.post('/api/orchestrator/tasks/:id/retry', async (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })

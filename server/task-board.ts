@@ -232,11 +232,29 @@ export class TaskBoard {
     }
   }
 
-  /** Re-spawn a failed or timed-out task with the same request. */
+  /** Stop a running task and mark it as cancelled. */
+  stopTask(taskId: string): TaskEntry {
+    const task = this.tasks.get(taskId)
+    if (!task) throw new Error('Task not found')
+    if (task.status !== 'starting' && task.status !== 'running') {
+      throw new Error(`Cannot stop task with status: ${task.status}`)
+    }
+
+    // Kill the child process
+    const session = this.sessions.get(taskId)
+    if (session?.claudeProcess?.isAlive()) {
+      session.claudeProcess.stop()
+    }
+
+    this.markTaskTerminal(task, 'cancelled', 'Task was manually stopped')
+    return task
+  }
+
+  /** Re-spawn a failed, timed-out, or cancelled task with the same request. */
   async retryTask(taskId: string): Promise<TaskEntry> {
     const old = this.tasks.get(taskId)
     if (!old) throw new Error('Task not found')
-    if (old.status !== 'failed' && old.status !== 'timed_out') {
+    if (old.status !== 'failed' && old.status !== 'timed_out' && old.status !== 'cancelled') {
       throw new Error(`Cannot retry task with status: ${old.status}`)
     }
     return this.spawn(old.request)
@@ -709,6 +727,12 @@ export class TaskBoard {
             lines.push(`  Task ID: ${event.taskId} | Request ID: ${event.payload.approval.requestId}`)
           }
           break
+        case 'cancelled':
+          lines.push(`CANCELLED: ${taskDesc} (${repo})`)
+          if (event.payload.error) {
+            lines.push(`  ${event.payload.error}`)
+          }
+          break
       }
       lines.push('')
     }
@@ -799,7 +823,7 @@ export class TaskBoard {
 
   private markTaskTerminal(task: TaskEntry, status: TaskStatus, error: string | null): void {
     // Only transition to terminal if not already terminal
-    if (task.status === 'completed' || task.status === 'failed' || task.status === 'timed_out') return
+    if (task.status === 'completed' || task.status === 'failed' || task.status === 'timed_out' || task.status === 'cancelled') return
 
     task.status = status
     task.error = error
@@ -817,7 +841,8 @@ export class TaskBoard {
 
     // Queue event
     const eventType: TaskEventType = status === 'completed' ? 'completed'
-      : status === 'timed_out' ? 'timed_out' : 'failed'
+      : status === 'timed_out' ? 'timed_out'
+      : status === 'cancelled' ? 'cancelled' : 'failed'
     this.queueEvent(task.id, eventType, {
       summary: task.result?.summary,
       error: task.error ?? undefined,
