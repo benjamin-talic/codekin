@@ -8,8 +8,9 @@
 
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { homedir } from 'os'
 import { randomUUID } from 'crypto'
-import { DATA_DIR, AGENT_DISPLAY_NAME, getAgentDisplayName } from './config.js'
+import { DATA_DIR, AGENT_DISPLAY_NAME, getAgentDisplayName, REPOS_ROOT } from './config.js'
 import type { SessionManager } from './session-manager.js'
 
 export const ORCHESTRATOR_DIR = join(DATA_DIR, 'orchestrator')
@@ -371,16 +372,31 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
   ensureOrchestratorDir()
   const stableId = getOrCreateOrchestratorId()
 
-  const ORCHESTRATOR_ALLOWED_TOOLS = ['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList']
+  const ORCHESTRATOR_ALLOWED_TOOLS = ['Bash(curl:*)', 'Bash(env:*)', 'Bash(printenv:*)', 'CronCreate', 'CronDelete', 'CronList']
+
+  // Grant the orchestrator access to the user's home directory so it (and its
+  // subagents) can read files in any repository the user points it to, not
+  // just the orchestrator workspace. Also add REPOS_ROOT explicitly.
+  const addDirs = [...new Set([REPOS_ROOT, homedir()])]
 
   // Check if session already exists
   const existing = sessions.get(stableId)
   if (existing) {
-    // Ensure allowedTools is up-to-date (may be missing if the session was
-    // created before CronCreate/Delete/List were added, or lost during
-    // a persistence round-trip).
-    if (!existing.allowedTools || existing.allowedTools.length === 0) {
-      existing.allowedTools = ORCHESTRATOR_ALLOWED_TOOLS
+    // Always reconcile allowedTools and addDirs — new tools/dirs may have been
+    // added since the session was first created or last persisted.
+    let dirty = false
+    const currentTools = new Set(existing.allowedTools || [])
+    for (const tool of ORCHESTRATOR_ALLOWED_TOOLS) {
+      if (!currentTools.has(tool)) { currentTools.add(tool); dirty = true }
+    }
+    if (dirty) existing.allowedTools = [...currentTools]
+
+    const currentDirs = new Set(existing.addDirs || [])
+    for (const dir of addDirs) {
+      if (!currentDirs.has(dir)) { currentDirs.add(dir); dirty = true }
+    }
+    if (dirty) {
+      existing.addDirs = [...currentDirs]
       sessions.persistToDisk()
     }
     // Session exists — start Claude if not alive
@@ -399,6 +415,7 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
     id: stableId,
     permissionMode: 'acceptEdits',
     allowedTools: ORCHESTRATOR_ALLOWED_TOOLS,
+    addDirs,
   })
 
   // Start Claude
