@@ -9,9 +9,9 @@ import type { RefObject } from 'react'
 import { OrchestratorView } from './OrchestratorView'
 import { ChatView } from './ChatView'
 import { TodoPanel } from './TodoPanel'
+import { TaskBoardPanel } from './TaskBoardPanel'
 import { PromptButtons } from './PromptButtons'
 import { InputBar, type InputBarHandle } from './InputBar'
-import { TaskBoardPanel } from './TaskBoardPanel'
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
 import type { ChatMessage, PermissionMode, TaskItem } from '../types'
@@ -89,10 +89,11 @@ export function OrchestratorContent({
         agentName={agentName}
         onToggleTaskBoard={onToggleTaskBoard}
       />
-      {/* Render chat UI once orchestrator session is joined */}
+      {/* Render chat UI + task board once orchestrator session is joined */}
       {activeSessionId && (
         <div className="flex flex-1 overflow-hidden min-h-0">
-          <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+          {/* Chat column */}
+          <div className="flex flex-1 flex-col overflow-hidden min-h-0 min-w-0">
             <div className="relative flex-1 min-h-0 flex flex-col">
               <ChatView
                 messages={messages}

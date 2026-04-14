@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { IconX, IconCheck, IconAlertTriangle, IconLoader2, IconPlayerPlay, IconSend, IconRefresh, IconExternalLink, IconClock } from '@tabler/icons-react'
+import { IconX, IconCheck, IconAlertTriangle, IconLoader2, IconPlayerPlay, IconSend, IconRefresh, IconExternalLink, IconClock, IconMinus } from '@tabler/icons-react'
 import type { TaskBoardEntry, TaskBoardStatus } from '../types'
 import { useTaskBoard } from '../hooks/useTaskBoard'
 
@@ -52,6 +52,7 @@ function StatusBadge({ status }: { status: TaskBoardStatus }) {
     completed: { label: 'Completed', className: 'bg-success-9 text-success-1' },
     failed: { label: 'Failed', className: 'bg-error-9 text-error-1' },
     timed_out: { label: 'Timed Out', className: 'bg-warning-9 text-warning-1' },
+    cancelled: { label: 'Cancelled', className: 'bg-warning-9 text-warning-1' },
   }
   const c = config[status]
   return <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${c.className}`}>{c.label}</span>
@@ -82,7 +83,7 @@ function TaskCard({
   const [messageInput, setMessageInput] = useState('')
   const [showMessageInput, setShowMessageInput] = useState(false)
 
-  const isTerminal = task.status === 'completed' || task.status === 'failed' || task.status === 'timed_out'
+  const isTerminal = task.status === 'completed' || task.status === 'failed' || task.status === 'timed_out' || task.status === 'cancelled'
   const needsApproval = task.snapshot.state === 'waiting_for_approval' && task.snapshot.pendingApproval
 
   return (
@@ -205,6 +206,14 @@ function TaskCard({
         </div>
       )}
 
+      {/* Cancelled notice */}
+      {task.status === 'cancelled' && (
+        <div className="text-xs text-warning-4 mb-2 flex items-start gap-1">
+          <IconMinus size={12} className="flex-shrink-0 mt-0.5" />
+          <span>Task was cancelled</span>
+        </div>
+      )}
+
       {/* Actions for terminal tasks */}
       {isTerminal && (
         <div className="flex gap-1.5">
@@ -322,7 +331,7 @@ export function TaskBoardPanel({ isOpen, onClose, token, onViewSession }: TaskBo
   const needsApproval = tasks.filter(t => t.snapshot.state === 'waiting_for_approval')
   const running = tasks.filter(t => (t.status === 'running' || t.status === 'starting') && t.snapshot.state !== 'waiting_for_approval')
   const completed = tasks.filter(t => t.status === 'completed')
-  const failed = tasks.filter(t => t.status === 'failed' || t.status === 'timed_out')
+  const failed = tasks.filter(t => t.status === 'failed' || t.status === 'timed_out' || t.status === 'cancelled')
 
   const handleApprove = (taskId: string, requestId: string) => void approve(taskId, requestId, 'allow')
   const handleDeny = (taskId: string, requestId: string) => void approve(taskId, requestId, 'deny')

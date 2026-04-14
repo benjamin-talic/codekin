@@ -150,7 +150,7 @@ export interface TaskItem {
 // ---------------------------------------------------------------------------
 
 export type TaskType = 'implement' | 'explore' | 'review' | 'research'
-export type TaskBoardStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out'
+export type TaskBoardStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out' | 'cancelled'
 export type TaskBoardState = 'idle' | 'processing' | 'waiting_for_approval' | 'exited'
 
 export interface TaskBoardEntry {
@@ -367,4 +367,5 @@ export interface MobileProps {
   mobileOpen?: boolean
   onMobileClose?: () => void
 }
+
 
