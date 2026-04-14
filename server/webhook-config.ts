@@ -94,6 +94,15 @@ export function loadWebhookConfig(): FullWebhookConfig {
   const envOpencodeModel = process.env.GITHUB_WEBHOOK_PR_REVIEW_OPENCODE_MODEL
   if (envOpencodeModel) prReviewOpencodeModel = envOpencodeModel
 
+  // Normalize short Claude model names to full IDs so the UI model validation
+  // doesn't "correct" them (e.g. 'sonnet' → 'claude-sonnet-4-6').
+  const CLAUDE_MODEL_ALIASES: Record<string, string> = {
+    'sonnet': 'claude-sonnet-4-6',
+    'opus': 'claude-opus-4-6',
+    'haiku': 'claude-haiku-4-5-20251001',
+  }
+  prReviewClaudeModel = CLAUDE_MODEL_ALIASES[prReviewClaudeModel] ?? prReviewClaudeModel
+
   return {
     enabled,
     secret,
