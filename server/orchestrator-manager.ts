@@ -9,7 +9,7 @@
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { randomUUID } from 'crypto'
-import { DATA_DIR, AGENT_DISPLAY_NAME, getAgentDisplayName, REPOS_ROOT } from './config.js'
+import { DATA_DIR, AGENT_DISPLAY_NAME, getAgentDisplayName } from './config.js'
 import type { SessionManager } from './session-manager.js'
 
 export const ORCHESTRATOR_DIR = join(DATA_DIR, 'orchestrator')
@@ -373,10 +373,9 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
 
   const ORCHESTRATOR_ALLOWED_TOOLS = ['Bash(curl:*)', 'Bash(env:*)', 'Bash(printenv:*)', 'CronCreate', 'CronDelete', 'CronList']
 
-  // The orchestrator does NOT get direct repo access — it delegates work to
-  // child sessions that run inside the target repo. Only REPOS_ROOT is added
-  // so Joe can read audit reports from .codekin/reports/ directories.
-  const addDirs = [REPOS_ROOT]
+  // The orchestrator does NOT get direct repo access — it delegates all repo
+  // work to child sessions that run inside the target repo.
+  const addDirs: string[] = []
 
   // Check if session already exists
   const existing = sessions.get(stableId)
