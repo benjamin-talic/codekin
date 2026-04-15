@@ -4,7 +4,7 @@
  * All REST calls (including uploads) go through the /cc proxy (nginx → server on port 32352).
  */
 
-import type { Session, WsServerMessage } from '../types'
+import type { Session, WsServerMessage, ChildSessionInfo, TaskBoardEntry } from '../types'
 
 /** Base path for the WebSocket server REST API (proxied by nginx). */
 const BASE = '/cc'
@@ -148,6 +148,20 @@ export async function startOrchestrator(token: string): Promise<{ sessionId: str
   })
   if (!res.ok) throw new Error(`Failed to start orchestrator: ${res.status}`)
   return res.json()
+}
+
+/** Stop a running orchestrator child session. */
+export async function stopChildSession(token: string, childId: string): Promise<ChildSessionInfo> {
+  const res = await authFetch(`${BASE}/api/orchestrator/children/${encodeURIComponent(childId)}/stop`, {
+    method: 'POST',
+    headers: headers(token),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Stop failed' }))
+    throw new Error(data.error || `Failed to stop child session: ${res.status}`)
+  }
+  const data = await res.json()
+  return data.child
 }
 
 /** Upload a file via the server. Returns the server-side file path. */
@@ -554,4 +568,64 @@ export async function testWebhookDelivery(
     throw new Error(data.error || `Test failed: ${res.status}`)
   }
   return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Task Board (orchestrator sub-agent management)
+// ---------------------------------------------------------------------------
+
+/** List all tasks on the orchestrator's task board. */
+export async function listTasks(token: string): Promise<TaskBoardEntry[]> {
+  const res = await authFetch(`${BASE}/api/orchestrator/tasks`, { headers: headers(token) })
+  if (!res.ok) return []
+  const data = await res.json()
+  return data.tasks ?? []
+}
+
+/** Get a single task by ID. */
+export async function getTask(token: string, id: string): Promise<TaskBoardEntry | null> {
+  const res = await authFetch(`${BASE}/api/orchestrator/tasks/${id}`, { headers: headers(token) })
+  if (!res.ok) return null
+  const data = await res.json()
+  return data.task ?? null
+}
+
+/** Approve or deny a task's pending tool approval. */
+export async function approveTask(token: string, taskId: string, requestId: string, value: string): Promise<void> {
+  const res = await authFetch(`${BASE}/api/orchestrator/tasks/${taskId}/approve`, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify({ requestId, value }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Failed to approve' }))
+    throw new Error(data.error || `Approve failed: ${res.status}`)
+  }
+}
+
+/** Send a follow-up message to a running task's child session. */
+export async function sendTaskMessage(token: string, taskId: string, message: string): Promise<void> {
+  const res = await authFetch(`${BASE}/api/orchestrator/tasks/${taskId}/message`, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify({ message }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Failed to send message' }))
+    throw new Error(data.error || `Send message failed: ${res.status}`)
+  }
+}
+
+/** Retry a failed or timed-out task. */
+export async function retryTask(token: string, taskId: string): Promise<TaskBoardEntry | null> {
+  const res = await authFetch(`${BASE}/api/orchestrator/tasks/${taskId}/retry`, {
+    method: 'POST',
+    headers: headers(token),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Failed to retry' }))
+    throw new Error(data.error || `Retry failed: ${res.status}`)
+  }
+  const data = await res.json()
+  return data.task ?? null
 }

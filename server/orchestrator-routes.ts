@@ -16,6 +16,8 @@ import { scanRepoReports, readReport, getReportsSince } from './orchestrator-rep
 import { OrchestratorMemory } from './orchestrator-memory.js'
 import { OrchestratorChildManager } from './orchestrator-children.js'
 import type { OrchestratorMonitor } from './orchestrator-monitor.js'
+import type { TaskBoard } from './task-board.js'
+import type { TaskType } from './task-board-types.js'
 import {
   extractMemoryCandidates, smartUpsert, runAgingCycle,
   recordFindingOutcome, getTriageRecommendation,
@@ -36,10 +38,18 @@ export function createOrchestratorRouter(
   verifyTokenOrSessionToken?: VerifySessionFn,
   injectedMemory?: OrchestratorMemory,
   injectedChildren?: OrchestratorChildManager,
+  injectedTaskBoard?: TaskBoard,
 ): Router {
   const router = Router()
   const memory = injectedMemory ?? new OrchestratorMemory()
   const children = injectedChildren ?? new OrchestratorChildManager(sessions)
+  const taskBoard = injectedTaskBoard
+
+  /** Resolve effective repos root: DB setting (from UI) > REPOS_ROOT env/default. */
+  const resolveReposRoot = (): string => {
+    const custom = sessions.archive.getSetting('repos_path', '')
+    return custom || REPOS_ROOT
+  }
 
   /**
    * Verify that the request is authorized — accepts either the master auth
@@ -163,9 +173,10 @@ export function createOrchestratorRouter(
       }
     }
 
-    // Validate repo path: must resolve under REPOS_ROOT and be an existing directory
+    // Validate repo path: must resolve under the configured repos root
+    const reposRoot = resolveReposRoot()
     const resolvedRepo = resolve(repo)
-    if (!resolvedRepo.startsWith(REPOS_ROOT + '/') && resolvedRepo !== REPOS_ROOT) {
+    if (!resolvedRepo.startsWith(reposRoot + '/') && resolvedRepo !== reposRoot) {
       return res.status(400).json({ error: 'Invalid repo path: must be under configured repos root' })
     }
     if (!existsSync(resolvedRepo) || !statSync(resolvedRepo).isDirectory()) {
@@ -197,6 +208,190 @@ export function createOrchestratorRouter(
     if (!child) return res.status(404).json({ error: 'Child session not found' })
 
     res.json({ child })
+  })
+
+  /** Stop a running child session. */
+  router.post('/api/orchestrator/children/:id/stop', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const existing = children.get(req.params.id)
+    if (!existing) return res.status(404).json({ error: 'Child session not found' })
+    if (existing.status !== 'starting' && existing.status !== 'running') {
+      return res.status(409).json({ error: `Cannot stop child in '${existing.status}' state` })
+    }
+
+    const child = children.stopChild(req.params.id)
+    res.json({ child })
+  })
+
+  // -------------------------------------------------------------------------
+  // Task Board
+  // -------------------------------------------------------------------------
+
+  /** Strip fullOutput from task results to keep default responses compact.
+   *  Joe can pass ?full=true to get the untruncated output when needed. */
+  function compactTask(task: import('./task-board-types.js').TaskEntry): import('./task-board-types.js').TaskEntry {
+    if (!task.result?.fullOutput) return task
+    const { fullOutput: _, ...compactResult } = task.result
+    return { ...task, result: { ...compactResult, fullOutput: '' } }
+  }
+
+  /** List all tasks. Pass ?full=true to include full untruncated output. */
+  router.get('/api/orchestrator/tasks', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!taskBoard) return res.status(501).json({ error: 'Task board not available' })
+
+    const full = req.query.full === 'true'
+    const tasks = taskBoard.list()
+    res.json({ tasks: full ? tasks : tasks.map(compactTask) })
+  })
+
+  /** Get task events (optionally pending only). */
+  router.get('/api/orchestrator/tasks/events', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!taskBoard) return res.status(501).json({ error: 'Task board not available' })
+
+    const pendingOnly = req.query.pending === 'true'
+    res.json({ events: taskBoard.getEvents(pendingOnly) })
+  })
+
+  /** Get a specific task. Pass ?full=true to include full untruncated output. */
+  router.get('/api/orchestrator/tasks/:id', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!taskBoard) return res.status(501).json({ error: 'Task board not available' })
+
+    const task = taskBoard.get(req.params.id)
+    if (!task) return res.status(404).json({ error: 'Task not found' })
+
+    const full = req.query.full === 'true'
+    res.json({ task: full ? task : compactTask(task) })
+  })
+
+  /** Spawn a new task. */
+  router.post('/api/orchestrator/tasks', async (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!taskBoard) return res.status(501).json({ error: 'Task board not available' })
+
+    const { repo, task, branchName, taskType, completionPolicy, useWorktree, timeoutMs, model, allowedTools } = req.body
+    if (!repo || !task || !taskType) {
+      return res.status(400).json({ error: 'Missing required fields: repo, task, taskType' })
+    }
+
+    // Validate taskType
+    const validTypes: TaskType[] = ['implement', 'explore', 'review', 'research']
+    if (!validTypes.includes(taskType)) {
+      return res.status(400).json({ error: `Invalid taskType: must be one of ${validTypes.join(', ')}` })
+    }
+
+    // branchName required for implement, auto-generate for others
+    const effectiveBranch = branchName
+      || (taskType === 'implement' ? null : `${taskType}/${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`)
+    if (!effectiveBranch) {
+      return res.status(400).json({ error: 'Missing required field: branchName (required for implement tasks)' })
+    }
+
+    // Validate branchName
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$/.test(effectiveBranch)) {
+      return res.status(400).json({ error: 'Invalid branchName: only alphanumeric, /, _, ., and - are allowed' })
+    }
+
+    // Validate allowedTools if provided
+    if (allowedTools !== undefined) {
+      if (!Array.isArray(allowedTools) || !allowedTools.every((t: unknown) => typeof t === 'string')) {
+        return res.status(400).json({ error: 'Invalid allowedTools: must be an array of strings' })
+      }
+    }
+
+    // Validate repo path
+    const reposRoot = resolveReposRoot()
+    const resolvedRepo = resolve(repo)
+    if (!resolvedRepo.startsWith(reposRoot + '/') && resolvedRepo !== reposRoot) {
+      return res.status(400).json({ error: 'Invalid repo path: must be under configured repos root' })
+    }
+    if (!existsSync(resolvedRepo) || !statSync(resolvedRepo).isDirectory()) {
+      return res.status(400).json({ error: 'Invalid repo path: directory does not exist' })
+    }
+
+    // Default completionPolicy based on taskType
+    const effectivePolicy = completionPolicy
+      ?? (taskType === 'implement' ? 'pr' : 'none')
+
+    try {
+      const spawned = await taskBoard.spawn({
+        repo,
+        task,
+        branchName: effectiveBranch,
+        taskType,
+        completionPolicy: effectivePolicy,
+        useWorktree: useWorktree ?? (taskType === 'implement'),
+        timeoutMs,
+        model,
+        allowedTools,
+      })
+      res.json({ task: spawned })
+    } catch (err) {
+      res.status(503).json({ error: err instanceof Error ? err.message : 'Failed to spawn task' })
+    }
+  })
+
+  /** Send a follow-up message to a running task's child session. */
+  router.post('/api/orchestrator/tasks/:id/message', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!taskBoard) return res.status(501).json({ error: 'Task board not available' })
+
+    const { message } = req.body
+    if (!message) return res.status(400).json({ error: 'Missing required field: message' })
+
+    try {
+      taskBoard.sendMessageToChild(req.params.id, message)
+      res.json({ ok: true })
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to send message' })
+    }
+  })
+
+  /** Approve or deny a task's pending approval. */
+  router.post('/api/orchestrator/tasks/:id/approve', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!taskBoard) return res.status(501).json({ error: 'Task board not available' })
+
+    const { requestId, value } = req.body
+    if (!requestId || !value) {
+      return res.status(400).json({ error: 'Missing required fields: requestId, value' })
+    }
+
+    try {
+      taskBoard.respondToApproval(req.params.id, requestId, value)
+      res.json({ ok: true })
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to respond to approval' })
+    }
+  })
+
+  /** Stop a running task. */
+  router.post('/api/orchestrator/tasks/:id/stop', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!taskBoard) return res.status(501).json({ error: 'Task board not available' })
+
+    try {
+      const stopped = taskBoard.stopTask(req.params.id)
+      res.json({ task: stopped })
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to stop task' })
+    }
+  })
+
+  /** Re-spawn a failed or timed-out task. */
+  router.post('/api/orchestrator/tasks/:id/retry', async (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!taskBoard) return res.status(501).json({ error: 'Task board not available' })
+
+    try {
+      const retried = await taskBoard.retryTask(req.params.id)
+      res.json({ task: retried })
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to retry task' })
+    }
   })
 
   // -------------------------------------------------------------------------
@@ -364,7 +559,7 @@ export function createOrchestratorRouter(
 
     const repoItems = memory.list({ memoryType: 'repo_context' })
     const pendingNotifications = monitorRef?.current?.getPending() ?? []
-    const activeChildren = children.activeCount()
+    const activeChildren = taskBoard ? taskBoard.activeCount() : children.activeCount()
     const trustRecords = memory.listTrustRecords()
     const autoApproved = trustRecords.filter(t => t.effectiveLevel !== 'ask').length
 
@@ -373,7 +568,8 @@ export function createOrchestratorRouter(
         managedRepos: repoItems.length,
         pendingNotifications: pendingNotifications.length,
         activeChildSessions: activeChildren,
-        totalChildSessions: children.list().length,
+        totalChildSessions: taskBoard ? taskBoard.list().length : children.list().length,
+        needsApproval: taskBoard ? taskBoard.needsApprovalCount() : 0,
         trustRecords: trustRecords.length,
         autoApprovedActions: autoApproved,
         memoryItems: memory.list().length,

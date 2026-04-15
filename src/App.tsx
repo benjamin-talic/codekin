@@ -70,6 +70,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(!settings.token)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [diffPanelOpen, setDiffPanelOpen] = useState(false)
+  const [taskBoardOpen, setTaskBoardOpen] = useState(false)
   /** Callback ref for forwarding WsServerMessages to the diff panel (set by DiffPanel on mount). */
   const diffHandleMessageRef = useRef<(msg: import('./types').WsServerMessage) => void>(() => {})
   /** Callback ref for notifying the diff panel when a tool finishes (triggers auto-refresh). */
@@ -672,6 +673,15 @@ export default function App() {
             onPermissionModeChange={handlePermissionModeChange}
             disabled={!settings.token}
             agentName={agentName}
+            taskBoardOpen={taskBoardOpen}
+            onCloseTaskBoard={() => setTaskBoardOpen(false)}
+            onToggleTaskBoard={() => setTaskBoardOpen(prev => !prev)}
+            onViewSession={(sessionId) => {
+              clearMessages()
+              leaveSession()
+              joinSession(sessionId)
+              navigate(`/s/${sessionId}`)
+            }}
           />
         ) : view === 'workflows' ? (
           <WorkflowsView

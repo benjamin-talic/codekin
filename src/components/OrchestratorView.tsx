@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react'
-import { IconRobotFace, IconFolder, IconBell, IconTerminal2 } from '@tabler/icons-react'
+import { IconRobotFace, IconFolder, IconBell, IconTerminal2, IconAlertTriangle } from '@tabler/icons-react'
 import * as api from '../lib/ccApi'
 
 interface DashboardStats {
@@ -15,6 +15,7 @@ interface DashboardStats {
   pendingNotifications: number
   activeChildSessions: number
   totalChildSessions: number
+  needsApproval: number
   trustRecords: number
   autoApprovedActions: number
   memoryItems: number
@@ -27,21 +28,29 @@ interface Props {
   sessionJoined: boolean
   /** Agent display name (from parent settings). */
   agentName?: string
+  /** Callback to toggle the Task Board panel. */
+  onToggleTaskBoard?: () => void
 }
 
-function StatCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
+function StatCard({ label, value, icon, onClick, variant }: { label: string; value: number; icon: React.ReactNode; onClick?: () => void; variant?: 'warning' }) {
+  const Wrapper = onClick ? 'button' : 'div'
+  const bg = variant === 'warning' ? 'bg-warning-11' : 'bg-neutral-11'
+  const hoverBg = onClick ? (variant === 'warning' ? 'hover:bg-warning-10' : 'hover:bg-neutral-10') : ''
   return (
-    <div className="flex items-center gap-2.5 rounded-lg bg-neutral-11 px-3 py-2 min-w-[120px]">
-      <div className="text-neutral-5">{icon}</div>
+    <Wrapper
+      className={`flex items-center gap-2.5 rounded-lg ${bg} px-3 py-2 min-w-[120px] ${onClick ? `cursor-pointer ${hoverBg} transition-colors` : ''}`}
+      onClick={onClick}
+    >
+      <div className={variant === 'warning' ? 'text-warning-4' : 'text-neutral-5'}>{icon}</div>
       <div>
-        <div className="text-[18px] font-semibold text-neutral-2 leading-tight">{value}</div>
-        <div className="text-[12px] text-neutral-5 leading-tight">{label}</div>
+        <div className={`text-[18px] font-semibold leading-tight ${variant === 'warning' ? 'text-warning-2' : 'text-neutral-2'}`}>{value}</div>
+        <div className={`text-[12px] leading-tight ${variant === 'warning' ? 'text-warning-5' : 'text-neutral-5'}`}>{label}</div>
       </div>
-    </div>
+    </Wrapper>
   )
 }
 
-export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoined, agentName: agentNameProp }: Props) {
+export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoined, agentName: agentNameProp, onToggleTaskBoard }: Props) {
   const [status, setStatus] = useState<'loading' | 'active' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -138,8 +147,11 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
           {stats.pendingNotifications > 0 && (
             <StatCard label="pending" value={stats.pendingNotifications} icon={<IconBell size={15} />} />
           )}
+          {stats.needsApproval > 0 && (
+            <StatCard label="needs approval" value={stats.needsApproval} icon={<IconAlertTriangle size={15} />} onClick={onToggleTaskBoard} variant="warning" />
+          )}
           {stats.activeChildSessions > 0 && (
-            <StatCard label="sessions" value={stats.activeChildSessions} icon={<IconTerminal2 size={15} />} />
+            <StatCard label="tasks" value={stats.activeChildSessions} icon={<IconTerminal2 size={15} />} onClick={onToggleTaskBoard} />
           )}
         </div>
       )}

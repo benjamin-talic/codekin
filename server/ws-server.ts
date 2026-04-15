@@ -44,6 +44,7 @@ import { createDocsRouter } from './docs-routes.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
+import { TaskBoard } from './task-board.js'
 import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, CLAUDE_BINARY } from './config.js'
 
 // ---------------------------------------------------------------------------
@@ -334,7 +335,9 @@ app.use(createDocsRouter(verifyToken, extractToken))
 app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions, commitEventState))
 // Orchestrator router — monitorRef is populated after workflow engine init
 const orchestratorMonitorRef: { current: OrchestratorMonitor | null } = { current: null }
-app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken))
+// Task Board — provides structured task lifecycle, snapshots, and event delivery for the orchestrator
+const taskBoard = new TaskBoard(sessions, () => getOrchestratorSessionId(sessions))
+app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, undefined, taskBoard))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
 if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
@@ -432,8 +435,11 @@ function checkWsRateLimit(ip: string): boolean {
 wss.on('connection', (ws: WebSocket, req) => {
   // Validate Origin header to prevent cross-site WebSocket hijacking.
   // In production CORS_ORIGIN is always set; in dev we also accept no origin (CLI tools).
+  // In standalone mode (FRONTEND_DIST set), also accept the server's own origin since the
+  // frontend is served from the same port.
   const origin = req.headers.origin
-  if (origin && origin !== CORS_ORIGIN) {
+  const selfOrigin = FRONTEND_DIST ? `http://localhost:${port}` : null
+  if (origin && origin !== CORS_ORIGIN && origin !== selfOrigin) {
     ws.close(4003, 'Origin not allowed')
     return
   }
