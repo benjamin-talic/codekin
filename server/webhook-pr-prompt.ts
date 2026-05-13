@@ -94,10 +94,13 @@ function loadCustomPrompt(workspacePath: string, provider?: string): string | un
 function buildDefaultInstructions(ctx: PullRequestContext): string {
   const lines: string[] = []
 
-  if (ctx.action === 'synchronize' && ctx.beforeSha) {
-    lines.push(`This PR has been updated with new commits. The previous head was \`${ctx.beforeSha.slice(0, 7)}\`, the new head is \`${ctx.headSha.slice(0, 7)}\`. Review the full PR diff but pay particular attention to changes since the previous head.`)
-  } else if (ctx.action === 'reopened') {
+  if (ctx.action === 'reopened') {
     lines.push('This PR has been reopened. Provide a fresh comprehensive code review.')
+  } else if (ctx.action === 'review_requested') {
+    lines.push('A human explicitly requested a fresh Codekin review. Provide a comprehensive code review of this pull request.')
+    if (ctx.requestedBy) {
+      lines.push(`Acknowledge @${ctx.requestedBy} informally in the formal pull request review body.`)
+    }
   } else {
     lines.push('Provide a comprehensive code review of this pull request.')
   }
@@ -284,6 +287,12 @@ export function buildPrReviewPrompt(ctx: PullRequestContext, workspacePath: stri
     lines.push('')
     lines.push(`IMPORTANT: Always include \`${REVIEW_COMMENT_MARKER}\` at the very beginning of the comment body. This marker allows future reviews to update this comment instead of creating a new one.`)
   }
+
+  lines.push('')
+  lines.push('## Submitting the Formal Pull Request Review')
+  lines.push('After posting or updating the canonical Codekin summary comment, submit one formal GitHub pull request review for this run.')
+  lines.push(`Use \`gh pr review ${ctx.prNumber} --repo ${ctx.repo} --comment --body-file ${reviewBodyPath}\`.`)
+  lines.push('Do not submit more than one formal review for this run.')
 
   // --- Cache-writing instructions ---
   if (options?.cachePath) {

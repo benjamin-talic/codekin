@@ -1,6 +1,6 @@
 /** Tests for PR-specific GitHub API helpers — verifies diff/files/commits fetching and graceful degradation. */
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews, fetchExistingReviewComment, fetchPrState, postProviderUnavailableComment, REVIEW_COMMENT_MARKER, _setGhRunner, _resetGhRunner } from './webhook-pr-github.js'
+import { fetchAuthenticatedGhLogin, fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews, fetchExistingReviewComment, fetchExistingReviewStatusComment, fetchPrState, postProviderUnavailableComment, upsertTransientReviewStatusComment, deleteTransientReviewStatusComment, REVIEW_COMMENT_MARKER, REVIEW_STATUS_COMMENT_MARKER, _setGhRunner, _resetGhRunner } from './webhook-pr-github.js'
 
 describe('fetchPrDiff', () => {
   afterEach(() => {
@@ -37,6 +37,22 @@ describe('fetchPrDiff', () => {
     await fetchPrDiff('owner/repo', 7)
     expect(capturedArgs).toContain('/repos/owner/repo/pulls/7')
     expect(capturedArgs).toContain('Accept: application/vnd.github.diff')
+  })
+})
+
+describe('fetchAuthenticatedGhLogin', () => {
+  afterEach(() => {
+    _resetGhRunner()
+  })
+
+  it('returns the authenticated gh login', async () => {
+    _setGhRunner(async () => 'codekin-bot\n')
+    await expect(fetchAuthenticatedGhLogin()).resolves.toBe('codekin-bot')
+  })
+
+  it('returns undefined on error', async () => {
+    _setGhRunner(async () => { throw new Error('api error') })
+    await expect(fetchAuthenticatedGhLogin()).resolves.toBeUndefined()
   })
 })
 
@@ -209,6 +225,73 @@ describe('fetchExistingReviewComment', () => {
     _setGhRunner(async () => '[]')
     const result = await fetchExistingReviewComment('owner/repo', 42)
     expect(result).toBeUndefined()
+  })
+})
+
+describe('transient review status comments', () => {
+  afterEach(() => {
+    _resetGhRunner()
+  })
+
+  it('finds the latest transient status comment', async () => {
+    _setGhRunner(async () => JSON.stringify([
+      { id: 100, body: `${REVIEW_STATUS_COMMENT_MARKER}\nOld status` },
+      { id: 200, body: 'Regular comment' },
+      { id: 300, body: `${REVIEW_STATUS_COMMENT_MARKER}\nNew status` },
+    ]))
+
+    await expect(fetchExistingReviewStatusComment('owner/repo', 42)).resolves.toBe(300)
+  })
+
+  it('creates a status comment when none exists', async () => {
+    const calls: Array<string[]> = []
+    _setGhRunner(async (args) => {
+      calls.push(args)
+      if (args.includes('--paginate')) return '[]'
+      return '{"id":123}'
+    })
+
+    await expect(upsertTransientReviewStatusComment({
+      repo: 'owner/repo',
+      prNumber: 42,
+      body: 'Reviewing. Hang tight',
+    })).resolves.toBe(123)
+
+    const postCall = calls[1]
+    expect(postCall).toContain('/repos/owner/repo/issues/42/comments')
+    expect(postCall.find(a => a.startsWith('body='))).toContain(REVIEW_STATUS_COMMENT_MARKER)
+  })
+
+  it('updates an existing status comment', async () => {
+    const calls: Array<string[]> = []
+    _setGhRunner(async (args) => {
+      calls.push(args)
+      if (args.includes('--paginate')) return JSON.stringify([{ id: 123, body: REVIEW_STATUS_COMMENT_MARKER }])
+      return '{"id":123}'
+    })
+
+    await upsertTransientReviewStatusComment({
+      repo: 'owner/repo',
+      prNumber: 42,
+      body: 'Still reviewing',
+    })
+
+    expect(calls[1]).toContain('/repos/owner/repo/issues/comments/123')
+    expect(calls[1]).toContain('PATCH')
+  })
+
+  it('deletes an existing status comment', async () => {
+    const calls: Array<string[]> = []
+    _setGhRunner(async (args) => {
+      calls.push(args)
+      if (args.includes('--paginate')) return JSON.stringify([{ id: 123, body: REVIEW_STATUS_COMMENT_MARKER }])
+      return ''
+    })
+
+    await deleteTransientReviewStatusComment({ repo: 'owner/repo', prNumber: 42 })
+
+    expect(calls[1]).toContain('/repos/owner/repo/issues/comments/123')
+    expect(calls[1]).toContain('DELETE')
   })
 })
 

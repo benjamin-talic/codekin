@@ -3,7 +3,7 @@
  *
  * Processes incoming webhook events:
  *   - `workflow_run` (completed+failed) → spawns Claude session for CI diagnosis
- *   - `pull_request` (opened/synchronize/reopened/ready_for_review) → spawns Claude session for code review
+ *   - `pull_request` (opened/reopened/ready_for_review/review_requested) → spawns Claude session for code review
  *
  * Event lifecycle / state machine:
  *   received → (filtered/duplicate/capped)
@@ -31,10 +31,12 @@ import { WebhookDedup, computeIdempotencyKey, computePrIdempotencyKey } from './
 import { checkGhHealth, fetchFailedLogs, fetchJobs, fetchAnnotations, fetchCommitMessage, fetchPRTitle } from './webhook-github.js'
 import {
   fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews,
-  fetchExistingReviewComment, fetchPrState, postProviderUnavailableComment,
+  fetchExistingReviewComment, fetchPrState, postProviderUnavailableComment, fetchAuthenticatedGhLogin,
 } from './webhook-pr-github.js'
 import { buildPrReviewPrompt } from './webhook-pr-prompt.js'
 import { loadPrCache, ensureCacheDir, archivePrCache, deletePrCache } from './webhook-pr-cache.js'
+import { decidePrReview, PR_REVIEW_ACTIONS } from './webhook-pr-review-policy.js'
+import { ReviewStatusCommentService } from './webhook-pr-review-status.js'
 import { buildPrompt } from './webhook-prompt.js'
 import { createWorkspace, cleanupWorkspace } from './webhook-workspace.js'
 import { WebhookHandlerBase } from './webhook-handler-base.js'
@@ -45,15 +47,6 @@ import { REPOS_ROOT } from './config.js'
 
 /** How long an event can stay in 'processing' before the watchdog marks it as error. */
 const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000
-
-/** Supported pull_request actions for code review. */
-const PR_REVIEW_ACTIONS = ['opened', 'synchronize', 'reopened', 'ready_for_review'] as const
-
-/**
- * Actions that don't involve code changes — if the PR was already reviewed
- * at this SHA, skip the review to avoid wasting resources.
- */
-const NO_CODE_CHANGE_ACTIONS: readonly string[] = ['reopened', 'ready_for_review']
 
 /** Pending debounce entry for a PR event waiting to fire. */
 interface PendingDebounce {
@@ -84,6 +77,7 @@ interface ReviewSessionInfo {
   model: string
   payload: PullRequestPayload
   isFallback: boolean
+  requestedBy?: string
 }
 
 export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEventStatus> {
@@ -101,6 +95,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   /** Backlog entry IDs currently being retried — prevents double-processing if a worker tick overlaps. */
   private retryInProgress = new Set<string>()
   private debounceFileConsumed = false
+  private agentLogin: string | undefined
+  private reviewStatusComments = new ReviewStatusCommentService()
 
   constructor(config: FullWebhookConfig, sessions: SessionManager) {
     super('webhook', PROCESSING_TIMEOUT_MS)
@@ -128,6 +124,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
 
       if (code === 0) {
+        const reviewInfo = this.reviewSessions.get(sessionId)
+        if (reviewInfo) void this.clearReviewStatusComment(reviewInfo.payload)
         this.updateEventStatus(event.id, 'completed')
         console.log(`[webhook] Event ${event.id} → completed (session ${sessionId}, code=0)`)
         this.reviewSessions.delete(sessionId)
@@ -157,6 +155,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       const reviewInfo = this.reviewSessions.get(sessionId)
       if (reviewInfo) {
         this.providerHealth.markHealthy(reviewInfo.provider)
+        void this.clearReviewStatusComment(reviewInfo.payload)
         this.reviewSessions.delete(sessionId)
       }
       this.sessionLastError.delete(sessionId)
@@ -186,6 +185,15 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     return (activeWebhookSessions + processingEvents) >= this.config.maxConcurrentSessions
   }
 
+  protected override updateEventStatus(eventId: string, status: WebhookEventStatus, error?: string): void {
+    const event = this.getEvent(eventId)
+    super.updateEventStatus(eventId, status, error)
+
+    if (event?.event === 'pull_request' && status === 'error' && error?.includes('watchdog') && event.prNumber) {
+      void this.clearReviewStatusCommentFor(event.repo, event.prNumber)
+    }
+  }
+
   /**
    * Run gh CLI health check. Must be called on startup.
    * Sets ghHealthy flag — if false, webhook processing is disabled.
@@ -199,6 +207,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       console.warn('[webhook] Webhook processing disabled — manual sessions still work')
     } else {
       console.log('[webhook] gh CLI health check passed')
+      this.agentLogin = await fetchAuthenticatedGhLogin()
+      if (this.agentLogin) console.log(`[webhook] Authenticated GitHub user: ${this.agentLogin}`)
       this.restorePendingDebounces()
     }
     return this.ghHealthy
@@ -571,35 +581,45 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     }
 
-    // --- Deduplication ---
     const headSha = pr.head?.sha ?? ''
+    const priorCache = loadPrCache(payload.repository.full_name, pr.number)
+    const inFlightForSha = this.hasInFlightPrReview(payload.repository.full_name, pr.number, headSha)
+    const policy = decidePrReview({ payload, agentLogin: this.agentLogin, priorCache, inFlightForSha })
+
+    if (policy.kind === 'ignore') {
+      return {
+        statusCode: 200,
+        body: { accepted: false, eventId, status: 'filtered', filterReason: policy.reason },
+      }
+    }
+
+    if (policy.kind === 'already_reviewed') {
+      await this.reviewStatusComments.markAlreadyReviewed(payload.repository.full_name, pr.number, headSha)
+      return {
+        statusCode: 200,
+        body: { accepted: false, eventId, status: 'completed', filterReason: policy.reason },
+      }
+    }
+
+    if (policy.kind === 'reuse_in_flight') {
+      this.updateInFlightRequester(payload.repository.full_name, pr.number, headSha, policy.requestedBy)
+      return {
+        statusCode: 202,
+        body: { accepted: true, eventId, status: 'processing', reused: true },
+      }
+    }
+
+    // --- Deduplication ---
     const idempotencyKey = computePrIdempotencyKey(
       payload.repository.full_name,
       pr.number,
-      payload.action,
+      payload.action === 'review_requested' ? `${payload.action}:${eventId}` : payload.action,
       headSha,
     )
-
     if (this.dedup.isDuplicate(eventId, idempotencyKey)) {
       return {
         statusCode: 200,
         body: { accepted: false, eventId, status: 'duplicate' },
-      }
-    }
-
-    // --- Smart SHA filter: skip if already reviewed at this SHA ---
-    if (NO_CODE_CHANGE_ACTIONS.includes(payload.action)) {
-      const cachedReview = loadPrCache(payload.repository.full_name, pr.number)
-      if (cachedReview && cachedReview.lastReviewedSha === headSha) {
-        return {
-          statusCode: 200,
-          body: {
-            accepted: false,
-            eventId,
-            status: 'filtered',
-            filterReason: `Already reviewed at SHA ${headSha.slice(0, 8)} (action=${payload.action}, no code change)`,
-          },
-        }
       }
     }
 
@@ -648,7 +668,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
 
       const timer = setTimeout(() => {
         this.pendingDebounce.delete(debounceKey)
-        this.fireDebouncedPrEvent(payload, webhookEvent, sessionId)
+        this.fireDebouncedPrEvent(payload, webhookEvent, sessionId, policy.requestedBy)
       }, debounceMs)
       if (timer.unref) timer.unref()
 
@@ -677,8 +697,9 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     this.recordEvent(webhookEvent)
     this.dedup.recordProcessed(eventId, idempotencyKey)
 
-    this.processPrReviewAsync(payload, webhookEvent, sessionId).catch(err => {
+    this.processPrReviewAsync(payload, webhookEvent, sessionId, { requestedBy: policy.requestedBy }).catch(err => {
       console.error('[webhook] PR async processing error:', err)
+      void this.clearReviewStatusComment(payload)
       if (this.getEvent(eventId)?.status !== 'superseded') {
         this.updateEventStatus(eventId, 'error', String(err))
       }
@@ -742,7 +763,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     payload: PullRequestPayload,
     event: WebhookEvent,
     sessionId: string,
-    opts?: { forceProvider?: CodingProvider; isFallback?: boolean },
+    opts?: { forceProvider?: CodingProvider; isFallback?: boolean; requestedBy?: string },
   ): Promise<void> {
     const pr = payload.pull_request
     const repo = payload.repository.full_name
@@ -762,6 +783,8 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
 
     // --- Load prior review cache ---
     const priorCache = loadPrCache(repo, prNumber)
+
+    await this.reviewStatusComments.markReviewStarted(repo, prNumber)
 
     // --- Fetch PR context (all calls degrade gracefully) ---
     const [diffResult, files, commits, reviewComments, reviews, existingComment] = await Promise.all([
@@ -793,6 +816,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       baseSha: pr.base?.sha ?? '',
       beforeSha: payload.before,
       action: payload.action as PullRequestContext['action'],
+      requestedBy: opts?.requestedBy,
       changedFiles: pr.changed_files ?? 0,
       additions: pr.additions ?? 0,
       deletions: pr.deletions ?? 0,
@@ -820,6 +844,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       )
     } catch (err) {
       console.error(`[webhook] Failed to create workspace for PR ${repo}#${prNumber}:`, err)
+      await this.clearReviewStatusComment(payload)
       if (this.getEvent(event.id)?.status !== 'superseded') {
         this.updateEventStatus(event.id, 'error', `Workspace creation failed: ${err}`)
       }
@@ -836,9 +861,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     // --- Create session ---
     const groupDir = `${REPOS_ROOT}/${repoName}`
     let sessionName: string
-    if (payload.action === 'synchronize') {
-      sessionName = `PR #${prNumber}: ${pr.title} (update @${headSha.slice(0, 7)})`
-    } else if (payload.action === 'reopened') {
+    if (payload.action === 'reopened') {
       sessionName = `PR #${prNumber}: ${pr.title} (reopened)`
     } else {
       sessionName = `PR #${prNumber}: ${pr.title}`
@@ -914,6 +937,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       model: reviewModel,
       payload,
       isFallback,
+      requestedBy: opts?.requestedBy,
     })
 
     console.log(`[webhook] PR session created: ${sessionName} (${sessionId})`)
@@ -978,6 +1002,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     cleanupWorkspace(sessionId)
 
     if (category === 'other' || !reviewInfo) {
+      if (reviewInfo) await this.clearReviewStatusComment(reviewInfo.payload)
       this.updateEventStatus(event.id, 'error', errorText.slice(0, 500))
       console.log(`[webhook] Event ${event.id} → error (session ${sessionId}, category=${category})`)
       return
@@ -1002,9 +1027,10 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       this.recordEvent(newEvent)
 
       this.processPrReviewAsync(payload, newEvent, newSessionId, {
-        forceProvider: otherProvider, isFallback: true,
+        forceProvider: otherProvider, isFallback: true, requestedBy: reviewInfo.requestedBy,
       }).catch(err => {
         console.error('[webhook] Fallback session error:', err)
+        void this.clearReviewStatusComment(payload)
         if (this.getEvent(newEvent.id)?.status !== 'superseded') {
           this.updateEventStatus(newEvent.id, 'error', String(err))
         }
@@ -1026,6 +1052,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       event.id, 'error',
       `${category} on ${provider}${isFallback ? ' (after split fallback)' : ''} — backlogged, retryAfter=${entry.retryAfter}`,
     )
+    await this.clearReviewStatusComment(payload)
 
     const providerDisplay = provider === 'opencode' ? `OpenCode (${model})` : `Claude (${model})`
     await postProviderUnavailableComment({
@@ -1100,6 +1127,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     payload: PullRequestPayload,
     event: WebhookEvent,
     sessionId: string,
+    requestedBy?: string,
   ): void {
     const pr = payload.pull_request
     const repo = payload.repository.full_name
@@ -1112,6 +1140,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     // Cap check
     if (this.isAtSessionCap()) {
       this.updateEventStatus(event.id, 'error', `Max concurrent webhook sessions reached (${this.config.maxConcurrentSessions})`)
+      void this.clearReviewStatusComment(payload)
       console.warn(`[webhook] Cap reached when debounce fired for ${repo}#${pr.number}, dropping event ${event.id}`)
       return
     }
@@ -1121,8 +1150,9 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     const liveEvent = this.getEvent(event.id)
     if (liveEvent) liveEvent.receivedAt = new Date().toISOString()
 
-    this.processPrReviewAsync(payload, event, sessionId).catch(err => {
+    this.processPrReviewAsync(payload, event, sessionId, { requestedBy }).catch(err => {
       console.error('[webhook] PR async processing error:', err)
+      void this.clearReviewStatusComment(payload)
       if (this.getEvent(event.id)?.status !== 'superseded') {
         this.updateEventStatus(event.id, 'error', String(err))
       }
@@ -1145,6 +1175,33 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
         this.sessions.delete(oldEvent.sessionId)
       }
     }
+  }
+
+  private hasInFlightPrReview(repo: string, prNumber: number, headSha: string): boolean {
+    const activeStatuses: WebhookEventStatus[] = ['processing', 'session_created', 'debounced']
+    return this.getEvents().some(
+      e => e.event === 'pull_request' && e.repo === repo && e.prNumber === prNumber && e.headSha === headSha && activeStatuses.includes(e.status),
+    )
+  }
+
+  private updateInFlightRequester(repo: string, prNumber: number, headSha: string, requestedBy: string | undefined): void {
+    if (!requestedBy) return
+    // The prompt for an existing session has already been sent. This only
+    // preserves the latest requester if split-mode fallback starts a new run.
+    for (const [sessionId, info] of this.reviewSessions) {
+      const pr = info.payload.pull_request
+      if (info.payload.repository.full_name === repo && pr.number === prNumber && pr.head?.sha === headSha) {
+        this.reviewSessions.set(sessionId, { ...info, requestedBy })
+      }
+    }
+  }
+
+  private async clearReviewStatusComment(payload: PullRequestPayload): Promise<void> {
+    await this.clearReviewStatusCommentFor(payload.repository.full_name, payload.pull_request.number)
+  }
+
+  private async clearReviewStatusCommentFor(repo: string, prNumber: number): Promise<void> {
+    await this.reviewStatusComments.clear(repo, prNumber)
   }
 
   // ---------------------------------------------------------------------------
@@ -1207,9 +1264,9 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
 
       // Smart SHA filter on restored events
       const pr = rec.payload.pull_request
-      if (pr && NO_CODE_CHANGE_ACTIONS.includes(rec.payload.action)) {
+      if (pr) {
         const cached = loadPrCache(rec.payload.repository.full_name, pr.number)
-        if (cached && cached.lastReviewedSha === pr.head?.sha) {
+        if ((rec.payload.action === 'reopened' || rec.payload.action === 'ready_for_review') && cached && cached.lastReviewedSha === pr.head?.sha) {
           console.log(`[webhook] Skipping restored debounce for ${rec.key} — already reviewed at SHA ${pr.head.sha.slice(0, 8)}`)
           continue
         }
