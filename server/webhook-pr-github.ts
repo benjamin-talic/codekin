@@ -177,6 +177,17 @@ export async function fetchPrReviews(repo: string, prNumber: number): Promise<st
 
 /** HTML marker embedded in Codekin review comments for identification. */
 export const REVIEW_COMMENT_MARKER = '<!-- codekin-review -->'
+export const REVIEW_STATUS_COMMENT_MARKER = '<!-- codekin-review-status -->'
+
+export async function fetchAuthenticatedGhLogin(): Promise<string | undefined> {
+  try {
+    const output = await ghRunner(['api', '/user', '--jq', '.login'])
+    return output.trim() || undefined
+  } catch (err) {
+    console.warn('fetchAuthenticatedGhLogin: failed:', err)
+    return undefined
+  }
+}
 
 /**
  * Find an existing Codekin review summary comment on a PR.
@@ -210,6 +221,74 @@ export async function fetchExistingReviewComment(repo: string, prNumber: number)
   } catch (err) {
     console.warn(`fetchExistingReviewComment: failed for ${repo} PR #${prNumber}:`, err)
     return undefined
+  }
+}
+
+export async function fetchExistingReviewStatusComment(repo: string, prNumber: number): Promise<number | undefined> {
+  try {
+    const raw = await ghRunner([
+      'api',
+      `/repos/${repo}/issues/${prNumber}/comments`,
+      '--paginate',
+    ])
+    const comments = JSON.parse(raw) as Array<{ id: number; body: string }>
+    if (!Array.isArray(comments) || comments.length === 0) return undefined
+
+    for (let i = comments.length - 1; i >= 0; i--) {
+      if (comments[i].body.includes(REVIEW_STATUS_COMMENT_MARKER)) return comments[i].id
+    }
+    return undefined
+  } catch (err) {
+    console.warn(`fetchExistingReviewStatusComment: failed for ${repo} PR #${prNumber}:`, err)
+    return undefined
+  }
+}
+
+export async function upsertTransientReviewStatusComment(params: {
+  repo: string
+  prNumber: number
+  body: string
+}): Promise<number | undefined> {
+  const body = `${REVIEW_STATUS_COMMENT_MARKER}\n${params.body}`
+  try {
+    const existingId = await fetchExistingReviewStatusComment(params.repo, params.prNumber)
+    if (existingId) {
+      await ghRunner([
+        'api',
+        `/repos/${params.repo}/issues/comments/${existingId}`,
+        '-X', 'PATCH',
+        '-f', `body=${body}`,
+      ])
+      return existingId
+    }
+
+    const raw = await ghRunner([
+      'api',
+      `/repos/${params.repo}/issues/${params.prNumber}/comments`,
+      '-f', `body=${body}`,
+    ])
+    const created = JSON.parse(raw) as { id?: number }
+    return created.id
+  } catch (err) {
+    console.warn(`upsertTransientReviewStatusComment: failed for ${params.repo} PR #${params.prNumber}:`, err)
+    return undefined
+  }
+}
+
+export async function deleteTransientReviewStatusComment(params: {
+  repo: string
+  prNumber: number
+}): Promise<void> {
+  try {
+    const existingId = await fetchExistingReviewStatusComment(params.repo, params.prNumber)
+    if (!existingId) return
+    await ghRunner([
+      'api',
+      `/repos/${params.repo}/issues/comments/${existingId}`,
+      '-X', 'DELETE',
+    ])
+  } catch (err) {
+    console.warn(`deleteTransientReviewStatusComment: failed for ${params.repo} PR #${params.prNumber}:`, err)
   }
 }
 

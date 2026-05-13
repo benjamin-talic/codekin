@@ -37,6 +37,10 @@ function makeContext(overrides: Partial<PullRequestContext> = {}): PullRequestCo
     commitMessages: '- abc1234: fix: resolve auth bug',
     reviewComments: '',
     reviews: '',
+    existingComment: null,
+    priorCache: null,
+    reviewProvider: 'claude',
+    reviewModel: 'sonnet',
     ...overrides,
   }
 }
@@ -82,22 +86,13 @@ describe('buildPrReviewPrompt', () => {
     expect(prompt).toContain('fresh comprehensive code review')
   })
 
-  it('synchronize action mentions previous head', () => {
+  it('review_requested action includes requester attribution guidance', () => {
     const prompt = buildPrReviewPrompt(
-      makeContext({ action: 'synchronize', beforeSha: 'old1234567890' }),
+      makeContext({ action: 'review_requested', requestedBy: 'reviewer1' }),
       '/tmp/workspace',
     )
-    expect(prompt).toContain('updated with new commits')
-    expect(prompt).toContain('old1234')
-    expect(prompt).toContain('abc1234')
-  })
-
-  it('synchronize without beforeSha falls back to comprehensive review', () => {
-    const prompt = buildPrReviewPrompt(
-      makeContext({ action: 'synchronize', beforeSha: undefined }),
-      '/tmp/workspace',
-    )
-    expect(prompt).toContain('comprehensive code review')
+    expect(prompt).toContain('explicitly requested')
+    expect(prompt).toContain('@reviewer1')
   })
 
   it('missing PR body omits description section', () => {
@@ -140,7 +135,7 @@ describe('buildPrReviewPrompt', () => {
   describe('custom prompt resolution', () => {
     it('uses repo-level custom prompt when available', () => {
       vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
-        String(p).includes('/tmp/workspace/.codekin/pr-review-prompt.md'),
+        String(p).includes('/tmp/workspace/.codekin/pr-review-prompt.claude.md'),
       )
       vi.mocked(readFileSync).mockReturnValue('Custom repo review instructions here')
 
@@ -152,7 +147,7 @@ describe('buildPrReviewPrompt', () => {
 
     it('uses global custom prompt when repo-level not found', () => {
       vi.mocked(existsSync).mockImplementation((p: Parameters<typeof existsSync>[0]) =>
-        String(p).includes('.codekin/pr-review-prompt.md') && !String(p).includes('/tmp/workspace'),
+        String(p).includes('.codekin/pr-review-prompt.claude.md') && !String(p).includes('/tmp/workspace'),
       )
       vi.mocked(readFileSync).mockReturnValue('Global custom instructions')
 
@@ -301,6 +296,12 @@ describe('buildPrReviewPrompt', () => {
     it('always includes marker requirement in create instructions', () => {
       const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
       expect(prompt).toContain(REVIEW_COMMENT_MARKER)
+    })
+
+    it('instructs submitting a formal pull request review', () => {
+      const prompt = buildPrReviewPrompt(makeContext(), '/tmp/workspace')
+      expect(prompt).toContain('## Submitting the Formal Pull Request Review')
+      expect(prompt).toContain('gh pr review 42 --repo owner/repo --comment --body-file /tmp/workspace/pr-42-review-body.md')
     })
   })
 })

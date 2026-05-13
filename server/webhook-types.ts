@@ -194,6 +194,8 @@ export interface PullRequestPayload {
     clone_url: string
   }
   sender: { login: string }
+  requested_reviewer?: { login: string } | null
+  requested_team?: { name?: string; slug?: string } | null
 }
 
 // --- GitHub webhook object (from Hooks API) ---
@@ -253,8 +255,9 @@ export interface PullRequestContext {
   baseBranch: string
   headSha: string
   baseSha: string
-  beforeSha?: string              // previous head SHA (on synchronize)
-  action: 'opened' | 'synchronize' | 'reopened' | 'ready_for_review'
+  beforeSha?: string
+  action: 'opened' | 'reopened' | 'ready_for_review' | 'review_requested'
+  requestedBy?: string
   changedFiles: number
   additions: number
   deletions: number

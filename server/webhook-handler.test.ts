@@ -35,12 +35,15 @@ vi.mock('./webhook-prompt.js', () => ({
 }))
 
 vi.mock('./webhook-pr-github.js', () => ({
+  fetchAuthenticatedGhLogin: vi.fn(async () => 'codekin-bot'),
   fetchPrDiff: vi.fn(async () => ({ diff: 'diff content', truncated: false })),
   fetchPrFiles: vi.fn(async () => 'file1.ts'),
   fetchPrCommits: vi.fn(async () => 'commit 1'),
   fetchPrReviewComments: vi.fn(async () => ''),
   fetchPrReviews: vi.fn(async () => ''),
   fetchExistingReviewComment: vi.fn(async () => undefined),
+  upsertTransientReviewStatusComment: vi.fn(async () => 444),
+  deleteTransientReviewStatusComment: vi.fn(async () => undefined),
 }))
 
 vi.mock('./webhook-pr-prompt.js', () => ({
@@ -48,10 +51,10 @@ vi.mock('./webhook-pr-prompt.js', () => ({
 }))
 
 vi.mock('./webhook-pr-cache.js', () => ({
-  loadPrCache: vi.fn(async () => null),
-  ensureCacheDir: vi.fn(async () => {}),
-  archivePrCache: vi.fn(async () => {}),
-  deletePrCache: vi.fn(async () => {}),
+  loadPrCache: vi.fn(() => null),
+  ensureCacheDir: vi.fn(() => '/tmp/pr-cache.json'),
+  archivePrCache: vi.fn(() => {}),
+  deletePrCache: vi.fn(() => {}),
 }))
 
 vi.mock('./webhook-workspace.js', () => ({
@@ -61,6 +64,9 @@ vi.mock('./webhook-workspace.js', () => ({
 
 import { WebhookHandler } from './webhook-handler.js'
 import { createWorkspace } from './webhook-workspace.js'
+import { loadPrCache } from './webhook-pr-cache.js'
+import { buildPrReviewPrompt } from './webhook-pr-prompt.js'
+import { deleteTransientReviewStatusComment, upsertTransientReviewStatusComment } from './webhook-pr-github.js'
 import type { FullWebhookConfig } from './webhook-config.js'
 
 const SECRET = 'test-secret-123'
@@ -72,6 +78,10 @@ function makeConfig(overrides: Partial<FullWebhookConfig> = {}): FullWebhookConf
     maxConcurrentSessions: 3,
     logLinesToInclude: 200,
     actorAllowlist: [],
+    prDebounceMs: 0,
+    prReviewProvider: 'claude',
+    prReviewClaudeModel: 'sonnet',
+    prReviewOpencodeModel: 'openai/gpt-5.4',
     ...overrides,
   }
 }
@@ -125,6 +135,37 @@ function makePayload(overrides: Record<string, unknown> = {}) {
       clone_url: 'https://github.com/owner/repo.git',
       ...overrides.repository,
     },
+    ...overrides,
+  }
+}
+
+function makePrPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    action: 'opened',
+    number: 42,
+    pull_request: {
+      number: 42,
+      title: 'Fix auth bug',
+      body: null,
+      state: 'open',
+      draft: false,
+      merged: false,
+      user: { login: 'author' },
+      head: { ref: 'fix-auth', sha: 'abc1234567890', repo: { clone_url: 'https://github.com/owner/repo.git' } },
+      base: { ref: 'main', sha: 'def1234567890' },
+      html_url: 'https://github.com/owner/repo/pull/42',
+      changed_files: 1,
+      additions: 2,
+      deletions: 3,
+      ...overrides.pull_request,
+    },
+    repository: {
+      full_name: 'owner/repo',
+      name: 'repo',
+      clone_url: 'https://github.com/owner/repo.git',
+      ...overrides.repository,
+    },
+    sender: { login: 'reviewer1' },
     ...overrides,
   }
 }
@@ -357,6 +398,88 @@ describe('WebhookHandler', () => {
       expect(event?.status).toBe('error')
       expect(event?.error).toContain('Workspace creation failed')
     })
+
+    it('filters pull_request synchronize events', async () => {
+      await handler.checkHealth()
+      const payload = makePrPayload({ action: 'synchronize' })
+      const body = Buffer.from(JSON.stringify(payload))
+
+      const result = await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
+
+      expect(result.statusCode).toBe(200)
+      expect(result.body.status).toBe('filtered')
+      expect(result.body.filterReason).toContain('synchronize')
+      expect(sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('filters review_requested events for another user', async () => {
+      await handler.checkHealth()
+      const payload = makePrPayload({
+        action: 'review_requested',
+        requested_reviewer: { login: 'someone-else' },
+      })
+      const body = Buffer.from(JSON.stringify(payload))
+
+      const result = await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
+
+      expect(result.statusCode).toBe(200)
+      expect(result.body.status).toBe('filtered')
+      expect(result.body.filterReason).toContain('not authenticated Codekin user')
+    })
+
+    it('answers explicit review requests for an already reviewed SHA with the transient status comment', async () => {
+      await handler.checkHealth()
+      vi.mocked(loadPrCache).mockReturnValueOnce({
+        prNumber: 42,
+        repo: 'owner/repo',
+        lastReviewedSha: 'abc1234567890',
+        timestamp: '2026-05-13T00:00:00.000Z',
+        priorReviewSummary: 'Reviewed',
+        codebaseContext: 'Context',
+        reviewFindings: 'None',
+      })
+      const payload = makePrPayload({
+        action: 'review_requested',
+        requested_reviewer: { login: 'codekin-bot' },
+      })
+      const body = Buffer.from(JSON.stringify(payload))
+
+      const result = await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
+
+      expect(result.statusCode).toBe(200)
+      expect(result.body.status).toBe('completed')
+      expect(sessions.create).not.toHaveBeenCalled()
+      expect(upsertTransientReviewStatusComment).toHaveBeenCalledWith({
+        repo: 'owner/repo',
+        prNumber: 42,
+        body: "I've already reviewed the latest changes on commit abc12345.",
+      })
+    })
+
+    it('starts review_requested events for the authenticated gh user and passes requester attribution', async () => {
+      await handler.checkHealth()
+      const payload = makePrPayload({
+        action: 'review_requested',
+        requested_reviewer: { login: 'codekin-bot' },
+      })
+      const body = Buffer.from(JSON.stringify(payload))
+
+      const result = await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
+      await vi.advanceTimersByTimeAsync(100)
+
+      expect(result.statusCode).toBe(202)
+      expect(sessions.create).toHaveBeenCalled()
+      expect(upsertTransientReviewStatusComment).toHaveBeenCalledWith({
+        repo: 'owner/repo',
+        prNumber: 42,
+        body: 'Reviewing. Hang tight',
+      })
+      expect(buildPrReviewPrompt).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'review_requested', requestedBy: 'reviewer1' }),
+        '/tmp/workspace',
+        expect.any(Object),
+      )
+    })
   })
 
   describe('event history', () => {
@@ -452,13 +575,29 @@ describe('WebhookHandler', () => {
       const eventAfter = handler.getEvent(result.body.eventId as string)
       expect(eventAfter?.status).toBe(statusBefore)
     })
+
+    it('clears transient status comment when a PR review exits with an unclassified error', async () => {
+      await handler.checkHealth()
+      const payload = makePrPayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
+      const sessionId = result.body.sessionId as string
+
+      await vi.advanceTimersByTimeAsync(100)
+      sessions._errorCallbacks[0](sessionId, 'unexpected provider failure')
+      sessions._exitCallbacks[0](sessionId, 1, null, false)
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(deleteTransientReviewStatusComment).toHaveBeenCalledWith({ repo: 'owner/repo', prNumber: 42 })
+      expect(handler.getEvent(result.body.eventId as string)?.status).toBe('error')
+    })
   })
 
   describe('processing watchdog', () => {
     it('marks processing events as error after 5 minutes', async () => {
       await handler.checkHealth()
       // Make workspace creation hang forever by never resolving
-      vi.mocked(createWorkspace).mockReturnValue(new Promise(() => {}))
+      vi.mocked(createWorkspace).mockImplementationOnce(() => new Promise(() => {}))
 
       const payload = makePayload()
       const body = Buffer.from(JSON.stringify(payload))
@@ -471,6 +610,24 @@ describe('WebhookHandler', () => {
       expect(event?.status).toBe('error')
       expect(event?.error).toContain('watchdog')
     })
+
+    it('clears transient status comments when a PR event times out in processing', async () => {
+      await handler.checkHealth()
+      vi.mocked(createWorkspace).mockImplementationOnce(() => new Promise(() => {}))
+
+      const payload = makePrPayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
+
+      await vi.advanceTimersByTimeAsync(100)
+      vi.advanceTimersByTime(6 * 60 * 1000)
+      await vi.advanceTimersByTimeAsync(0)
+
+      const event = handler.getEvent(result.body.eventId as string)
+      expect(event?.status).toBe('error')
+      expect(event?.error).toContain('watchdog')
+      expect(deleteTransientReviewStatusComment).toHaveBeenCalledWith({ repo: 'owner/repo', prNumber: 42 })
+    })
   })
 
   describe('getConfig', () => {
@@ -481,6 +638,10 @@ describe('WebhookHandler', () => {
         maxConcurrentSessions: 3,
         logLinesToInclude: 200,
         actorAllowlist: [],
+        prDebounceMs: 0,
+        prReviewProvider: 'claude',
+        prReviewClaudeModel: 'sonnet',
+        prReviewOpencodeModel: 'openai/gpt-5.4',
       })
       expect('secret' in config).toBe(false)
     })
